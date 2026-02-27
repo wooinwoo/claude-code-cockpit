@@ -1,0 +1,60 @@
+{
+  "id": "incident-postmortem",
+  "name": "인시던트 포스트모텀",
+  "description": "장애 정보 → 타임라인 구조화 → 근본 원인 분석 → 재발 방지 대책 → 검수 순환",
+  "maxIterations": 2,
+  "inputs": [
+    { "key": "incident", "label": "장애 상황 (타임라인, 로그, 슬랙 대화 등)", "type": "textarea", "required": true },
+    { "key": "severity", "label": "심각도", "type": "select", "options": ["SEV1 (서비스 전면 중단)", "SEV2 (주요 기능 장애)", "SEV3 (부분 장애)", "SEV4 (경미)"], "default": "SEV2 (주요 기능 장애)" },
+    { "key": "service", "label": "영향받은 서비스/시스템", "type": "text", "default": "" }
+  ],
+  "steps": [
+    {
+      "id": "timeline_builder",
+      "name": "타임라인 구조화",
+      "type": "llm",
+      "role": "인시던트 코디네이터. 혼란스러운 장애 정보를 정확한 시간순 타임라인으로 정리한다.",
+      "provider": "claude",
+      "model": "sonnet",
+      "prompt": "## 장애 정보\n{{incident}}\n\n## 심각도: {{severity}}\n## 영향 서비스: {{service}}\n\n이 정보를 구조화된 타임라인으로 정리해라.\n\n### 타임라인\n| 시간 | 이벤트 | 누가 | 영향 |\n|------|--------|------|------|\n\n### 핵심 사실\n- 최초 감지 시점\n- 영향 시작 ~ 복구 시점\n- 총 장애 시간\n- 영향 범위 (사용자 수, 서비스)\n\n시간이 명확하지 않은 부분은 [추정]으로 표시",
+      "outputKey": "timeline"
+    },
+    {
+      "id": "rca_analyst",
+      "name": "근본 원인 분석가",
+      "type": "llm",
+      "role": "SRE 전문가. 5-Why 기법으로 근본 원인을 파고든다. 표면적 원인에 만족하지 않는다.",
+      "provider": "claude",
+      "model": "sonnet",
+      "prompt": "## 타임라인\n{{timeline}}\n\n## 원본 장애 정보\n{{incident}}\n\n## 이전 검수 피드백 (있으면)\n{{final_postmortem}}\n\n근본 원인 분석(RCA)을 수행해라. 검수 피드백이 있으면 지적된 부분을 반영하여 개선해라.\n\n### 5-Why 분석\n1. Why: 왜 장애가 발생했나?\n2. Why: 왜 그 상황이 발생했나?\n3. Why: 왜 그게 가능했나?\n4. Why: 왜 사전에 방지 못했나?\n5. Why: 왜 그 방지 체계가 없었나?\n\n### 근본 원인\n- 직접 원인 (immediate cause)\n- 기여 원인 (contributing factors)\n- 시스템적 원인 (systemic cause)\n\n### 탐지/대응 평가\n- 모니터링이 제대로 잡았나?\n- 알림은 적절했나?\n- 대응 속도는?\n- 에스컬레이션은 적절했나?",
+      "outputKey": "rca"
+    },
+    {
+      "id": "action_planner",
+      "name": "재발 방지 설계자",
+      "type": "llm",
+      "role": "엔지니어링 매니저. 실행 가능하고 측정 가능한 재발 방지 대책을 수립한다.",
+      "provider": "claude",
+      "model": "sonnet",
+      "prompt": "## 타임라인\n{{timeline}}\n\n## 근본 원인\n{{rca}}\n\n구체적인 재발 방지 대책을 수립해라.\n\n### 즉시 조치 (1주 내)\n| 액션 | 담당 | 기한 | 완료 기준 |\n\n### 단기 개선 (1개월 내)\n| 액션 | 담당 | 기한 | 완료 기준 |\n\n### 구조적 개선 (분기 내)\n| 액션 | 담당 | 기한 | 완료 기준 |\n\n### 모니터링 강화\n- 추가할 알림/메트릭\n- 수정할 임계값\n\n각 액션은 SMART하게 (구체적, 측정 가능, 달성 가능, 기한 있는).\n담당자는 TBD로 둬도 됨.",
+      "outputKey": "action_plan"
+    },
+    {
+      "id": "reviewer",
+      "name": "포스트모텀 검수자",
+      "type": "llm",
+      "role": "VP of Engineering. 포스트모텀의 완성도와 실행력을 검수한다. 빈틈없으면 QUALITY:GOOD, 부족하면 QUALITY:POOR.",
+      "provider": "claude",
+      "model": "haiku",
+      "prompt": "## 타임라인\n{{timeline}}\n\n## RCA\n{{rca}}\n\n## 액션 플랜\n{{action_plan}}\n\n포스트모텀을 검수해라.\n\n체크리스트:\n1. 타임라인에 빈 구간이 없는가?\n2. 근본 원인이 표면적 수준에 머물지 않았는가?\n3. 액션이 원인과 직접 연결되는가?\n4. 비난이 아닌 시스템 개선에 초점이 맞춰져 있는가? (blameless)\n5. 모든 액션에 완료 기준이 있는가?\n\n충분하면 QUALITY:GOOD + 최종 포스트모텀 통합 문서를 출력\n부족하면 QUALITY:POOR + 구체적으로 보완할 점 명시",
+      "outputKey": "final_postmortem"
+    }
+  ],
+  "edges": [
+    { "from": "START", "to": "timeline_builder" },
+    { "from": "timeline_builder", "to": "rca_analyst" },
+    { "from": "rca_analyst", "to": "action_planner" },
+    { "from": "action_planner", "to": "reviewer" },
+    { "from": "reviewer", "condition": { "pattern": "QUALITY:\\s*GOOD", "true": "END", "false": "rca_analyst" } }
+  ]
+}

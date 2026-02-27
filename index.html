@@ -1,0 +1,1674 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cockpit</title>
+    <meta name="theme-color" content="#818cf8" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="manifest" href="/manifest.json" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/vendor/xterm.min.css" />
+    <script src="/vendor/xterm.min.js"></script>
+    <script src="/vendor/addon-fit.min.js"></script>
+    <script src="/vendor/addon-web-links.min.js"></script>
+    <script src="/vendor/addon-webgl.min.js"></script>
+    <script src="/vendor/addon-search.min.js"></script>
+    <script src="/vendor/addon-image.min.js"></script>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <div class="logo">
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.8"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <path d="M12 6v6l4 2" />
+          <circle
+            cx="12"
+            cy="12"
+            r="2.5"
+            fill="currentColor"
+            stroke="none"
+            opacity=".3"
+          />
+          <path
+            d="M4.93 4.93l2.12 2.12M19.07 4.93l-2.12 2.12M12 2v2M22 12h-2M2 12h2"
+            stroke-width="1.2"
+            opacity=".4"
+          />
+        </svg>
+        Cockpit
+      </div>
+      <div class="nav-tabs" role="tablist" aria-label="Dashboard navigation">
+        <button class="nav-tab active" role="tab" aria-selected="true" aria-controls="dashboard-view" title="Overview (Ctrl+1)" data-action="switch-view" data-view="dashboard">
+          <svg viewBox="0 0 24 24">
+            <rect x="3" y="3" width="7" height="7" rx="1" />
+            <rect x="14" y="3" width="7" height="7" rx="1" />
+            <rect x="3" y="14" width="7" height="7" rx="1" />
+            <rect x="14" y="14" width="7" height="7" rx="1" />
+          </svg>
+          Overview
+        </button>
+        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="terminal-view" title="Terminal (Ctrl+2)" data-action="switch-view" data-view="terminal">
+          <svg viewBox="0 0 24 24">
+            <polyline points="4 17 10 11 4 5" />
+            <line x1="12" y1="19" x2="20" y2="19" />
+          </svg>
+          Terminal
+        </button>
+        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="diff-view" title="Changes (Ctrl+3)" data-action="switch-view" data-view="diff">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 3v18" />
+            <path d="M5 12h14" />
+          </svg>
+          Changes
+        </button>
+        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="jira-view" title="Jira (Ctrl+4)" data-action="switch-view" data-view="jira">
+          <svg viewBox="0 0 24 24">
+            <path d="M11.53 2c-.55 0-1.07.22-1.46.6L2.6 10.07a2.07 2.07 0 000 2.93l7.47 7.47c.39.38.91.6 1.46.6s1.07-.22 1.46-.6l7.47-7.47a2.07 2.07 0 000-2.93L13 2.6c-.39-.38-.91-.6-1.47-.6z"/>
+          </svg>
+          Jira
+        </button>
+        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="cicd-view" title="CI/CD (Ctrl+5)" data-action="switch-view" data-view="cicd">
+          <svg viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="10"/><path d="M8 12l2 2 4-4"/>
+          </svg>
+          <span class="tab-label">CI/CD</span>
+        </button>
+        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="notes-view" title="Docs (Ctrl+6)" data-action="switch-view" data-view="notes">
+          <svg viewBox="0 0 24 24">
+            <path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>
+          </svg>
+          <span class="tab-label">Docs</span>
+        </button>
+        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="workflows-view" title="Workflows (Ctrl+7)" data-action="switch-view" data-view="workflows">
+          <svg viewBox="0 0 24 24">
+            <circle cx="5" cy="12" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="19" cy="19" r="2"/>
+            <path d="M7 11l10-5M7 13l10 5"/>
+          </svg>
+          <span class="tab-label">Workflows</span>
+        </button>
+        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="forge-view" title="Forge (Ctrl+8)" data-action="switch-view" data-view="forge">
+          <svg viewBox="0 0 24 24">
+            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+          </svg>
+          <span class="tab-label">Forge</span>
+        </button>
+        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="readme-view" title="README (Ctrl+9)" data-action="switch-view" data-view="readme">
+          <svg viewBox="0 0 24 24">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+            <path
+              d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"
+            />
+          </svg>
+          <span class="tab-label">README</span>
+        </button>
+        <div class="nav-more-wrap" id="nav-more-wrap">
+          <button class="nav-tab nav-more-btn" id="nav-more-btn" data-action="toggle-nav-more" title="More tabs">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.5" fill="currentColor" stroke="none"/></svg>
+            <span class="tab-label">More</span>
+          </button>
+          <div class="nav-more-menu" id="nav-more-menu"></div>
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="header-clock" id="header-clock"></span>
+        <div class="stat-badge">
+          <span>Output</span><span class="value" id="today-output">0</span>
+        </div>
+        <div class="stat-badge">
+          <span>Msgs</span><span class="value" id="today-msgs">0</span>
+        </div>
+        <div
+          class="stat-badge"
+          id="dev-server-badge"
+          data-action="show-dev-dialog"
+          style="cursor: pointer"
+          title="Running dev servers"
+        >
+          <span>Dev</span><span class="value" id="dev-count">0</span>
+        </div>
+        <button
+          class="btn"
+          id="notify-toggle"
+          data-action="toggle-notifications"
+          style="font-size: 0.72rem; padding: 3px 8px"
+          title="Toggle notifications"
+          data-contextaction="open-notif-settings"
+        >
+          On
+        </button>
+        <button class="btn" data-action="open-notif-settings" style="font-size:0.68rem;padding:2px 5px;opacity:.6" title="Notification settings per project">&#x2699;</button>
+        <button
+          class="header-btn"
+          data-action="open-error-log"
+          title="Error Log"
+          id="error-log-btn"
+          style="display: none"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path
+              d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"
+            />
+            <line x1="12" y1="9" x2="12" y2="13" />
+            <line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+        </button>
+        <button
+          class="header-btn"
+          data-action="hard-refresh"
+          title="새로고침 (캐시 클리어)"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+            <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
+          </svg>
+        </button>
+        <button
+          class="theme-toggle"
+          id="theme-toggle"
+          data-action="toggle-theme"
+          title="Toggle theme"
+        >
+          <svg
+            id="theme-icon-dark"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z" />
+          </svg>
+          <svg
+            id="theme-icon-light"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            style="display: none"
+          >
+            <circle cx="12" cy="12" r="5" />
+            <line x1="12" y1="1" x2="12" y2="3" />
+            <line x1="12" y1="21" x2="12" y2="23" />
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+            <line x1="1" y1="12" x2="3" y2="12" />
+            <line x1="21" y1="12" x2="23" y2="12" />
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+          </svg>
+        </button>
+        <button class="header-btn" data-action="show-mobile-connect" title="Mobile Connect">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>
+          </svg>
+        </button>
+        <span class="conn-dot" id="conn-dot"></span>
+        <button
+          class="header-btn"
+          data-action="open-settings"
+          title="Settings"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <path
+              d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"
+            />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="app">
+      <!-- Dashboard View -->
+      <div class="view active" id="dashboard-view" role="tabpanel">
+        <div class="smart-actions" id="smart-actions"></div>
+        <div class="overview-columns">
+        <div class="overview-main">
+        <section class="activity-log-section" id="activity-log-section" style="display:none">
+          <div class="section-title" style="cursor:pointer" data-action="toggle-activity-log">Activity Log <span style="font-size:.72rem;color:var(--text-3)">(click to toggle)</span></div>
+          <div class="activity-log-list collapsed" id="activity-log-list"></div>
+        </section>
+        <section>
+          <div class="section-title">Projects</div>
+          <div class="project-search-bar">
+            <input
+              type="text"
+              id="project-search"
+              placeholder="Search projects..."
+              data-action="filter-projects"
+            />
+            <div class="project-filter-btns" id="project-filter-btns">
+              <button
+                class="pf-btn active"
+                data-filter="all"
+                data-action="set-project-filter" data-filter-val="all"
+              >
+                All
+              </button>
+              <button
+                class="pf-btn"
+                data-filter="active"
+                data-action="set-project-filter" data-filter-val="active"
+              >
+                Active
+              </button>
+              <button
+                class="pf-btn"
+                data-filter="idle"
+                data-action="set-project-filter" data-filter-val="idle"
+              >
+                Idle
+              </button>
+            </div>
+            <span class="project-search-count" id="project-search-count"></span>
+            <select id="card-sort-select" class="card-sort-select" data-action="set-project-sort" title="Sort projects">
+              <option value="name">Name</option>
+              <option value="activity">Activity</option>
+              <option value="recent">Recent</option>
+              <option value="uncommitted">Uncommitted</option>
+            </select>
+          </div>
+          <div class="project-grid-wrap">
+            <div class="scroll-ind left hidden" id="scroll-ind-left"></div>
+            <div class="project-grid" id="project-grid"></div>
+            <div class="scroll-ind right hidden" id="scroll-ind-right"></div>
+            <div class="empty-projects" id="empty-projects" style="display:none">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="width:48px;height:48px;color:var(--text-3);margin-bottom:12px">
+                <path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/>
+                <line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/>
+              </svg>
+              <div class="ep-title">No projects yet</div>
+              <div class="ep-desc">Add a Claude Code project folder to start monitoring sessions, costs, and changes.</div>
+              <button class="btn btn-primary" data-action="open-add-project" style="margin-top:12px">
+                <svg viewBox="0 0 24 24" style="width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;margin-right:4px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                Add Project
+              </button>
+            </div>
+          </div>
+        </section>
+        </div><!-- /.overview-main -->
+        <div class="overview-sidebar">
+        <section>
+          <div class="section-title">Cost & Usage</div>
+          <div class="usage-grid" id="usage-grid">
+            <!-- Today -->
+            <div class="usage-card" id="uc-today">
+              <div class="uc-header">
+                <span class="uc-title">Today</span
+                ><span class="uc-sub" id="uc-today-date"></span>
+              </div>
+              <div class="uc-main" id="uc-today-output">0 tok</div>
+              <div class="uc-stats" id="uc-today-stats"></div>
+              <div class="uc-models" id="uc-today-models"></div>
+              <div class="uc-footer" id="uc-today-cost"></div>
+            </div>
+            <!-- This Week -->
+            <div class="usage-card" id="uc-week">
+              <div class="uc-header">
+                <span class="uc-title">This Week</span
+                ><span class="uc-sub" id="uc-week-reset"></span>
+              </div>
+              <div class="uc-main" id="uc-week-output">0 tok</div>
+              <div class="uc-stats" id="uc-week-stats"></div>
+              <div class="uc-models" id="uc-week-models"></div>
+              <div class="uc-footer" id="uc-week-cost"></div>
+            </div>
+            <!-- Overview -->
+            <div class="usage-card" id="uc-overview">
+              <div class="uc-header">
+                <span class="uc-title">Overview</span>
+              </div>
+              <div class="uc-stats" id="uc-overview-stats"></div>
+              <div class="uc-footer" id="uc-plan-info"></div>
+            </div>
+          </div>
+          <div class="charts-grid">
+            <div class="chart-card">
+              <h3>
+                Daily Output Tokens <span id="chart-period-label">(30d)</span>
+                <div class="chart-period">
+                  <button class="active" data-action="set-chart-period" data-period="7">7d</button
+                  ><button data-action="set-chart-period" data-period="14">14d</button
+                  ><button data-action="set-chart-period" data-period="30">30d</button>
+                </div>
+              </h3>
+              <div class="chart-wrap"><canvas id="daily-chart"></canvas></div>
+            </div>
+            <div class="chart-card">
+              <h3>By Model</h3>
+              <div class="chart-wrap"><canvas id="model-chart"></canvas></div>
+            </div>
+          </div>
+        </section>
+        </div><!-- /.overview-sidebar -->
+        </div><!-- /.overview-columns -->
+      </div>
+
+      <!-- Terminal View -->
+      <div class="view" id="terminal-view" role="tabpanel">
+        <!-- Mobile terminal tab bar -->
+        <div class="mob-term-tabs" id="mob-term-tabs"></div>
+        <div class="broadcast-indicator" id="broadcast-indicator" style="display:none" data-action="toggle-broadcast">
+          <span class="bc-icon">&#x1F4E1;</span> Broadcast <span class="bc-count">0</span> terminals
+          <button class="bc-close" title="Turn off">&times;</button>
+        </div>
+        <div class="term-panels" id="term-panels">
+          <div class="term-empty">
+            <button class="btn" data-action="new-term">
+              + New Terminal
+            </button>
+          </div>
+        </div>
+        <!-- Mobile quick action bar -->
+        <div class="mob-term-actions" id="mob-term-actions">
+          <button data-key="escape">Esc</button>
+          <button data-key="tab">Tab</button>
+          <button data-key="ctrl-c">^C</button>
+          <button data-key="ctrl-d">^D</button>
+          <button data-key="ctrl-z">^Z</button>
+          <button data-key="ctrl-l">^L</button>
+          <button data-key="up">&#x25B2;</button>
+          <button data-key="down">&#x25BC;</button>
+          <button data-key="ctrl-r">^R</button>
+          <button data-key="ctrl-a">^A</button>
+          <button data-key="ctrl-e">^E</button>
+        </div>
+        <div class="term-search" id="term-search-bar">
+          <input
+            type="text"
+            placeholder="Search..."
+            list="term-search-history"
+            data-action="term-search-input"
+          />
+          <datalist id="term-search-history"></datalist>
+          <button class="ts-toggle" id="ts-case" data-action="ts-toggle-case" title="Case Sensitive (Aa)">Aa</button>
+          <button class="ts-toggle" id="ts-regex" data-action="ts-toggle-regex" title="Regex (.*)">.*</button>
+          <button
+            class="ts-btn"
+            data-action="term-search-prev"
+            title="Previous"
+          >
+            &uarr;
+          </button>
+          <button class="ts-btn" data-action="term-search-next" title="Next">
+            &darr;
+          </button>
+          <span class="ts-count" id="ts-match-count"></span>
+          <button
+            class="ts-btn"
+            data-action="close-term-search"
+            title="Close (Esc)"
+          >
+            &times;
+          </button>
+          <span
+            style="
+              width: 1px;
+              height: 16px;
+              background: var(--border);
+              margin: 0 4px;
+            "
+          ></span>
+          <div class="term-font-controls">
+            <button
+              class="term-font-btn"
+              data-action="font-size-down"
+              title="Decrease font"
+            >
+              −
+            </button>
+            <span class="term-font-size" id="term-font-size">13</span>
+            <button
+              class="term-font-btn"
+              data-action="font-size-up"
+              title="Increase font"
+            >
+              +
+            </button>
+            <span
+              style="
+                width: 1px;
+                height: 16px;
+                background: var(--border);
+                margin: 0 4px;
+              "
+            ></span>
+            <button
+              class="term-font-btn"
+              data-action="export-terminal"
+              title="Export terminal output (.txt)"
+              style="width: auto; padding: 0 6px; font-size: 0.7rem"
+            >
+              TXT
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Diff View -->
+      <div class="view" id="diff-view" role="tabpanel">
+        <div class="diff-toolbar">
+          <select id="diff-project" data-action="load-diff"></select>
+          <div class="diff-branch-info" id="diff-branch-info"></div>
+          <div class="diff-summary" id="diff-summary"></div>
+          <button
+            class="dt-icon-btn"
+            data-action="diff-expand-all"
+            title="Expand All (E)"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M7 10l5 5 5-5" />
+            </svg>
+          </button>
+          <button
+            class="dt-icon-btn"
+            data-action="diff-collapse-all"
+            title="Collapse All (C)"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M7 14l5-5 5 5" />
+            </svg>
+          </button>
+          <button class="dt-icon-btn" data-action="refresh-diff" title="Refresh (R)">
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M1 4v6h6" />
+              <path d="M3.51 15a9 9 0 105.64-8.36L1 10" />
+            </svg>
+          </button>
+          <button
+            class="ac-btn"
+            id="ac-btn"
+            data-action="start-auto-commit"
+            title="AI Auto-Commit"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M12 3v18M5.5 8.5l13 7M18.5 8.5l-13 7" />
+            </svg>
+            AI Commit
+          </button>
+          <button
+            class="ac-btn"
+            id="forge-review-btn"
+            data-action="forge-review-diff"
+            title="Review with Forge"
+          >🔥 Review</button>
+          <div class="dt-act-group">
+            <button
+              class="dt-act-btn"
+              id="dt-pull-btn"
+              data-action="do-pull"
+              title="Git Pull"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+              >
+                <path d="M12 5v14M19 12l-7 7-7-7" />
+              </svg>
+              Pull
+            </button>
+            <button
+              class="dt-act-btn"
+              id="dt-fetch-btn"
+              data-action="do-fetch"
+              title="Git Fetch --all"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              Fetch
+            </button>
+            <button
+              class="dt-act-btn"
+              id="dt-stash-btn"
+              data-action="do-stash"
+              title="Git Stash"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path
+                  d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"
+                />
+                <polyline points="17 21 17 13 7 13 7 21" />
+              </svg>
+              Stash
+            </button>
+            <button
+              class="dt-act-btn"
+              id="dt-stash-pop-btn"
+              data-action="do-stash-pop"
+              title="Git Stash Pop"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path d="M3 15v4a2 2 0 002 2h14a2 2 0 002-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+              Pop
+            </button>
+            <button
+              class="dt-act-btn"
+              id="dt-stash-list-btn"
+              data-action="show-stash-list"
+              title="Stash List"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <line x1="8" y1="6" x2="21" y2="6" />
+                <line x1="8" y1="12" x2="21" y2="12" />
+                <line x1="8" y1="18" x2="21" y2="18" />
+                <line x1="3" y1="6" x2="3.01" y2="6" />
+                <line x1="3" y1="12" x2="3.01" y2="12" />
+                <line x1="3" y1="18" x2="3.01" y2="18" />
+              </svg>
+              List
+            </button>
+          </div>
+        </div>
+        <div class="diff-project-chips" id="diff-project-chips"></div>
+        <div
+          class="diff-layout"
+          style="position: relative; flex: 1; overflow: hidden"
+        >
+          <aside class="diff-sidebar" id="diff-sidebar">
+            <div class="diff-commit-box">
+              <textarea
+                id="diff-commit-msg"
+                placeholder="Commit message (Ctrl+Enter to commit)"
+                rows="2"
+                data-action="commit-msg-input"
+              ></textarea>
+              <div class="dcb-row">
+                <button
+                  class="dcb-ai-btn"
+                  id="dcb-ai-btn"
+                  data-action="generate-commit-msg"
+                  title="AI: Generate commit message"
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path d="M12 3v18M5.5 8.5l13 7M18.5 8.5l-13 7" />
+                  </svg>
+                </button>
+                <button
+                  class="dcb-commit-btn"
+                  id="dcb-commit-btn"
+                  data-action="do-manual-commit"
+                  disabled
+                >
+                  <svg
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                  >
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                  Commit
+                </button>
+                <span class="dcb-staged-count" id="dcb-staged-info"></span>
+              </div>
+            </div>
+            <div class="diff-sidebar-search">
+              <input
+                type="text"
+                id="diff-file-search"
+                placeholder="Filter files..."
+                data-action="filter-diff-files"
+              />
+            </div>
+            <div class="diff-sidebar-list" id="diff-sidebar-list"></div>
+          </aside>
+          <main class="diff-main" id="diff-main">
+            <div class="diff-empty" id="diff-empty">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.5"
+              >
+                <path d="M9 12l2 2 4-4" />
+                <circle cx="12" cy="12" r="10" />
+              </svg>
+              <span class="de-title">No changes</span>
+              <span class="de-sub">Working tree is clean</span>
+            </div>
+          </main>
+        </div>
+      </div>
+
+      <!-- README View -->
+      <div class="view" id="readme-view" role="tabpanel">
+        <div class="rm-layout">
+          <nav class="rm-sidebar" id="rm-sidebar"></nav>
+          <main class="rm-main" id="readme-content"></main>
+          <aside class="rm-toc" id="rm-toc"></aside>
+        </div>
+      </div>
+
+      <!-- CI/CD View -->
+      <div class="view" id="cicd-view" role="tabpanel">
+        <div class="cicd-toolbar">
+          <select id="cicd-project-filter" data-action="cicd-project-filter">
+            <option value="">Select Project</option>
+          </select>
+          <select id="cicd-workflow-filter" data-action="cicd-workflow-filter">
+            <option value="">All Workflows</option>
+          </select>
+          <div class="cicd-summary" id="cicd-summary"></div>
+          <button class="dt-icon-btn" data-action="refresh-cicd" title="Refresh">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-8.36L1 10"/></svg>
+          </button>
+        </div>
+        <div class="cicd-content" id="cicd-content"></div>
+        <div class="cicd-detail" id="cicd-detail"></div>
+      </div>
+
+      <!-- Notes / Docs View -->
+      <div class="view" id="notes-view" role="tabpanel">
+        <div class="docs-layout">
+          <!-- Sidebar nav -->
+          <nav class="docs-sidebar" id="docs-sidebar">
+            <div class="docs-sidebar-head">
+              <div class="docs-search-wrap">
+                <svg class="docs-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" class="docs-search" placeholder="Search docs..." data-action="search-notes">
+              </div>
+              <button class="docs-new-btn" data-action="create-new-note" title="New page">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+              </button>
+            </div>
+            <div class="docs-nav-tree" id="notes-sidebar-list"></div>
+          </nav>
+          <!-- Main content area -->
+          <main class="docs-main" id="notes-editor">
+            <div class="docs-empty">
+              <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="var(--text-3)" stroke-width="1"><path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/><line x1="9" y1="7" x2="15" y2="7"/><line x1="9" y1="11" x2="15" y2="11"/></svg>
+              <div class="docs-empty-title">Documentation</div>
+              <div class="docs-empty-sub">Select a page or create a new one to get started</div>
+            </div>
+          </main>
+          <!-- Table of Contents -->
+          <aside class="docs-toc" id="docs-toc"></aside>
+        </div>
+      </div>
+
+      <!-- Jira View -->
+      <div class="view" id="jira-view" role="tabpanel">
+        <!-- Setup screen -->
+        <div class="jira-setup" id="jira-setup" style="display:none">
+          <div class="jira-setup-card">
+            <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="var(--accent)" stroke-width="1.5"><path d="M11.53 2c-.55 0-1.07.22-1.46.6L2.6 10.07a2.07 2.07 0 000 2.93l7.47 7.47c.39.38.91.6 1.46.6s1.07-.22 1.46-.6l7.47-7.47a2.07 2.07 0 000-2.93L13 2.6c-.39-.38-.91-.6-1.47-.6z"/></svg>
+            <h2>Connect to Jira</h2>
+            <p class="jira-setup-desc">Atlassian 계정을 연결하면 이슈, 스프린트, 보드를 관리할 수 있습니다.</p>
+            <label>Jira URL</label>
+            <input type="text" id="jira-url" placeholder="https://myteam.atlassian.net">
+            <label>Email</label>
+            <input type="email" id="jira-email" placeholder="me@company.com">
+            <label>API Token</label>
+            <input type="password" id="jira-token" placeholder="Your API token" data-action="jira-token-input">
+            <a href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noopener" class="jira-token-link">API Token 발급하기 &rarr;</a>
+            <div class="jira-setup-actions">
+              <button class="btn" data-action="test-jira" id="jira-test-btn">Test Connection</button>
+              <button class="btn primary" data-action="save-jira" id="jira-save-btn" disabled>Save &amp; Connect</button>
+            </div>
+            <div id="jira-test-result"></div>
+            <div id="jira-board-picker" style="display:none">
+              <label>Default Project</label>
+              <select id="jira-default-project"></select>
+              <label>Board</label>
+              <select id="jira-board-select"></select>
+            </div>
+          </div>
+        </div>
+        <!-- Main content -->
+        <div class="jira-main" id="jira-main" style="display:none">
+          <div class="jira-toolbar">
+            <select id="jira-project-filter" data-action="jira-project-filter">
+              <option value="">All Projects</option>
+            </select>
+            <select id="jira-status-filter" data-action="jira-status-filter">
+              <option value="">All Statuses</option>
+            </select>
+            <select id="jira-type-filter" data-action="jira-type-filter">
+              <option value="">All Types</option>
+            </select>
+            <input type="text" id="jira-search" placeholder="Search issues..." data-action="filter-jira-issues">
+            <div class="jira-view-toggle">
+              <button class="jira-view-btn active" data-view="list" data-action="set-jira-view" title="List view">
+                <svg viewBox="0 0 24 24" width="14" height="14"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+              </button>
+              <button class="jira-view-btn" data-view="board" data-action="set-jira-view" title="Board view">
+                <svg viewBox="0 0 24 24" width="14" height="14"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+              </button>
+              <button class="jira-view-btn" data-view="timeline" data-action="set-jira-view" title="Timeline view">
+                <svg viewBox="0 0 24 24" width="14" height="14"><line x1="4" y1="6" x2="16" y2="6"/><line x1="8" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="12" y2="18"/></svg>
+              </button>
+            </div>
+            <button class="dt-icon-btn" data-action="refresh-jira" title="Refresh (R)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-8.36L1 10"/></svg>
+            </button>
+            <button class="dt-icon-btn" data-action="open-jira-settings" title="Jira Settings">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"/></svg>
+            </button>
+          </div>
+          <div class="jira-summary-bar" id="jira-summary-bar"></div>
+          <div class="jira-sprint-bar" id="jira-sprint-bar"></div>
+          <div class="jira-content">
+            <div class="jira-list-view" id="jira-list-view"></div>
+            <div class="jira-board-view" id="jira-board-view" style="display:none"></div>
+            <div class="jira-timeline-view" id="jira-timeline-view" style="display:none"></div>
+          </div>
+        </div>
+        <!-- Detail side panel -->
+        <div class="jira-detail" id="jira-detail"></div>
+      </div>
+
+      <!-- Workflows View -->
+      <div class="view" id="workflows-view" role="tabpanel">
+        <div class="wf-layout">
+          <div class="wf-sidebar">
+            <div class="wf-section">
+              <div class="wf-section-hdr">
+                <span>Workflows <span id="wf-def-count" class="wf-count-badge"></span></span>
+                <button class="dt-icon-btn" data-action="refresh-workflows" title="Refresh">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-8.36L1 10"/></svg>
+                </button>
+              </div>
+              <div class="wf-def-list" id="wf-def-list">
+                <div class="cicd-loading">Loading...</div>
+              </div>
+            </div>
+            <div class="wf-section">
+              <div class="wf-section-hdr"><span>Run History <span id="wf-run-count" class="wf-count-badge"></span></span></div>
+              <div class="wf-run-search">
+                <input type="text" placeholder="Filter runs..." data-action="filter-wf-runs">
+              </div>
+              <div class="wf-run-list" id="wf-run-list"></div>
+            </div>
+          </div>
+          <div class="wf-main" id="wf-main">
+            <div class="wf-empty">
+              <div class="wf-empty-graph">
+                <div class="wf-empty-node wf-en-1"></div>
+                <div class="wf-empty-edge"></div>
+                <div class="wf-empty-node wf-en-2"></div>
+                <div class="wf-empty-edge"></div>
+                <div class="wf-empty-node wf-en-3"></div>
+              </div>
+              <div class="wf-empty-title">Multi-Agent Workflows</div>
+              <div class="wf-empty-desc">Build automated pipelines with LLM agents, shell commands, and conditional logic. Select a workflow from the sidebar to get started.</div>
+              <div class="wf-empty-hints">
+                <div class="wf-empty-hint"><span class="wf-eh-icon">⬡</span> LLM Agents</div>
+                <div class="wf-empty-hint"><span class="wf-eh-icon">⌘</span> Shell Steps</div>
+                <div class="wf-empty-hint"><span class="wf-eh-icon">◇</span> Conditions</div>
+                <div class="wf-empty-hint"><span class="wf-eh-icon">⟲</span> Cycles</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Forge View -->
+      <div class="view" id="forge-view" role="tabpanel">
+        <div id="forge-content"></div>
+      </div>
+    </div>
+
+    <!-- New Terminal Modal -->
+    <dialog id="new-term-modal">
+      <div class="modal-header">
+        <h2>New Terminal</h2>
+        <button
+          class="modal-close"
+          data-action="close-modal"
+        >
+          &times;
+        </button>
+      </div>
+      <div class="modal-body">
+        <label>Project</label>
+        <select id="nt-project" data-action="load-branches"></select>
+        <label>Command</label>
+        <select id="nt-cmd">
+          <option value="">Shell only</option>
+          <option value="claude">claude</option>
+          <option value="claude --continue">claude --continue</option>
+          <option value="claude --model opus">claude --model opus</option>
+          <option value="claude --model sonnet">claude --model sonnet</option>
+        </select>
+        <div id="nt-branch-section" style="display: none">
+          <label
+            >Branch / Worktree
+            <span style="color: var(--text-3); font-size: 0.72rem"
+              >(optional)</span
+            ></label
+          >
+          <div class="nt-branch-list" id="nt-branch-list"></div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button
+          class="btn"
+          data-action="close-modal"
+        >
+          Cancel
+        </button>
+        <button class="btn primary" data-action="create-terminal">Open</button>
+      </div>
+    </dialog>
+
+    <!-- Start Session Modal -->
+    <dialog id="start-modal">
+      <div class="modal-header">
+        <h2>Start Session</h2>
+        <button
+          class="modal-close"
+          data-action="close-dialog" data-dialog="start-modal"
+        >
+          &times;
+        </button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="modal-project-id" />
+        <label>Model</label>
+        <select id="modal-model">
+          <option value="">Default</option>
+          <option value="opus">Opus</option>
+          <option value="sonnet">Sonnet</option>
+          <option value="haiku">Haiku</option>
+        </select>
+        <label>Prompt</label>
+        <input
+          type="text"
+          id="modal-prompt"
+          placeholder="/orchestrate, /fix, or task"
+        />
+      </div>
+      <div class="modal-footer">
+        <button
+          class="btn"
+          data-action="close-dialog" data-dialog="start-modal"
+        >
+          Cancel
+        </button>
+        <button class="btn primary" data-action="do-start-session">Start</button>
+      </div>
+    </dialog>
+
+    <!-- Add/Edit Project Modal -->
+    <dialog id="project-modal">
+      <div class="modal-header">
+        <h2 id="pm-title">Add Project</h2>
+        <button
+          class="modal-close"
+          data-action="close-dialog" data-dialog="project-modal"
+        >
+          &times;
+        </button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="pm-edit-id" />
+        <label>Project Name</label>
+        <input type="text" id="pm-name" placeholder="My Project" />
+        <label>Path</label>
+        <div class="path-input-row">
+          <input
+            type="text"
+            id="pm-path"
+            placeholder="C:/_project/service/my-project"
+          />
+          <button
+            type="button"
+            class="btn-browse"
+            data-action="toggle-folder-picker"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path
+                d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"
+              /></svg
+            >Browse
+          </button>
+        </div>
+        <div class="folder-picker" id="folder-picker">
+          <div class="fp-breadcrumb" id="fp-breadcrumb"></div>
+          <ul class="fp-list" id="fp-list"></ul>
+          <div class="fp-select">
+            <button class="btn primary" data-action="select-current-folder">
+              Select this folder
+            </button>
+          </div>
+        </div>
+        <label>Stack</label>
+        <select id="pm-stack">
+          <option value="react-next">React / Next.js</option>
+          <option value="nestjs">NestJS</option>
+          <option value="express">Express</option>
+          <option value="python">Python</option>
+          <option value="other">Other</option>
+        </select>
+        <label>Dev Server Command</label>
+        <div style="display: flex; gap: 6px; align-items: center">
+          <input
+            type="text"
+            id="pm-devcmd"
+            placeholder="npm run dev, pnpm dev, etc."
+            style="flex: 1"
+          />
+          <button
+            type="button"
+            class="btn"
+            id="pm-scripts-btn"
+            data-action="load-pkg-scripts"
+            style="font-size: 0.72rem; white-space: nowrap"
+            title="Load from package.json"
+          >
+            Scripts
+          </button>
+        </div>
+        <div
+          id="pm-scripts-list"
+          style="
+            display: none;
+            max-height: 150px;
+            overflow-y: auto;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            background: var(--bg-0);
+            margin-top: 4px;
+          "
+        ></div>
+        <label
+          >GitHub URL
+          <span style="color: var(--text-3); font-size: 0.72rem"
+            >(auto-detected if empty)</span
+          ></label
+        >
+        <input
+          type="text"
+          id="pm-github"
+          placeholder="https://github.com/org/repo"
+        />
+        <label>Tag <span style="color: var(--text-3); font-size: 0.72rem">(for grouping/filtering)</span></label>
+        <input type="text" id="pm-tag" placeholder="e.g. work, personal, client" />
+        <label>Color</label>
+        <input type="color" id="pm-color" value="#6366f1" />
+      </div>
+      <div class="modal-footer">
+        <button
+          class="btn"
+          data-action="close-dialog" data-dialog="project-modal"
+        >
+          Cancel
+        </button>
+        <button class="btn primary" data-action="save-project">Save</button>
+      </div>
+    </dialog>
+
+    <!-- Terminal Context Menu -->
+    <div class="ctx-menu" id="term-ctx-menu"></div>
+
+    <!-- Diff Dialog -->
+    <dialog id="diff-dialog" style="max-width: 900px; width: 95%">
+      <div class="modal-header">
+        <h2 id="diff-dialog-title">Changes</h2>
+        <div
+          class="diff-summary"
+          id="diff-dialog-summary"
+          style="margin-left: auto; margin-right: 12px"
+        ></div>
+        <button
+          class="modal-close"
+          data-action="close-dialog" data-dialog="diff-dialog"
+        >
+          &times;
+        </button>
+      </div>
+      <div
+        class="modal-body"
+        style="max-height: 70vh; overflow-y: auto; padding: 0"
+      >
+        <div class="diff-file-nav" id="diff-file-nav"></div>
+        <div
+          id="diff-dialog-panels"
+          style="
+            padding: 10px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+          "
+        ></div>
+      </div>
+    </dialog>
+
+    <!-- Session History Dialog -->
+    <dialog id="session-dialog" style="max-width: 600px; width: 95%">
+      <div class="modal-header">
+        <h2 id="session-dialog-title">Session History</h2>
+        <button
+          class="modal-close"
+          data-action="close-dialog" data-dialog="session-dialog"
+        >
+          &times;
+        </button>
+      </div>
+      <div
+        class="modal-body"
+        style="max-height: 60vh; overflow-y: auto; padding: 0"
+      >
+        <div id="session-dialog-content" style="padding: 14px"></div>
+      </div>
+    </dialog>
+
+    <!-- Dev Server Dialog -->
+    <dialog id="dev-dialog" style="max-width: 560px; width: 95%">
+      <div class="modal-header">
+        <h2>Dev Servers</h2>
+        <button
+          class="modal-close"
+          data-action="close-dialog" data-dialog="dev-dialog"
+        >
+          &times;
+        </button>
+      </div>
+      <div
+        class="modal-body"
+        style="max-height: 60vh; overflow-y: auto; padding: 0"
+      >
+        <div id="dev-dialog-content"></div>
+      </div>
+    </dialog>
+
+    <!-- Git Log Dialog -->
+    <dialog id="git-log-dialog" style="max-width: 700px; width: 95%">
+      <div class="modal-header">
+        <h2 id="git-log-title">Git History</h2>
+        <button
+          class="modal-close"
+          data-action="close-dialog" data-dialog="git-log-dialog"
+        >
+          &times;
+        </button>
+      </div>
+      <div
+        class="modal-body"
+        style="max-height: 60vh; overflow-y: auto; padding: 0"
+      >
+        <div id="git-log-content" style="padding: 0"></div>
+      </div>
+    </dialog>
+
+    <!-- Error Log Dialog -->
+    <dialog id="error-log-dialog" style="max-width: 700px; width: 95%">
+      <div class="modal-header">
+        <h2>Error Log</h2>
+        <div style="margin-left: auto; margin-right: 12px">
+          <button
+            class="btn"
+            data-action="clear-error-log"
+            style="font-size: 0.72rem"
+          >
+            Clear
+          </button>
+        </div>
+        <button
+          class="modal-close"
+          data-action="close-dialog" data-dialog="error-log-dialog"
+        >
+          &times;
+        </button>
+      </div>
+      <div
+        class="modal-body"
+        style="max-height: 60vh; overflow-y: auto; padding: 0"
+      >
+        <div id="error-log-content"></div>
+      </div>
+    </dialog>
+
+    <!-- Discover Projects Dialog -->
+    <dialog id="discover-dialog" style="max-width: 580px; width: 95%">
+      <div class="modal-header">
+        <h2>Discover Projects</h2>
+        <button
+          class="modal-close"
+          data-action="close-dialog" data-dialog="discover-dialog"
+        >
+          &times;
+        </button>
+      </div>
+      <div class="modal-body" id="discover-body">
+        <div class="discover-loading">
+          Scanning Claude projects<span></span>
+        </div>
+      </div>
+      <div class="modal-footer" id="discover-footer" style="display: none">
+        <button
+          class="btn"
+          data-action="close-dialog" data-dialog="discover-dialog"
+        >
+          Cancel
+        </button>
+        <button
+          class="btn primary"
+          id="discover-add-btn"
+          data-action="add-discovered"
+        >
+          Add Selected (0)
+        </button>
+      </div>
+    </dialog>
+
+    <!-- Notification Settings Dialog -->
+    <dialog id="notif-settings-dialog" style="max-width: 460px; width: 95%">
+      <div class="modal-header">
+        <h2>Notification Settings</h2>
+        <button
+          class="modal-close"
+          data-action="close-dialog" data-dialog="notif-settings-dialog"
+        >
+          &times;
+        </button>
+      </div>
+      <div
+        class="modal-body"
+        style="max-height: 60vh; overflow-y: auto; padding: 14px"
+      >
+        <div
+          style="margin-bottom: 12px; font-size: 0.82rem; color: var(--text-2)"
+        >
+          Toggle notifications per project:
+        </div>
+        <div id="notif-filter-list"></div>
+      </div>
+    </dialog>
+
+    <!-- AI Settings Dialog -->
+    <dialog id="ai-settings-dialog" style="max-width: 460px; width: 95%">
+      <div class="modal-header">
+        <h2>AI Settings</h2>
+        <button class="modal-close" data-action="close-dialog" data-dialog="ai-settings-dialog">&times;</button>
+      </div>
+      <div class="modal-body" style="padding: 16px">
+        <div class="ai-settings-section">
+          <label style="font-size:.82rem;font-weight:600;margin-bottom:4px;display:block">Gemini API Key</label>
+          <div style="display:flex;gap:8px">
+            <input type="password" id="ai-gemini-key" placeholder="AIzaSy..." style="flex:1;font-size:.82rem;padding:8px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-1)">
+            <button class="btn" data-action="test-ai-key" id="ai-test-btn" style="white-space:nowrap">Test</button>
+          </div>
+          <div id="ai-test-result" style="font-size:.76rem;margin-top:6px;min-height:18px"></div>
+          <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener" style="font-size:.72rem;color:var(--accent)">Google AI Studio에서 API Key 발급 &rarr;</a>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
+          <button class="btn" data-action="close-dialog" data-dialog="ai-settings-dialog">Cancel</button>
+          <button class="btn primary" data-action="save-ai-config" id="ai-save-btn">Save</button>
+        </div>
+      </div>
+    </dialog>
+
+    <!-- Settings Panel -->
+    <div
+      class="settings-overlay"
+      id="settings-overlay"
+      data-action="close-settings"
+    ></div>
+    <div class="settings-panel" id="settings-panel">
+      <div class="settings-header">
+        <h2>Settings</h2>
+        <button class="modal-close" data-action="close-settings">
+          &times;
+        </button>
+      </div>
+      <div class="settings-body">
+        <div class="settings-actions">
+          <button
+            class="btn"
+            data-action="export-settings"
+            title="Download projects.json"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="7 10 12 15 17 10" />
+              <line x1="12" y1="15" x2="12" y2="3" />
+            </svg>
+            Export
+          </button>
+          <button
+            class="btn"
+            data-action="import-settings"
+            title="Import projects.json"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            Import
+          </button>
+          <input
+            type="file"
+            id="import-file"
+            accept=".json"
+            style="display: none"
+            data-action="import-file-change"
+          />
+          <button
+            class="btn"
+            data-action="open-discover"
+            title="Auto-discover Claude projects"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            Discover
+          </button>
+        </div>
+        <div class="settings-project-list" id="settings-project-list"></div>
+
+        <!-- API Keys Section -->
+        <div class="settings-section-divider"></div>
+        <h3 class="settings-section-title">API Keys</h3>
+        <div class="settings-api-keys">
+          <div class="settings-api-row">
+            <div class="settings-api-label">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+              Gemini API Key
+            </div>
+            <div class="settings-api-value">
+              <input type="password" id="settings-gemini-key" placeholder="AIzaSy..." class="settings-api-input">
+              <button class="btn btn-sm" data-action="save-settings-gemini-key">Save</button>
+            </div>
+          </div>
+          <div class="settings-api-row">
+            <div class="settings-api-label">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg>
+              Jira
+            </div>
+            <button class="btn btn-sm" data-action="goto-jira-settings">Configure</button>
+          </div>
+        </div>
+      </div>
+      <div class="settings-footer">
+        <button
+          class="btn primary"
+          data-action="open-add-project"
+          style="width: 100%"
+        >
+          + Add Project
+        </button>
+      </div>
+    </div>
+
+    <div class="toast-container" id="toast-container"></div>
+
+    <!-- Recent Conversations -->
+    <div
+      class="conv-overlay hidden"
+      id="conv-overlay"
+      data-action="close-conv-overlay"
+    >
+      <div class="conv-box">
+        <div class="conv-header">
+          <h3>
+            <svg
+              viewBox="0 0 24 24"
+              width="16"
+              height="16"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+            >
+              <path
+                d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"
+              />
+            </svg>
+            Recent Conversations
+          </h3>
+          <button
+            class="header-btn"
+            data-action="close-conv-list"
+            style="width: 24px; height: 24px"
+          >
+            &times;
+          </button>
+        </div>
+        <div class="conv-body" id="conv-body"></div>
+      </div>
+    </div>
+
+    <!-- Command Palette -->
+    <div
+      class="cmd-palette-overlay hidden"
+      id="cmd-palette"
+      data-action="close-cmd-palette-overlay"
+    >
+      <div class="cmd-palette-box">
+        <input
+          class="cmd-palette-input"
+          id="cmd-palette-input"
+          type="text"
+          placeholder="Type a command..."
+          autocomplete="off"
+          spellcheck="false"
+        />
+        <div class="cmd-palette-list" id="cmd-palette-list"></div>
+      </div>
+    </div>
+
+    <!-- Keyboard Shortcut Overlay -->
+    <div
+      class="shortcut-overlay hidden"
+      id="shortcut-overlay"
+      data-action="close-shortcut-overlay"
+    >
+      <div class="shortcut-card">
+        <h2>
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+          >
+            <rect x="2" y="4" width="20" height="16" rx="2" />
+            <path
+              d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"
+            />
+          </svg>
+          Keyboard Shortcuts
+        </h2>
+        <table>
+          <tr class="sc-section">
+            <td colspan="2">Navigation</td>
+          </tr>
+          <tr>
+            <td>Ctrl + 1</td>
+            <td>Overview</td>
+          </tr>
+          <tr>
+            <td>Ctrl + 2</td>
+            <td>Terminal</td>
+          </tr>
+          <tr>
+            <td>Ctrl + 3</td>
+            <td>Changes</td>
+          </tr>
+          <tr>
+            <td>Ctrl + 4</td>
+            <td>Jira</td>
+          </tr>
+          <tr>
+            <td>Ctrl + 5</td>
+            <td>CI/CD</td>
+          </tr>
+          <tr>
+            <td>Ctrl + `</td>
+            <td>Agent</td>
+          </tr>
+          <tr class="sc-section">
+            <td colspan="2">Terminal</td>
+          </tr>
+          <tr>
+            <td>Ctrl + T</td>
+            <td>New terminal</td>
+          </tr>
+          <tr>
+            <td>Ctrl + W</td>
+            <td>Close terminal</td>
+          </tr>
+          <tr>
+            <td>Ctrl + F</td>
+            <td>Search in terminal</td>
+          </tr>
+          <tr>
+            <td>Ctrl + Tab</td>
+            <td>Next terminal</td>
+          </tr>
+          <tr>
+            <td>Ctrl + Shift + Tab</td>
+            <td>Previous terminal</td>
+          </tr>
+          <tr>
+            <td>Double-click tab</td>
+            <td>Rename terminal</td>
+          </tr>
+          <tr class="sc-section">
+            <td colspan="2">Changes</td>
+          </tr>
+          <tr>
+            <td>E</td>
+            <td>Expand all diffs</td>
+          </tr>
+          <tr>
+            <td>C</td>
+            <td>Collapse all diffs</td>
+          </tr>
+          <tr class="sc-section">
+            <td colspan="2">General</td>
+          </tr>
+          <tr>
+            <td>Ctrl + K</td>
+            <td>Command palette</td>
+          </tr>
+          <tr>
+            <td>?</td>
+            <td>Show this help</td>
+          </tr>
+          <tr>
+            <td>Escape</td>
+            <td>Close overlay / search</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- Stash List Dialog -->
+    <dialog id="mobile-connect-dialog" class="mobile-connect-dialog">
+      <div class="mobile-connect-head">
+        <h3>Mobile Connect</h3>
+        <button data-action="close-parent-dialog" class="btn">&times;</button>
+      </div>
+      <div class="mobile-connect-body">
+        <p class="mobile-connect-desc">Scan QR code or copy URL to connect from mobile</p>
+        <div id="qr-container" style="width:200px;height:200px;border-radius:8px;overflow:hidden;background:#fff"></div>
+        <div class="mobile-connect-url" id="mobile-connect-url"></div>
+        <button class="btn mobile-connect-copy" data-action="copy-mobile-url">Copy URL</button>
+        <p class="mobile-connect-hint">Token is saved — device stays authenticated</p>
+      </div>
+    </dialog>
+
+    <dialog id="stash-list-dialog" class="stash-dialog">
+      <div class="stash-dialog-head">
+        <h3>Stash List</h3>
+        <button data-action="close-parent-dialog" class="btn">&times;</button>
+      </div>
+      <div class="stash-list-body"></div>
+    </dialog>
+
+    <!-- Agent FAB + Floating Panel -->
+    <button class="agent-fab" id="agent-fab" data-action="toggle-agent" data-contextaction="toggle-wake-word" title="Agent (Ctrl+`) · 우클릭: 웨이크워드">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 110 2h-1.17A7 7 0 0113 22h-2a7 7 0 01-6.83-6H3a1 1 0 110-2h1a7 7 0 017-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 012-2z"/>
+        <circle cx="9" cy="14" r="1.5" fill="currentColor" stroke="none"/>
+        <circle cx="15" cy="14" r="1.5" fill="currentColor" stroke="none"/>
+      </svg>
+      <span class="agent-fab-badge" id="agent-fab-badge" style="display:none"></span>
+    </button>
+
+    <div class="agent-panel" id="agent-panel">
+      <div class="agent-panel-header">
+        <span class="agent-panel-title">Agent</span>
+        <div class="agent-panel-actions">
+          <select id="agent-model-select" data-action="change-agent-model" title="AI 모델 선택">
+            <option value="flash">Flash</option>
+            <option value="pro">Pro</option>
+          </select>
+          <button class="ag-icon-btn" data-action="open-ai-settings" title="AI 설정">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+          </button>
+          <button class="ag-icon-btn" data-action="toggle-agent-sidebar" title="대화 이력">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+          </button>
+          <button class="ag-icon-btn" data-action="toggle-agent" title="닫기">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="ag-layout">
+        <div class="ag-sidebar" id="agent-sidebar">
+          <div class="ag-sidebar-head">
+            <span>대화 이력</span>
+            <button class="ag-sidebar-close" data-action="toggle-agent-sidebar">&times;</button>
+          </div>
+          <div class="ag-conv-list" id="agent-conv-list"></div>
+        </div>
+        <div class="ag-main">
+          <div class="ag-chat-area" id="agent-chat"></div>
+          <div class="ag-thinking" id="agent-thinking" style="display:none">
+            <span class="ag-thinking-dot"></span>
+            <span class="ag-thinking-dot"></span>
+            <span class="ag-thinking-dot"></span>
+            <span class="ag-thinking-text">생각하는 중이에여...</span>
+          </div>
+          <div class="ag-voice-settings hidden" id="ag-voice-settings">
+            <div class="ag-vs-row">
+              <label>볼륨</label>
+              <input type="range" min="0" max="1" step="0.05" value="0.8" data-action="set-tts-volume">
+              <span id="ag-vol-label">80%</span>
+            </div>
+            <div class="ag-vs-row">
+              <label>속도</label>
+              <input type="range" min="0.5" max="2" step="0.1" value="1.1" data-action="set-tts-rate">
+              <span id="ag-rate-label">1.1x</span>
+            </div>
+            <div class="ag-vs-row">
+              <label>피치</label>
+              <input type="range" min="0.5" max="2" step="0.05" value="1.05" data-action="set-tts-pitch">
+            </div>
+          </div>
+          <div id="agent-wake-indicator" class="ag-wake-indicator" style="display:none"></div>
+          <div class="ag-input-bar">
+            <button class="ag-icon-btn" id="agent-wake-btn" data-action="toggle-wake-word" title="웨이크워드 OFF">
+              🐶
+            </button>
+            <button class="ag-icon-btn" id="agent-mic-btn" data-action="toggle-voice-input" title="음성 입력 (마이크)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            </button>
+            <button class="ag-icon-btn" id="agent-tts-btn" data-action="toggle-tts" data-contextaction="toggle-voice-settings" title="TTS On (우클릭: 설정)">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/></svg>
+            </button>
+            <textarea id="agent-input" placeholder="메시지를 입력하세여~ (Enter로 전송)" rows="1" data-action="agent-input"></textarea>
+            <button class="ag-send-btn" id="agent-send-btn" data-action="send-agent-msg" title="전송">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </button>
+            <button class="ag-stop-btn" id="agent-stop-btn" data-action="stop-agent" title="중단" style="display:none">
+              <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+            </button>
+            <button class="ag-icon-btn" data-action="new-agent-conv" title="새 대화">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="js/main.js?v=11"></script>
+  </body>
+</html>

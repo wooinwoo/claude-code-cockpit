@@ -1,0 +1,63 @@
+{
+  "id": "oss-evaluation",
+  "name": "OSS 라이브러리 실사",
+  "description": "보안/활성도/커뮤니티/대안 병렬 조사 → 종합 평가 → 채택/보류/기각 판정",
+  "maxIterations": 1,
+  "inputs": [
+    { "key": "library", "label": "라이브러리명 (예: zod, drizzle-orm, effect-ts)", "type": "text", "required": true },
+    { "key": "purpose", "label": "도입 목적 (뭘 대체/해결하려는지)", "type": "textarea", "required": true }
+  ],
+  "steps": [
+    {
+      "id": "security",
+      "name": "보안 감사관",
+      "type": "llm",
+      "role": "보안 전문가. CVE, 의존성 취약점, 라이선스 리스크를 조사한다.",
+      "provider": "gemini",
+      "model": "gemini-2.5-flash",
+      "timeout": 180000,
+      "tools": ["WebSearch", "WebFetch"],
+      "prompt": "라이브러리: {{library}}\n\n다음을 웹에서 조사해라:\n1. 알려진 CVE/보안 취약점 (NVD, GitHub Advisory, Snyk)\n2. 라이선스 (상업 사용 가능 여부, 제약)\n3. 의존성 수 — 의존성 체인에서 위험한 패키지\n4. 최근 보안 패치 이력\n5. 보안 등급 (Snyk/Socket.dev 점수)\n\n위험도: 높음/보통/낮음으로 평가",
+      "outputKey": "security_report"
+    },
+    {
+      "id": "health",
+      "name": "활성도 분석가",
+      "type": "llm",
+      "role": "오픈소스 생태계 분석가. GitHub 메트릭과 유지보수 건전성을 평가한다.",
+      "provider": "gemini",
+      "model": "gemini-2.5-flash",
+      "timeout": 180000,
+      "tools": ["WebSearch", "WebFetch"],
+      "prompt": "라이브러리: {{library}}\n\n다음을 GitHub과 npm에서 조사해라:\n1. GitHub 스타 수 + 최근 추세 (늘고 있나 줄고 있나)\n2. 최근 3개월 커밋 수, PR 처리 속도\n3. 오픈 이슈 수 vs 클로즈 이슈 수 (해결 비율)\n4. 메인테이너 수 — 1인 프로젝트인가 팀인가\n5. npm 주간 다운로드 추이\n6. 최근 릴리즈 날짜, 릴리즈 주기\n7. 후원/펀딩 상태 (OpenCollective, GitHub Sponsors)\n\n건전성: 좋음/보통/우려로 평가",
+      "outputKey": "health_report"
+    },
+    {
+      "id": "community",
+      "name": "커뮤니티 리서처",
+      "type": "llm",
+      "role": "커뮤니티 분석가. 실 사용자 후기, 도입 사례, 평판을 조사한다.",
+      "provider": "gemini",
+      "model": "gemini-2.5-flash",
+      "timeout": 180000,
+      "tools": ["WebSearch"],
+      "prompt": "라이브러리: {{library}}\n\n다음을 웹에서 조사해라:\n1. Reddit/HN/dev.to 에서의 평판 (긍정/부정 의견 정리)\n2. 유명 기업 도입 사례\n3. Stack Overflow 질문 수 (생태계 크기 지표)\n4. 공식 문서 품질 평가\n5. 학습 리소스 (강좌, 튜토리얼) 풍부도\n6. 대표적 불만/pain point\n\n커뮤니티 평판: 좋음/보통/나쁨",
+      "outputKey": "community_report"
+    },
+    {
+      "id": "evaluator",
+      "name": "종합 평가관",
+      "type": "llm",
+      "role": "시니어 엔지니어링 매니저. 모든 조사 결과를 종합하여 채택 여부를 판정한다.",
+      "provider": "claude",
+      "model": "sonnet",
+      "prompt": "## 라이브러리: {{library}}\n## 도입 목적: {{purpose}}\n\n## 보안 감사\n{{security_report}}\n\n## 활성도 분석\n{{health_report}}\n\n## 커뮤니티 평판\n{{community_report}}\n\n종합 평가서를 작성해라.\n\n### 평가 매트릭스\n| 항목 | 등급 | 비고 |\n|------|------|------|\n| 보안 | | |\n| 활성도 | | |\n| 커뮤니티 | | |\n| 문서/DX | | |\n| 종합 | | |\n\n### 대안 라이브러리\n같은 용도의 대안 2-3개와 간단 비교\n\n### 도입 시 주의사항\n마이그레이션 비용, 학습 곡선, 잠금 효과\n\n### 최종 판정\n**채택** / **보류** (추가 검토 필요) / **기각** (도입하지 말 것)\n\n근거와 함께 명확하게 판정해라.",
+      "outputKey": "evaluation"
+    }
+  ],
+  "edges": [
+    { "from": "START", "to": ["security", "health", "community"] },
+    { "from": ["security", "health", "community"], "to": "evaluator" },
+    { "from": "evaluator", "to": "END" }
+  ]
+}

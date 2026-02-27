@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Tauri build artifacts
+src-tauri/target/
+
+# Built binary
+cockpit.exe
+
+# Secrets & credentials
+.cockpit-token
+jira-config.json
+
+# Runtime state & cache
+session-state.json
+cost-cache.json
+agent-history.json
+workflow-runs.json
+
+# User-specific data
+projects.json
+notes/
+
+# Test/debug files
+test-*
+
+# Tooling
+.playwright-mcp/

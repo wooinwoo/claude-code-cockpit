@@ -1,0 +1,58 @@
+{
+  "id": "content-repurpose",
+  "name": "콘텐츠 리퍼포징",
+  "description": "원본 콘텐츠 하나 → 블로그/트위터/링크드인/뉴스레터 병렬 변환 → QA",
+  "maxIterations": 1,
+  "inputs": [
+    { "key": "content", "label": "원본 콘텐츠 (블로그, 발표 스크립트, 내부 문서 등)", "type": "textarea", "required": true },
+    { "key": "tone", "label": "톤", "type": "select", "options": ["프로페셔널", "캐주얼/친근", "기술적/전문가"], "default": "프로페셔널" },
+    { "key": "language", "label": "언어", "type": "select", "options": ["한국어", "English", "둘 다"], "default": "한국어" }
+  ],
+  "steps": [
+    {
+      "id": "blog",
+      "name": "블로그 변환기",
+      "type": "llm",
+      "role": "기술 블로거. SEO를 고려한 읽기 좋은 블로그 포스트를 작성한다.",
+      "provider": "claude",
+      "model": "sonnet",
+      "prompt": "원본:\n{{content}}\n\n톤: {{tone}}\n언어: {{language}}\n\n이 콘텐츠를 기술 블로그 포스트로 변환해라.\n\n형식:\n- 제목 (SEO 고려, 클릭 유도)\n- 부제목\n- 도입부 (왜 읽어야 하는지)\n- 본문 (소제목으로 구분, 코드/예시 포함)\n- TL;DR (3줄 요약)\n- 태그 5개\n\n1500-2000자 분량.",
+      "outputKey": "blog_post"
+    },
+    {
+      "id": "social",
+      "name": "소셜 미디어 변환기",
+      "type": "llm",
+      "role": "소셜 미디어 전문가. 트위터/X 스레드와 링크드인 포스트를 작성한다.",
+      "provider": "claude",
+      "model": "haiku",
+      "prompt": "원본:\n{{content}}\n\n톤: {{tone}}\n언어: {{language}}\n\n두 가지를 작성해라:\n\n## Twitter/X 스레드 (5-8 트윗)\n- 첫 트윗: 훅 (궁금증 유발)\n- 중간: 핵심 포인트 (1트윗 1메시지)\n- 마지막: CTA (블로그 링크, 의견 요청 등)\n- 각 트윗 280자 이내\n\n## LinkedIn 포스트\n- 도입: 개인 경험/질문으로 시작\n- 핵심: 인사이트 3-5개 (줄바꿈으로 가독성)\n- 마무리: CTA\n- 이모지 적절히 사용\n- 600-800자",
+      "outputKey": "social_posts"
+    },
+    {
+      "id": "newsletter",
+      "name": "뉴스레터 변환기",
+      "type": "llm",
+      "role": "뉴스레터 에디터. 이메일 구독자에게 보낼 뉴스레터 형식으로 변환한다.",
+      "provider": "claude",
+      "model": "haiku",
+      "prompt": "원본:\n{{content}}\n\n톤: {{tone}}\n언어: {{language}}\n\n이메일 뉴스레터 형식으로 변환해라.\n\n형식:\n- 제목 (이메일 오픈율 높이는 제목)\n- 인사 (짧게)\n- 핵심 내용 (불릿 포인트 + 간결한 설명)\n- 한 줄 인사이트 (핵심 테이크어웨이)\n- CTA 버튼 텍스트\n- P.S. (부가 정보나 다음 소식 예고)\n\n300-500자. 스캔 가능하게.",
+      "outputKey": "newsletter"
+    },
+    {
+      "id": "qa",
+      "name": "콘텐츠 QA",
+      "type": "llm",
+      "role": "편집장. 모든 변환 결과의 일관성, 정확성, 톤을 검증한다.",
+      "provider": "claude",
+      "model": "haiku",
+      "prompt": "## 원본\n{{content}}\n\n## 블로그\n{{blog_post}}\n\n## 소셜\n{{social_posts}}\n\n## 뉴스레터\n{{newsletter}}\n\n각 변환물을 검수해라:\n1. 원본의 핵심 메시지가 정확히 전달되는가\n2. 플랫폼별 톤이 적절한가\n3. 사실 오류나 과장이 없는가\n4. 각 포맷의 길이가 적절한가\n\n수정이 필요한 부분이 있으면 수정 버전을 포함해서, 최종 버전을 플랫폼별로 깔끔하게 정리해 출력해라.",
+      "outputKey": "final"
+    }
+  ],
+  "edges": [
+    { "from": "START", "to": ["blog", "social", "newsletter"] },
+    { "from": ["blog", "social", "newsletter"], "to": "qa" },
+    { "from": "qa", "to": "END" }
+  ]
+}

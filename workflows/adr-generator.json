@@ -1,0 +1,63 @@
+{
+  "id": "adr-generator",
+  "name": "ADR (기술 의사결정 기록)",
+  "description": "의사결정 주제 → 찬반 병렬 리서치 → 균형잡힌 ADR 문서 생성",
+  "maxIterations": 2,
+  "inputs": [
+    { "key": "decision", "label": "의사결정 주제 (예: 모노레포 전환, GraphQL 도입)", "type": "text", "required": true },
+    { "key": "context", "label": "현재 상황/배경", "type": "textarea", "required": true },
+    { "key": "code", "label": "관련 코드/설정 (선택)", "type": "textarea", "default": "" }
+  ],
+  "steps": [
+    {
+      "id": "pro_researcher",
+      "name": "찬성 리서처",
+      "type": "llm",
+      "role": "기술 옹호자. 해당 결정을 지지하는 근거를 웹에서 적극 조사한다.",
+      "provider": "gemini",
+      "model": "gemini-2.5-flash",
+      "timeout": 180000,
+      "tools": ["WebSearch"],
+      "prompt": "## 의사결정\n{{decision}}\n\n## 현재 상황\n{{context}}\n\n## 반대 측 주장 (있으면)\n{{con_research}}\n\n이 결정을 **지지하는** 근거를 웹에서 조사해라.\n\n1. 성공 사례 3개 이상 (회사명, 규모, 결과)\n2. 기술적 이점 (벤치마크, 데이터)\n3. 생산성/비용 개선 효과\n4. 업계 트렌드 (채택률, 성장세)\n5. 반대 측 주장에 대한 반박 (있으면)\n\n출처 URL 반드시 포함.",
+      "outputKey": "pro_research"
+    },
+    {
+      "id": "con_researcher",
+      "name": "반대 리서처",
+      "type": "llm",
+      "role": "기술 회의론자. 해당 결정의 위험과 단점을 웹에서 조사한다.",
+      "provider": "gemini",
+      "model": "gemini-2.5-flash",
+      "timeout": 180000,
+      "tools": ["WebSearch"],
+      "prompt": "## 의사결정\n{{decision}}\n\n## 현재 상황\n{{context}}\n\n## 찬성 측 주장 (있으면)\n{{pro_research}}\n\n이 결정에 **반대하는** 근거를 웹에서 조사해라.\n\n1. 실패/후회 사례 3개 이상 (회사명, 규모, 교훈)\n2. 기술적 단점/리스크\n3. 마이그레이션 비용/복잡도\n4. 대안 (같은 문제를 다른 방식으로 해결한 사례)\n5. 찬성 측 주장에 대한 반박 (있으면)\n\n출처 URL 반드시 포함.",
+      "outputKey": "con_research"
+    },
+    {
+      "id": "judge",
+      "name": "ADR 심판",
+      "type": "llm",
+      "role": "공정한 기술 심판. 양측 근거가 충분한지 평가한다.",
+      "provider": "claude",
+      "model": "haiku",
+      "prompt": "## 찬성\n{{pro_research}}\n\n## 반대\n{{con_research}}\n\n양측의 조사가 충분한가 평가해라.\n- 근거가 구체적인가 (수치, 사례 포함)\n- 양쪽 모두 공정하게 조사했는가\n- 빠진 관점이 있는가\n\n충분하면 VERDICT:RESOLVED\n보완 필요하면 VERDICT:CONTINUE + 추가 조사할 내용",
+      "outputKey": "judgment"
+    },
+    {
+      "id": "adr_writer",
+      "name": "ADR 작성자",
+      "type": "llm",
+      "role": "아키텍트. 리서치 결과를 ADR 포맷으로 정리한다.",
+      "provider": "claude",
+      "model": "sonnet",
+      "prompt": "## 의사결정: {{decision}}\n## 배경: {{context}}\n## 찬성 근거\n{{pro_research}}\n## 반대 근거\n{{con_research}}\n\nADR(Architecture Decision Record)을 작성해라.\n\n## ADR-XXX: {{decision}}\n\n### Status\nProposed\n\n### Context\n(현재 상황과 왜 이 결정이 필요한지)\n\n### Decision\n(최종 결정 — 찬반 근거를 종합하여)\n\n### Consequences\n**긍정적:**\n- ...\n\n**부정적:**\n- ...\n\n**리스크 & 대응:**\n- ...\n\n### Alternatives Considered\n| 대안 | 장점 | 단점 | 기각 사유 |\n\n### References\n- 출처 URL 목록",
+      "outputKey": "adr"
+    }
+  ],
+  "edges": [
+    { "from": "START", "to": ["pro_researcher", "con_researcher"] },
+    { "from": ["pro_researcher", "con_researcher"], "to": "judge" },
+    { "from": "judge", "condition": { "pattern": "VERDICT:\\s*RESOLVED", "true": "adr_writer", "false": ["pro_researcher", "con_researcher"] } },
+    { "from": "adr_writer", "to": "END" }
+  ]
+}

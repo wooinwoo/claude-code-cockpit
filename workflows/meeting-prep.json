@@ -1,0 +1,52 @@
+{
+  "id": "meeting-prep",
+  "name": "미팅 준비 브리핑",
+  "description": "참석자/회사 배경 조사 + 기술 컨텍스트 + 예상 Q&A → 브리핑 문서",
+  "maxIterations": 1,
+  "inputs": [
+    { "key": "topic", "label": "미팅 주제/안건", "type": "textarea", "required": true },
+    { "key": "attendees", "label": "참석자 (이름, 직책, 회사)", "type": "textarea", "required": true },
+    { "key": "my_goal", "label": "내가 원하는 결과", "type": "text", "default": "" }
+  ],
+  "steps": [
+    {
+      "id": "people_research",
+      "name": "참석자 리서처",
+      "type": "llm",
+      "role": "비즈니스 인텔리전스 분석가. 참석자와 소속 회사에 대한 배경을 조사한다.",
+      "provider": "gemini",
+      "model": "gemini-2.5-flash",
+      "timeout": 180000,
+      "tools": ["WebSearch"],
+      "prompt": "참석자: {{attendees}}\n\n각 참석자/회사에 대해 웹에서 조사해라:\n1. 회사 개요 (사업 분야, 규모, 최근 뉴스)\n2. 참석자 배경 (LinkedIn, 블로그, 발표 이력에서 추론)\n3. 최근 관심사/프로젝트 (공개 정보 기반)\n4. 의사결정 스타일 힌트 (직급/경력에서 추론)\n\n미팅에서 도움될 정보 위주로 정리해라.",
+      "outputKey": "people_intel"
+    },
+    {
+      "id": "topic_research",
+      "name": "주제 리서처",
+      "type": "llm",
+      "role": "기술 리서처. 미팅 주제와 관련된 최신 정보와 맥락을 조사한다.",
+      "provider": "gemini",
+      "model": "gemini-2.5-flash",
+      "timeout": 180000,
+      "tools": ["WebSearch"],
+      "prompt": "미팅 주제: {{topic}}\n\n이 주제와 관련된 최신 정보를 웹에서 조사해라:\n1. 업계 동향/트렌드\n2. 경쟁사 사례\n3. 최근 관련 뉴스\n4. 핵심 데이터/수치\n5. 흔히 나오는 쟁점/질문\n\n미팅 대화에 활용할 수 있는 팩트 위주로 정리해라.",
+      "outputKey": "topic_intel"
+    },
+    {
+      "id": "strategist",
+      "name": "미팅 전략가",
+      "type": "llm",
+      "role": "비즈니스 전략가. 참석자 정보와 주제 리서치를 종합하여 미팅 전략을 수립한다.",
+      "provider": "claude",
+      "model": "sonnet",
+      "prompt": "## 미팅 주제\n{{topic}}\n\n## 내 목표\n{{my_goal}}\n\n## 참석자 정보\n{{people_intel}}\n\n## 주제 리서치\n{{topic_intel}}\n\n미팅 브리핑 문서를 작성해라.\n\n### 1. 미팅 개요\n주제, 참석자, 목표 한 줄 정리\n\n### 2. 참석자 프로필\n각 참석자별 핵심 포인트 (이 사람이 신경 쓸 것)\n\n### 3. 핵심 데이터\n대화에서 인용할 수 있는 팩트/수치 5개\n\n### 4. 예상 질문 & 답변\n상대가 물어볼 법한 질문 5개 + 준비된 답변\n\n### 5. 대화 전략\n- 오프닝 (어떻게 시작할지)\n- 핵심 메시지 3개\n- 피해야 할 주제/표현\n- 클로징 (어떻게 마무리할지)\n\n### 6. 다음 단계 제안\n미팅 후 follow-up 액션 초안",
+      "outputKey": "briefing"
+    }
+  ],
+  "edges": [
+    { "from": "START", "to": ["people_research", "topic_research"] },
+    { "from": ["people_research", "topic_research"], "to": "strategist" },
+    { "from": "strategist", "to": "END" }
+  ]
+}
