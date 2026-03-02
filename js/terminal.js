@@ -1,6 +1,7 @@
 // ─── Terminal: WebSocket, xterm, layout tree, headers, search ───
 import { app } from './state.js';
 import { esc, showToast, escapeHtml, IMG_EXT } from './utils.js';
+import { registerClickActions, registerInputActions } from './actions.js';
 
 // ─── Mobile Detection ───
 export function isMobile() {
@@ -262,7 +263,7 @@ export function addTerminal(termId, projectId, addToView) {
       _cmdBuf += data;
     }
   });
-  app.termMap.set(termId, { xterm, fitAddon, searchAddon, projectId, element, label: name, color, opened: false, pendingBuffer: null });
+  app.termMap.set(termId, { xterm, fitAddon, searchAddon, projectId, element, label: name, color, opened: false, pendingBuffer: null, createdAt: Date.now() });
   if (addToView) {
     if (window._splitTarget) {
       const st = window._splitTarget; window._splitTarget = null;
@@ -535,6 +536,7 @@ export function updateTermHeaders() {
       (g.uncommittedCount ? `<span class="th-tag th-changes" data-pid="${t.projectId}">\u00B1${g.uncommittedCount}</span>` : '') +
       (model ? `<span class="th-tag th-model">${esc(model)}</span>` : '') +
       (nv ? `<span class="th-tag th-node" title="Node.js ${nv}">${esc(nv)}</span>` : '') +
+      (t.createdAt ? `<span class="th-tag th-timer" title="Session duration">${fmtDuration(Date.now() - t.createdAt)}</span>` : '') +
       (bufPct >= 80 ? `<span class="th-tag th-buf" data-action="clear-buf" style="color:${bufPct >= 95 ? 'var(--red)' : 'var(--yellow)'};font-size:.7rem;cursor:pointer" title="Buffer ${bufPct}% — click to clear">${bufPct}%</span>` : '') +
       `<span class="th-spacer"></span>` +
       `<button class="th-close" data-action="close" title="Close">\u00d7</button>`;
@@ -671,7 +673,7 @@ export function showTermCtxMenu(e, termId) {
   setTimeout(() => { document.addEventListener('click', dismiss); document.addEventListener('keydown', onKey); window.addEventListener('scroll', dismiss, true); }, 0);
 }
 
-function openNewTermModalWithSplit(targetTermId, pos) {
+export function openNewTermModalWithSplit(targetTermId, pos) {
   // Auto-create with same project as source terminal (skip modal)
   const sourceT = app.termMap.get(targetTermId);
   if (sourceT?.projectId && app.ws?.readyState === WebSocket.OPEN) {
@@ -1367,6 +1369,16 @@ export function broadcastInput(fromTermId, data) {
 
 export function isBroadcastMode() { return _broadcastMode; }
 
+// ─── Duration Formatter ───
+function fmtDuration(ms) {
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  return `${h}h${m % 60}m`;
+}
+
 // ─── Scrollback Setting ───
 const SCROLLBACK_KEY = 'dl-term-scrollback';
 
@@ -1391,3 +1403,20 @@ export function showScrollbackDialog() {
   const val = prompt(`Scrollback lines (1,000 ~ 50,000)\nCurrent: ${current.toLocaleString()}`, current);
   if (val !== null) setScrollback(val);
 }
+
+// ─── Action Registration ───
+registerClickActions({
+  'toggle-broadcast': toggleBroadcastMode,
+  'new-term': openNewTermModal,
+  'ts-toggle-case': (el) => { el.classList.toggle('active'); doTermSearch('next'); },
+  'ts-toggle-regex': (el) => { el.classList.toggle('active'); doTermSearch('next'); },
+  'term-search-prev': () => doTermSearch('prev'),
+  'term-search-next': () => doTermSearch('next'),
+  'close-term-search': closeTermSearch,
+  'font-size-down': () => changeTermFontSize(-1),
+  'font-size-up': () => changeTermFontSize(1),
+  'export-terminal': exportTerminal,
+});
+registerInputActions({
+  'term-search-input': () => doTermSearch('next'),
+});

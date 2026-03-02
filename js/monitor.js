@@ -1,6 +1,12 @@
 // ─── System Monitor Module ───
 import { app } from './state.js';
-import { esc } from './utils.js';
+import { esc, fetchJson } from './utils.js';
+
+// ─── History for sparklines ───
+const MAX_HISTORY = 30;
+const _cpuHistory = [];
+const _memHistory = [];
+let _procFilter = '';
 
 // ─── Init ───
 export function initMonitor() {
@@ -33,11 +39,18 @@ export function toggleMonitorPause() {
 async function loadMonitorStats() {
   if (app._monitorPaused) return;
   try {
-    const stats = await fetch('/api/monitor/stats').then(r => r.json());
-    if (stats.error) return;
+    const stats = await fetchJson('/api/monitor/stats');
     app.monitorStats = stats;
+    // Track history for sparklines
+    _cpuHistory.push(stats.cpu); if (_cpuHistory.length > MAX_HISTORY) _cpuHistory.shift();
+    _memHistory.push(stats.memory.percent); if (_memHistory.length > MAX_HISTORY) _memHistory.shift();
     renderMonitor();
   } catch { /* silent */ }
+}
+
+export function filterMonitorProc(query) {
+  _procFilter = query.toLowerCase();
+  renderMonitor();
 }
 
 export function refreshMonitor() { loadMonitorStats(); }
@@ -75,12 +88,25 @@ function renderMonitor() {
       ${renderGauge('Memory', mem.percent, '%', memColor(mem.percent))}
       ${renderGaugeText('RAM', formatBytes(mem.used) + ' / ' + formatBytes(mem.total))}
     </div>
+    <div class="mon-sparklines">
+      <div class="mon-spark-card">
+        <span class="mon-spark-label">CPU Trend</span>
+        ${renderSparkline(_cpuHistory, cpuColor(s.cpu))}
+      </div>
+      <div class="mon-spark-card">
+        <span class="mon-spark-label">Memory Trend</span>
+        ${renderSparkline(_memHistory, memColor(mem.percent))}
+      </div>
+    </div>
     <div class="mon-section">
       <h3 class="mon-section-title">Disks</h3>
       <div class="mon-disks">${s.disk.map(d => renderDisk(d)).join('')}</div>
     </div>
     <div class="mon-section">
-      <h3 class="mon-section-title">Top Processes</h3>
+      <div class="mon-proc-header">
+        <h3 class="mon-section-title">Top Processes</h3>
+        <input type="text" class="mon-proc-filter" placeholder="Filter processes..." value="${esc(_procFilter)}" data-action="filter-proc">
+      </div>
       <table class="mon-proc-table">
         <thead><tr>
           <th>PID</th>
@@ -88,7 +114,7 @@ function renderMonitor() {
           <th class="mon-sortable" data-action="sort-proc" data-col="cpu" title="Sort by CPU">CPU (s) ${_monSortCol === 'cpu' ? (_monSortAsc ? '▲' : '▼') : ''}</th>
           <th class="mon-sortable" data-action="sort-proc" data-col="mem" title="Sort by Memory">Memory ${_monSortCol === 'mem' ? (_monSortAsc ? '▲' : '▼') : ''}</th>
         </tr></thead>
-        <tbody>${sortProcesses(s.processes).map(p => `<tr>
+        <tbody>${filterAndSortProcesses(s.processes).map(p => `<tr>
           <td class="mon-pid">${p.Id}</td>
           <td class="mon-pname">${esc(p.ProcessName)}</td>
           <td class="mon-pcpu">${p.Cpu ?? '-'}</td>
@@ -105,6 +131,9 @@ function renderMonitor() {
       if (btn.dataset.action === 'toggle-pause') toggleMonitorPause();
       else if (btn.dataset.action === 'refresh') refreshMonitor();
       else if (btn.dataset.action === 'sort-proc') sortMonitorProc(btn.dataset.col);
+    });
+    el.addEventListener('input', e => {
+      if (e.target.dataset.action === 'filter-proc') filterMonitorProc(e.target.value);
     });
   }
 }
@@ -161,6 +190,34 @@ function sortProcesses(procs) {
     const vb = _monSortCol === 'cpu' ? (b.Cpu ?? 0) : (b.MemMB ?? 0);
     return _monSortAsc ? va - vb : vb - va;
   });
+}
+
+function filterAndSortProcesses(procs) {
+  let filtered = procs;
+  if (_procFilter) {
+    filtered = procs.filter(p =>
+      p.ProcessName.toLowerCase().includes(_procFilter) ||
+      String(p.Id).includes(_procFilter)
+    );
+  }
+  return sortProcesses(filtered);
+}
+
+function renderSparkline(data, color) {
+  if (data.length < 2) return '<svg class="mon-spark-svg" viewBox="0 0 120 30"></svg>';
+  const w = 120, h = 30, pad = 2;
+  const max = Math.max(100, ...data);
+  const pts = data.map((v, i) => {
+    const x = pad + (i / (data.length - 1)) * (w - pad * 2);
+    const y = h - pad - ((v / max) * (h - pad * 2));
+    return `${x},${y}`;
+  });
+  const fillPts = [`${pad},${h - pad}`, ...pts, `${pad + ((data.length - 1) / (data.length - 1)) * (w - pad * 2)},${h - pad}`];
+  return `<svg class="mon-spark-svg" viewBox="0 0 ${w} ${h}">
+    <polygon points="${fillPts.join(' ')}" fill="${color}" opacity="0.15"/>
+    <polyline points="${pts.join(' ')}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>
+    <circle cx="${pts[pts.length - 1].split(',')[0]}" cy="${pts[pts.length - 1].split(',')[1]}" r="2" fill="${color}"/>
+  </svg>`;
 }
 
 // ─── Helpers ───

@@ -168,3 +168,46 @@ export function sanitizeHtml(html) {
 export const IMG_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg', 'ico']);
 
 export const DIFF_LINE_LIMIT = 500;
+
+// ─── Fetch Helpers ───
+
+export class ApiError extends Error {
+  constructor(status, body) {
+    super(body?.error || body?.message || `HTTP ${status}`);
+    this.name = 'ApiError';
+    this.status = status;
+    this.body = body;
+  }
+}
+
+export async function fetchJson(path, opts = {}) {
+  const { timeoutMs = 15000, ...fetchOpts } = opts;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(path, { ...fetchOpts, signal: opts.signal || controller.signal });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({ error: res.statusText }));
+      throw new ApiError(res.status, body);
+    }
+    return await res.json();
+  } finally { clearTimeout(timer); }
+}
+
+export async function fetchText(path, opts = {}) {
+  const { timeoutMs = 30000, ...fetchOpts } = opts;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(path, { ...fetchOpts, signal: opts.signal || controller.signal });
+    if (!res.ok) throw new ApiError(res.status, { error: res.statusText });
+    return await res.text();
+  } finally { clearTimeout(timer); }
+}
+
+export function postJson(path, data, opts = {}) {
+  return fetchJson(path, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data), ...opts,
+  });
+}

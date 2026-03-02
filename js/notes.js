@@ -1,6 +1,7 @@
 // ─── Docs Module: Documentation-style notes with sidebar tree & TOC ───
 import { app } from './state.js';
-import { esc, showToast, simpleMarkdown } from './utils.js';
+import { esc, showToast, simpleMarkdown, fetchJson, postJson } from './utils.js';
+import { registerClickActions, registerInputActions } from './actions.js';
 
 let _mode = 'view'; // 'view' | 'edit'
 
@@ -14,7 +15,7 @@ export function initNotes() {
 // ─── Data ───
 async function loadNotesList() {
   try {
-    const notes = await fetch('/api/notes').then(r => r.json());
+    const notes = await fetchJson('/api/notes');
     app.notesList = Array.isArray(notes) ? notes : [];
     renderSidebar();
     if (!app._activeNoteId && app.notesList.length) selectNote(app.notesList[0].id);
@@ -101,8 +102,7 @@ export async function selectNote(id) {
   if (!main) return;
   main.innerHTML = '<div class="docs-loading"><div class="docs-loading-spinner"></div>Loading...</div>';
   try {
-    const note = await fetch(`/api/notes/${id}`).then(r => r.json());
-    if (note.error) throw new Error(note.error);
+    const note = await fetchJson(`/api/notes/${id}`);
     app._currentNote = note;
     renderDocView(note);
   } catch (err) {
@@ -123,6 +123,9 @@ function renderDocView(note) {
           <span class="docs-bc-page">${esc(note.title || 'Untitled')}</span>
         </div>
         <div class="docs-toolbar-actions">
+          <button class="docs-action-btn" data-action="export-note" title="Export as .md">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          </button>
           <button class="docs-action-btn" data-action="edit-doc" title="Edit">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.12 2.12 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
             <span>Edit</span>
@@ -245,6 +248,7 @@ function delegateMain(main) {
       case 'edit-doc': enterEditMode(); break;
       case 'view-doc': exitEditMode(); break;
       case 'delete-note': deleteCurrentNote(); break;
+      case 'export-note': exportNote(); break;
       case 'md-insert': mdInsert(btn.dataset.before, btn.dataset.after); break;
     }
   });
@@ -263,7 +267,7 @@ async function exitEditMode() {
   const main = document.getElementById('notes-editor');
   if (main) main.dataset.delegated2 = '';
   if (app._activeNoteId) {
-    const note = await fetch(`/api/notes/${app._activeNoteId}`).then(r => r.json());
+    const note = await fetchJson(`/api/notes/${app._activeNoteId}`);
     app._currentNote = note;
     renderDocView(note);
   }
@@ -328,10 +332,7 @@ async function saveCurrentNote() {
   try {
     app._notesSaveState = 'saving';
     updateSaveStatus();
-    await fetch(`/api/notes/${app._activeNoteId}`, {
-      method: 'PUT', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates)
-    });
+    await postJson(`/api/notes/${app._activeNoteId}`, updates, { method: 'PUT' });
     app._notesDirty = false;
     app._notesSaveState = 'saved';
     updateSaveStatus();
@@ -370,10 +371,7 @@ function updateWordCount() {
 // ─── Create ───
 export async function createNewNote() {
   try {
-    const note = await fetch('/api/notes', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: 'New Page', content: '' })
-    }).then(r => r.json());
+    const note = await postJson('/api/notes', { title: 'New Page', content: '' });
     app.notesList.unshift({ id: note.id, title: note.title, project: '', tags: [], updatedAt: note.updatedAt, createdAt: note.createdAt, preview: '' });
     app._activeNoteId = note.id;
     app._currentNote = note;
@@ -391,7 +389,7 @@ export async function deleteCurrentNote() {
   if (!app._activeNoteId) return;
   if (!confirm('Delete this page?')) return;
   try {
-    await fetch(`/api/notes/${app._activeNoteId}`, { method: 'DELETE' });
+    await fetchJson(`/api/notes/${app._activeNoteId}`, { method: 'DELETE' });
     app.notesList = app.notesList.filter(n => n.id !== app._activeNoteId);
     app._activeNoteId = null;
     app._notesDirty = false;
@@ -403,25 +401,50 @@ export async function deleteCurrentNote() {
   } catch { showToast('Failed to delete', 'error'); }
 }
 
-// ─── Search ───
+// ─── Search (title + content preview) ───
 export function searchNotes(query) {
   const items = document.querySelectorAll('.docs-item');
   const sections = document.querySelectorAll('.docs-section');
   const q = query.toLowerCase();
   if (!q) {
-    items.forEach(i => i.style.display = '');
+    items.forEach(i => { i.style.display = ''; const badge = i.querySelector('.docs-search-match'); if (badge) badge.remove(); });
     sections.forEach(s => s.style.display = '');
     return;
   }
   items.forEach(item => {
     const label = item.querySelector('.docs-item-label')?.textContent.toLowerCase() || '';
-    item.style.display = label.includes(q) ? '' : 'none';
+    const noteId = item.dataset.id;
+    const note = app.notesList.find(n => n.id === noteId);
+    const preview = (note?.preview || note?.content || '').toLowerCase();
+    const titleMatch = label.includes(q);
+    const contentMatch = preview.includes(q);
+    item.style.display = (titleMatch || contentMatch) ? '' : 'none';
+    // Show content match indicator
+    let badge = item.querySelector('.docs-search-match');
+    if (contentMatch && !titleMatch) {
+      if (!badge) { badge = document.createElement('span'); badge.className = 'docs-search-match'; item.appendChild(badge); }
+      badge.textContent = 'content';
+    } else if (badge) { badge.remove(); }
   });
   sections.forEach(sec => {
     const visible = sec.querySelectorAll('.docs-item:not([style*="display: none"])').length;
     sec.style.display = visible ? '' : 'none';
     if (visible) sec.classList.add('open');
   });
+}
+
+// ─── Export ───
+function exportNote() {
+  const note = app._currentNote;
+  if (!note) return;
+  const content = `# ${note.title || 'Untitled'}\n\n${note.content || ''}`;
+  const blob = new Blob([content], { type: 'text/markdown' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (note.title || 'note').replace(/[^a-zA-Z0-9가-힣_-]/g, '_') + '.md';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast('Note exported');
 }
 
 // ─── Markdown Insert ───
@@ -459,3 +482,11 @@ function renderEmpty() {
   </div>`;
   clearToc();
 }
+
+// ─── Action Registration ───
+registerClickActions({
+  'create-new-note': createNewNote,
+});
+registerInputActions({
+  'search-notes': (el) => searchNotes(el.value),
+});

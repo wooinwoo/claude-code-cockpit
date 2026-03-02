@@ -1,15 +1,15 @@
 // ─── Shared Mutable State ───
 // All modules import `app` and read/write properties directly.
+// Feature-specific state is grouped into namespace objects.
+// A Proxy provides backward compatibility: `app.cicdRuns` → `app.cicd.runs`.
 
 const _themeManual = !!localStorage.getItem('dl-theme');
 
-export const app = {
-  // Core data
+const _app = {
+  // ─── Core (flat — used across many modules) ───
   state: { projects: new Map(), costs: null, usage: null, connected: false },
   projectList: [],
   prevSessionStates: new Map(),
-
-  // WebSocket
   ws: null,
 
   // Terminal
@@ -38,39 +38,20 @@ export const app = {
   dailyChart: null,
   modelChart: null,
 
-  // SSE
+  // SSE reconnect
   _sseBackoff: 1000,
   _sseReconnTimer: null,
   _sseConnectedAt: 0,
 
-  // WS
+  // WS reconnect
   _wsBackoff: 1000,
   _wsReconnTimer: null,
   _wsConnectedAt: 0,
-
-  // Diff
-  _diffAbort: null,
-  _diffDebounceTimer: null,
-  _diffStagedCount: 0,
-  _acPlan: null,
-  _acExecuting: false,
-  _acDragFile: null,
-  _acBranchInfo: null,
-
-  // Branch picker
-  _branchData: null,
-  _selectedBranch: null,
-
-  // Command palette
-  _cmdActiveIdx: 0,
-  _cmdFiltered: [],
 
   // Project filter
   _projectStatusFilter: 'all',
   _projectTagFilter: '',
   _cardSortBy: localStorage.getItem('dl-card-sort') || 'name',
-
-  // Cards
   _renderedCardIds: [],
 
   // Terminal headers
@@ -94,10 +75,6 @@ export const app = {
   // Error log
   _errorLog: [],
 
-  // Discover
-  _discoverData: [],
-  _discoverSelected: new Set(),
-
   // Notification filter
   _notifFilter: JSON.parse(localStorage.getItem('dl-notif-filter') || '{}'),
 
@@ -110,57 +87,200 @@ export const app = {
   // Fit debounce
   fitDebounce: null,
 
-  // CI/CD
-  cicdRuns: [],
-  cicdWorkflows: [],
-  _cicdProject: null,
-  _cicdLoading: false,
-  _cicdInitialized: false,
-  _cicdDetailRun: null,
-  _cicdPollTimer: null,
+  // ─── Feature Namespaces ───
+  diff: {
+    abort: null,
+    debounceTimer: null,
+    stagedCount: 0,
+    acPlan: null,
+    acExecuting: false,
+    acDragFile: null,
+    acBranchInfo: null,
+    branchData: null,
+    selectedBranch: null,
+  },
 
-  // Monitor
-  monitorStats: null,
-  _monitorTimer: null,
-  _monitorInitialized: false,
-  _monitorPaused: false,
+  cmd: {
+    activeIdx: 0,
+    filtered: [],
+  },
 
-  // Notes
-  notesList: [],
-  _activeNoteId: null,
-  _notesInitialized: false,
-  _notesDirty: false,
-  _notesSaveTimer: null,
-  _notesSaveState: null, // null | 'saving' | 'saved'
+  discover: {
+    data: [],
+    selected: new Set(),
+  },
 
-  // Logs
-  logsFiles: [],
-  logsContent: null,
-  _logsProject: null,
-  _logsActiveFile: null,
-  _logsInitialized: false,
-  _logsFilter: 'all',
-  _logsFollowMode: true,
-  _logsRefreshTimer: null,
+  cicd: {
+    runs: [],
+    workflows: [],
+    project: null,
+    loading: false,
+    initialized: false,
+    detailRun: null,
+    pollTimer: null,
+  },
 
-  // Jira
-  jiraIssues: [],
-  jiraSprints: [],
-  jiraBoards: [],
-  jiraConfig: null,
-  _jiraView: localStorage.getItem('dl-jira-view') || 'list',
-  _jiraFilter: { project: '', sprint: '', status: '', search: '' },
-  _jiraLoading: false,
-  _jiraDetailKey: null,
-  _jiraInitialized: false,
+  monitor: {
+    stats: null,
+    timer: null,
+    initialized: false,
+    paused: false,
+  },
 
-  // Workflows
-  workflowDefs: [],
-  workflowRuns: [],
-  _activeWorkflowDefId: null,
-  _activeWorkflowRunId: null,
-  _workflowsInit: false,
+  ports: {
+    data: [],
+    timer: null,
+    initialized: false,
+    paused: false,
+    search: '',
+    devOnly: false,
+    sortCol: 'port',
+    sortAsc: true,
+  },
+
+  apiTester: {
+    requests: [],
+    activeId: null,
+    initialized: false,
+    method: 'GET',
+    url: '',
+    headers: [],
+    params: [],
+    body: '',
+    bodyType: 'none',
+    configTab: 'params',
+    response: null,
+    loading: false,
+  },
+
+  notes: {
+    list: [],
+    activeId: null,
+    initialized: false,
+    dirty: false,
+    saveTimer: null,
+    saveState: null, // null | 'saving' | 'saved'
+  },
+
+  logs: {
+    files: [],
+    content: null,
+    project: null,
+    activeFile: null,
+    initialized: false,
+    filter: 'all',
+    followMode: true,
+    refreshTimer: null,
+  },
+
+  jira: {
+    issues: [],
+    sprints: [],
+    boards: [],
+    config: null,
+    view: localStorage.getItem('dl-jira-view') || 'list',
+    filter: { project: '', sprint: '', status: '', search: '' },
+    loading: false,
+    detailKey: null,
+    initialized: false,
+  },
+
+  wf: {
+    defs: [],
+    runs: [],
+    activeDefId: null,
+    activeRunId: null,
+    init: false,
+  },
 };
+
+// ─── Backward-Compat Map: old flat name → [namespace, key] ───
+const COMPAT_MAP = {
+  // Diff
+  _diffAbort: ['diff', 'abort'],
+  _diffDebounceTimer: ['diff', 'debounceTimer'],
+  _diffStagedCount: ['diff', 'stagedCount'],
+  _acPlan: ['diff', 'acPlan'],
+  _acExecuting: ['diff', 'acExecuting'],
+  _acDragFile: ['diff', 'acDragFile'],
+  _acBranchInfo: ['diff', 'acBranchInfo'],
+  _branchData: ['diff', 'branchData'],
+  _selectedBranch: ['diff', 'selectedBranch'],
+  // Command palette
+  _cmdActiveIdx: ['cmd', 'activeIdx'],
+  _cmdFiltered: ['cmd', 'filtered'],
+  // Discover
+  _discoverData: ['discover', 'data'],
+  _discoverSelected: ['discover', 'selected'],
+  // CI/CD
+  cicdRuns: ['cicd', 'runs'],
+  cicdWorkflows: ['cicd', 'workflows'],
+  _cicdProject: ['cicd', 'project'],
+  _cicdLoading: ['cicd', 'loading'],
+  _cicdInitialized: ['cicd', 'initialized'],
+  _cicdDetailRun: ['cicd', 'detailRun'],
+  _cicdPollTimer: ['cicd', 'pollTimer'],
+  // Monitor
+  monitorStats: ['monitor', 'stats'],
+  _monitorTimer: ['monitor', 'timer'],
+  _monitorInitialized: ['monitor', 'initialized'],
+  _monitorPaused: ['monitor', 'paused'],
+  // Ports
+  portsData: ['ports', 'data'],
+  _portsTimer: ['ports', 'timer'],
+  _portsInitialized: ['ports', 'initialized'],
+  _portsPaused: ['ports', 'paused'],
+  // Notes
+  notesList: ['notes', 'list'],
+  _activeNoteId: ['notes', 'activeId'],
+  _notesInitialized: ['notes', 'initialized'],
+  _notesDirty: ['notes', 'dirty'],
+  _notesSaveTimer: ['notes', 'saveTimer'],
+  _notesSaveState: ['notes', 'saveState'],
+  // Logs
+  logsFiles: ['logs', 'files'],
+  logsContent: ['logs', 'content'],
+  _logsProject: ['logs', 'project'],
+  _logsActiveFile: ['logs', 'activeFile'],
+  _logsInitialized: ['logs', 'initialized'],
+  _logsFilter: ['logs', 'filter'],
+  _logsFollowMode: ['logs', 'followMode'],
+  _logsRefreshTimer: ['logs', 'refreshTimer'],
+  // Jira
+  jiraIssues: ['jira', 'issues'],
+  jiraSprints: ['jira', 'sprints'],
+  jiraBoards: ['jira', 'boards'],
+  jiraConfig: ['jira', 'config'],
+  _jiraView: ['jira', 'view'],
+  _jiraFilter: ['jira', 'filter'],
+  _jiraLoading: ['jira', 'loading'],
+  _jiraDetailKey: ['jira', 'detailKey'],
+  _jiraInitialized: ['jira', 'initialized'],
+  // Workflows
+  workflowDefs: ['wf', 'defs'],
+  workflowRuns: ['wf', 'runs'],
+  _activeWorkflowDefId: ['wf', 'activeDefId'],
+  _activeWorkflowRunId: ['wf', 'activeRunId'],
+  _workflowsInit: ['wf', 'init'],
+};
+
+export const app = new Proxy(_app, {
+  get(target, prop, receiver) {
+    const mapping = COMPAT_MAP[prop];
+    if (mapping) return target[mapping[0]][mapping[1]];
+    return Reflect.get(target, prop, receiver);
+  },
+  set(target, prop, value) {
+    const mapping = COMPAT_MAP[prop];
+    if (mapping) { target[mapping[0]][mapping[1]] = value; return true; }
+    target[prop] = value;
+    return true;
+  },
+  has(target, prop) {
+    if (prop in COMPAT_MAP) return true;
+    return prop in target;
+  },
+});
 
 // ─── Pub/Sub ───
 const _subscribers = new Map();

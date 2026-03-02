@@ -1,142 +1,111 @@
 // ─── Main Entry Point: imports, init, keyboard shortcuts, window.xxx wiring ───
 import { app } from './state.js';
-import { esc, showToast, simpleMarkdown } from './utils.js';
+import { esc, showToast, simpleMarkdown, fetchJson, fetchText, postJson } from './utils.js';
+import { getClickAction, getChangeAction, getInputAction, registerClickActions, registerChangeActions, registerInputActions } from './actions.js';
 
 // ─── Dashboard module ───
 import {
-  notifySessionChange, updateClock, startClock, connectSSE,
-  updateSummaryStats, switchView, renderCard, cardHTML, renderAllCards,
-  renderSkeletons, setChartPeriod, renderCosts, fetchUsage, renderUsage,
+  startClock, connectSSE,
+  updateSummaryStats, switchView, renderCard, renderAllCards,
+  renderSkeletons, setChartPeriod, fetchUsage,
   updateUsageTimestamp, showConvList, closeConvList, applyTheme, toggleTheme,
-  savePins, togglePin, sortAndRenderProjects, toggleNotifications,
-  isNotifEnabledForProject, saveNotifFilter, toggleProjectNotif,
-  setProjectFilter, filterProjects, fetchAllProjects, pullAllProjects, updateScrollIndicators,
-  jumpToChanges, onVisibilityChange, setProjectSort,
-  setProjectTag, renderTagFilters, addActivity,
-  setupNavOverflow, toggleNavMore, updateEmptyProjectState,
+  setProjectFilter, fetchAllProjects, pullAllProjects, updateScrollIndicators,
+  onVisibilityChange,
+  setProjectTag, renderTagFilters,
+  setupNavOverflow, updateEmptyProjectState,
 } from './dashboard.js';
 
 // ─── Terminal module ───
 import {
-  connectWS, addTerminal, renderLayout, fitAllTerminals, debouncedFit,
+  connectWS, renderLayout, fitAllTerminals,
   updateTermHeaders, debouncedUpdateTermHeaders, closeTerminal,
-  openNewTermModal, createTerminal, openTermWith, showTermCtxMenu,
+  openNewTermModal, openNewTermModalWithSplit, openTermWith,
   toggleTermSearch, closeTermSearch, doTermSearch, exportTerminal,
-  changeTermFontSize, resetTermFontSize, showDisconnectIndicator, setupTermEventDelegation,
-  startRenameHeader, saveLayout, restoreSavedLayout,
-  loadBranchesForTerm, selectBranch, initFileDrop,
-  isMobile, mobileSwitchTerm, mobileCloseTerm,
+  changeTermFontSize, resetTermFontSize, setupTermEventDelegation,
+  loadBranchesForTerm, initFileDrop,
   setupMobileActions, setupMobileSwipe,
   updateTermTheme,
-  toggleCmdPalette, closeCmdPalette,
-  addPreset, removePreset, runPreset, showPresetsDialog,
-  toggleBroadcastMode, toggleBroadcastTarget, isBroadcastMode, broadcastInput,
-  getScrollback, setScrollback, showScrollbackDialog,
+  toggleCmdPalette,
+  toggleBroadcastMode,
 } from './terminal.js';
 
 // ─── Diff module ───
 import {
-  renderDiffTableFull, scrollToDiffPanel, debouncedLoadDiff, loadDiff,
-  diffStageFile, diffUnstageFile, diffDiscardFile,
-  diffStageAll, diffUnstageAll, diffDiscardAll,
-  diffExpandAll, diffCollapseAll, filterDiffFiles,
-  doManualCommit, generateCommitMsg, updateDiffBranchInfo,
-  toggleBranchDropdown, filterBranchDropdown, switchBranch, toggleWorktreeDropdown,
-  startAutoCommit, cancelAutoCommit, executeAutoCommit, doPush,
-  doPull, doFetch, doStash, doStashPop,
-  createBranch, deleteBranch,
-  saveCommitMsg, restoreCommitMsg, clearCommitMsg,
-  showStashList, doStashApply, doStashPopRef, doStashDrop,
+  debouncedLoadDiff, loadDiff,
+  diffExpandAll, diffCollapseAll,
+  doManualCommit,
   renderProjectChips,
-  forgeReviewDiff, forgeFixFromReview,
 } from './diff.js';
 
 // ─── Modals module ───
 import {
-  openSettingsPanel, closeSettingsPanel, saveSettingsGeminiKey,
-  openAddProjectModal, editProject, saveProject, loadPkgScripts, pickScript,
-  toggleFolderPicker, closeFolderPicker, browseTo, selectCurrentFolder,
-  confirmDeleteProject, refreshProjectList, populateProjectSelects,
-  promptDevCmd, setDevCmd, toggleDevServer, showDevServerDialog, updateDevBadge,
-  openIDE, openGitHub, openStartModal, doStartSession,
+  closeSettingsPanel,
+  editProject, populateProjectSelects,
+  promptDevCmd, toggleDevServer, updateDevBadge,
+  openIDE, openGitHub,
   resumeLastSession, showShortcutHelp, hideShortcutHelp,
-  toggleCommandPalette, openCommandPalette, closeCommandPalette,
-  filterCommands, setCmdActive, execCmd, setupCommandPaletteListeners,
-  exportSettings, importSettings,
-  openDiscoverModal, toggleDiscoverItem, toggleDiscoverSelectAll, addDiscoveredProjects,
-  setupErrorLogCapture, openErrorLog, clearErrorLog,
+  toggleCommandPalette, closeCommandPalette,
+  setupCommandPaletteListeners,
+  setupErrorLogCapture,
   openNotifSettings, renderNotifFilterList,
-  showGitLog, showSessionHistory, resumeSessionFromHistory, viewSessionConversation,
+  showGitLog, showSessionHistory,
   openFilePreview, openFilePreviewFromFile, closeFilePreview,
-  copyFilePathToClipboard, copyFileContent, copyFileAsCodeBlock, insertPathToTerminal,
-  hideCtxMenu, showCtxMenu, ICON, getFilePathAtPosition, openInIde, openContainingFolder,
   setupCtxMenuListeners,
 } from './modals.js';
 
 // ─── Jira module ───
 import {
-  initJira, testJiraConnection, saveJiraSetup, openJiraSettings,
-  loadJiraIssues, setJiraView, filterJiraByProject, filterJiraBySprint,
-  filterJiraByStatus, filterJiraByType, filterJiraIssues, sortJiraBy,
+  initJira, testJiraConnection, openJiraSettings,
+  loadJiraIssues,
   showIssueDetail, closeIssueDetail,
-  changeIssueStatus, addJiraComment, handleBoardDrop,
-  filterJiraBySprintChip, forgeFromJira,
 } from './jira.js';
 
 // ─── CI/CD module ───
 import {
-  initCicd, loadCicdRuns, filterCicdByProject, filterCicdByWorkflow,
-  showCicdDetail, closeCicdDetail, rerunCicd, cancelCicdRun, viewCicdLogs,
-  forgeFixCicd,
+  initCicd, loadCicdRuns,
+  closeCicdDetail,
 } from './cicd.js';
 
 // ─── Notes module ───
-import {
-  initNotes, selectNote, createNewNote, deleteCurrentNote,
-  switchNoteTab, onNoteChange, searchNotes, mdInsert,
-} from './notes.js';
+import { initNotes } from './notes.js';
 
 // ─── Workflows module ───
 import {
   initWorkflows, loadWorkflowDefs, loadWorkflowRuns,
-  selectWorkflowDef, startWorkflowRun, stopWorkflowRun,
-  selectWorkflowRun, toggleStepOutput, copyWorkflowOutput,
-  copyStepOutput, rerunWorkflow, toggleRawOutput, filterWorkflowRuns,
-  handleWorkflowEvent, wfAutoFill, wfApplyRecent, wfProjectChanged,
+  handleWorkflowEvent,
 } from './workflows.js';
 
 // ─── Agent module ───
 import {
-  initAgent, initWakeWord, sendAgentMessage, stopAgentLoop, toggleVoiceInput, toggleTTS,
-  newAgentConversation, handleAgentEvent, agentInputKeydown,
-  setTTSVolume, setTTSRate, setTTSPitch, toggleVoiceSettings, toggleWakeWord,
-  changeAgentModel, toggleAgentSidebar, switchAgentConversation, deleteAgentConversation,
-  toggleAgentPanel, isAgentPanelOpen, showAgentFabBadge,
-  openAiSettings, testAiKey, saveAiConfig,
+  initWakeWord,
+  handleAgentEvent, agentInputKeydown,
+  toggleVoiceSettings, toggleWakeWord,
+  toggleAgentPanel, isAgentPanelOpen,
 } from './agent.js';
 
 // ─── Forge module ───
 import {
-  initForge, showForgeNewTask, openForgeWithPrefill, selectForgePlan,
-  selectForgeMode, selectForgePreset, selectForgeBudget, onForgeBudgetInput,
-  submitForgeTask, selectForgeRun, stopForgeRun, applyForgeResult,
-  toggleForgeAutoScroll, handleForgeEvent,
+  initForge, openForgeWithPrefill,
+  handleForgeEvent,
 } from './forge.js';
 
-// ─── Dashboard new features (Phase 1-3, 5) ───
-import {
-  showSessionTimeline, loadBriefing, checkSmartAlerts,
-  showBatchModal, toggleBatchAll, executeBatchCmd,
-} from './dashboard.js';
+// ─── Dashboard new features ───
+import { loadBriefing, checkSmartAlerts } from './dashboard.js';
+
+// ─── PR module ───
+import { initPR } from './pr.js';
 
 // ─── Logs module ───
-import {
-  initLogs, filterLogsByProject, selectLogFile, filterLogLevel,
-  searchLogs, toggleLogsFollow, refreshLogs,
-} from './logs.js';
+import { initLogs } from './logs.js';
 
 // ─── Monitor module ───
 import { initMonitor } from './monitor.js';
+
+// ─── Ports module ───
+import { initPorts, refreshPorts, togglePortPause, filterPortSearch, toggleDevFilter } from './ports.js';
+
+// ─── API Tester module ───
+import { initApiTester } from './api-tester.js';
 
 // ─── README Content ───
 const README_CONTENT = `# Cockpit
@@ -936,17 +905,19 @@ window.handleWorkflowEvent = handleWorkflowEvent;
 window.initJira = initJira;
 window.initCicd = initCicd;
 window.initNotes = initNotes;
+window.initPR = initPR;
 window.initWorkflows = initWorkflows;
 window.initForge = initForge;
 window.initLogs = initLogs;
 window.initMonitor = initMonitor;
+window.initPorts = initPorts;
+window.initApiTester = initApiTester;
 
 async function showMobileConnect() {
   const dlg = document.getElementById('mobile-connect-dialog');
   if (!dlg) return;
   try {
-    const r = await fetch('/api/lan-info');
-    const info = await r.json();
+    const info = await fetchJson('/api/lan-info');
     if (!info.ips?.length) {
       document.getElementById('mobile-connect-url').textContent = 'No network interface found';
       dlg.showModal();
@@ -978,8 +949,7 @@ async function showMobileConnect() {
     // Fetch QR SVG and inject directly
     const qrContainer = document.getElementById('qr-container');
     try {
-      const qrRes = await fetch(`/api/qr-code?data=${encodeURIComponent(url)}`);
-      const svgText = await qrRes.text();
+      const svgText = await fetchText(`/api/qr-code?data=${encodeURIComponent(url)}`);
       qrContainer.innerHTML = svgText;
       // Force SVG to fit container
       const svgEl = qrContainer.querySelector('svg');
@@ -998,134 +968,41 @@ function copyMobileUrl() {
 }
 
 
-// ─── Global Event Delegation for static HTML elements ───
+// ─── Register main.js-local actions ───
+registerClickActions({
+  'show-mobile-connect': showMobileConnect,
+  'copy-mobile-url': copyMobileUrl,
+  'hard-refresh': hardRefresh,
+  'goto-jira-settings': () => { closeSettingsPanel(); switchView('jira'); setTimeout(() => openJiraSettings(), 100); },
+  // Ports
+  'port-refresh': refreshPorts,
+  'port-toggle-pause': togglePortPause,
+});
+registerInputActions({
+  'port-search': (el) => filterPortSearch(el.value),
+});
+registerChangeActions({
+  'port-filter-dev': (el) => toggleDevFilter(el.checked),
+});
+
+// ─── Global Event Delegation (registry-based) ───
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-action]');
   if (!el) return;
-  const a = el.dataset.action;
-  switch (a) {
-    // Nav
-    case 'switch-view': switchView(el.dataset.view); break;
-    case 'toggle-nav-more': toggleNavMore(); break;
-    // Header
-    case 'show-dev-dialog': showDevServerDialog(); break;
-    case 'toggle-notifications': toggleNotifications(); break;
-    case 'open-notif-settings': openNotifSettings(); break;
-    case 'open-error-log': openErrorLog(); break;
-    case 'hard-refresh': hardRefresh(); break;
-    case 'toggle-theme': toggleTheme(); break;
-    case 'show-mobile-connect': showMobileConnect(); break;
-    case 'open-settings': openSettingsPanel(); break;
-    // Dashboard
-    case 'toggle-activity-log': document.getElementById('activity-log-list')?.classList.toggle('collapsed'); break;
-    case 'set-project-filter': setProjectFilter(el.dataset.filterVal); break;
-    case 'open-add-project': openAddProjectModal(); break;
-    case 'set-chart-period': setChartPeriod(Number(el.dataset.period)); break;
-    // Terminal
-    case 'toggle-broadcast': toggleBroadcastMode(); break;
-    case 'new-term': openNewTermModal(); break;
-    case 'ts-toggle-case': el.classList.toggle('active'); doTermSearch('next'); break;
-    case 'ts-toggle-regex': el.classList.toggle('active'); doTermSearch('next'); break;
-    case 'term-search-prev': doTermSearch('prev'); break;
-    case 'term-search-next': doTermSearch('next'); break;
-    case 'close-term-search': closeTermSearch(); break;
-    case 'font-size-down': changeTermFontSize(-1); break;
-    case 'font-size-up': changeTermFontSize(1); break;
-    case 'export-terminal': exportTerminal(); break;
-    // Diff toolbar
-    case 'diff-expand-all': diffExpandAll(); break;
-    case 'diff-collapse-all': diffCollapseAll(); break;
-    case 'refresh-diff': loadDiff(); break;
-    case 'start-auto-commit': startAutoCommit(); break;
-    case 'forge-review-diff': forgeReviewDiff(); break;
-    case 'do-pull': doPull(); break;
-    case 'do-fetch': doFetch(); break;
-    case 'do-stash': doStash(); break;
-    case 'do-stash-pop': doStashPop(); break;
-    case 'show-stash-list': showStashList(); break;
-    case 'generate-commit-msg': generateCommitMsg(); break;
-    case 'do-manual-commit': doManualCommit(); break;
-    // CI/CD
-    case 'refresh-cicd': loadCicdRuns(); break;
-    // Notes
-    case 'create-new-note': createNewNote(); break;
-    // Jira
-    case 'test-jira': testJiraConnection(); break;
-    case 'save-jira': saveJiraSetup(); break;
-    case 'set-jira-view': setJiraView(el.dataset.view); break;
-    case 'refresh-jira': loadJiraIssues(); break;
-    case 'open-jira-settings': openJiraSettings(); break;
-    // Workflows
-    case 'refresh-workflows': loadWorkflowDefs(); break;
-    // Dialogs
-    case 'close-dialog': document.getElementById(el.dataset.dialog)?.close(); break;
-    case 'close-parent-dialog': el.closest('dialog')?.close(); break;
-    case 'do-start-session': doStartSession(); break;
-    case 'toggle-folder-picker': toggleFolderPicker(); break;
-    case 'select-current-folder': selectCurrentFolder(); break;
-    case 'load-pkg-scripts': loadPkgScripts(); break;
-    case 'save-project': saveProject(); break;
-    case 'clear-error-log': clearErrorLog(); break;
-    case 'add-discovered': addDiscoveredProjects(); break;
-    // Settings
-    case 'close-settings': closeSettingsPanel(); break;
-    case 'export-settings': exportSettings(); break;
-    case 'import-settings': document.getElementById('import-file')?.click(); break;
-    case 'open-discover': openDiscoverModal(); break;
-    // Overlays
-    case 'close-conv-overlay': if (e.target === el) closeConvList(); break;
-    case 'close-conv-list': closeConvList(); break;
-    case 'close-cmd-palette-overlay': if (e.target === el) closeCommandPalette(); break;
-    case 'close-shortcut-overlay': if (e.target === el) hideShortcutHelp(); break;
-    // Mobile connect
-    case 'copy-mobile-url': copyMobileUrl(); break;
-    // Agent
-    case 'toggle-agent': toggleAgentPanel(); break;
-    case 'toggle-agent-sidebar': toggleAgentSidebar(); break;
-    case 'save-settings-gemini-key': saveSettingsGeminiKey(); break;
-    case 'goto-jira-settings': closeSettingsPanel(); switchView('jira'); setTimeout(() => openJiraSettings(), 100); break;
-    case 'open-ai-settings': openAiSettings(); break;
-    case 'test-ai-key': testAiKey(); break;
-    case 'save-ai-config': saveAiConfig(); break;
-    case 'toggle-wake-word': toggleWakeWord(); break;
-    case 'toggle-voice-input': toggleVoiceInput(); break;
-    case 'toggle-tts': toggleTTS(); break;
-    case 'send-agent-msg': sendAgentMessage(); break;
-    case 'stop-agent': stopAgentLoop(); break;
-    case 'new-agent-conv': newAgentConversation(); break;
-  }
+  const handler = getClickAction(el.dataset.action);
+  if (handler) handler(el, e);
 });
 document.addEventListener('change', e => {
   const a = e.target.dataset.action;
   if (!a) return;
-  switch (a) {
-    case 'set-project-sort': setProjectSort(e.target.value); break;
-    case 'load-diff': loadDiff(); break;
-    case 'cicd-project-filter': filterCicdByProject(e.target.value); break;
-    case 'cicd-workflow-filter': filterCicdByWorkflow(); break;
-    case 'jira-project-filter': filterJiraByProject(e.target.value); break;
-    case 'jira-status-filter': filterJiraByStatus(); break;
-    case 'jira-type-filter': filterJiraByType(); break;
-    case 'change-agent-model': changeAgentModel(e.target.value); break;
-    case 'import-file-change': importSettings(e.target); break;
-  }
+  const handler = getChangeAction(a);
+  if (handler) handler(e.target, e);
 });
 document.addEventListener('input', e => {
   const a = e.target.dataset.action;
   if (!a) return;
-  switch (a) {
-    case 'filter-projects': filterProjects(); break;
-    case 'term-search-input': doTermSearch('next'); break;
-    case 'filter-diff-files': filterDiffFiles(); break;
-    case 'commit-msg-input': { const t = e.target; t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 120) + 'px'; } break;
-    case 'search-notes': searchNotes(e.target.value); break;
-    case 'filter-jira-issues': filterJiraIssues(); break;
-    case 'filter-wf-runs': filterWorkflowRuns(e.target.value); break;
-    case 'agent-input': { const t = e.target; t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, 120) + 'px'; } break;
-    case 'set-tts-volume': setTTSVolume(e.target.value); break;
-    case 'set-tts-rate': setTTSRate(e.target.value); break;
-    case 'set-tts-pitch': setTTSPitch(e.target.value); break;
-  }
+  const handler = getInputAction(a);
+  if (handler) handler(e.target, e);
 });
 document.addEventListener('keydown', e => {
   const a = e.target.dataset.action;
@@ -1154,12 +1031,12 @@ document.addEventListener('keydown', e => {
   if (mod && e.key === '1') { e.preventDefault(); switchView('dashboard'); return; }
   if (mod && e.key === '2') { e.preventDefault(); switchView('terminal'); return; }
   if (mod && e.key === '3') { e.preventDefault(); switchView('diff'); return; }
-  if (mod && e.key === '4') { e.preventDefault(); switchView('jira'); return; }
-  if (mod && e.key === '5') { e.preventDefault(); switchView('cicd'); return; }
-  if (mod && e.key === '6') { e.preventDefault(); switchView('notes'); return; }
-  if (mod && e.key === '7') { e.preventDefault(); switchView('workflows'); return; }
-  if (mod && e.key === '8') { e.preventDefault(); switchView('forge'); return; }
-  if (mod && e.key === '9') { e.preventDefault(); switchView('readme'); return; }
+  if (mod && e.key === '4') { e.preventDefault(); switchView('pr'); return; }
+  if (mod && e.key === '5') { e.preventDefault(); switchView('jira'); return; }
+  if (mod && e.key === '6') { e.preventDefault(); switchView('cicd'); return; }
+  if (mod && e.key === '7') { e.preventDefault(); switchView('notes'); return; }
+  if (mod && e.key === '8') { e.preventDefault(); switchView('workflows'); return; }
+  if (mod && e.key === '9') { e.preventDefault(); switchView('forge'); return; }
   if (mod && e.key === '`') { e.preventDefault(); toggleAgentPanel(); return; }
   if (mod && e.key === 'Tab') {
     if (document.getElementById('terminal-view').classList.contains('active') && app.termMap.size > 1) {
@@ -1327,13 +1204,11 @@ setupCtxMenuListeners();
 async function init() {
   applyTheme(app.currentTheme);
   renderSkeletons(6);
-  let res;
-  try { res = await fetch('/api/projects'); } catch {
-    document.querySelector('.projects-grid').innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-2)">Server unreachable — check if Cockpit server is running on port 3847</div>';
+  try { app.projectList = await fetchJson('/api/projects'); } catch (e) {
+    const msg = e.status ? `Server error ${e.status}` : 'Server unreachable — check if Cockpit server is running on port 3847';
+    document.querySelector('.projects-grid').innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-2)">${msg}</div>`;
     return;
   }
-  if (!res.ok) { document.querySelector('.projects-grid').innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-2)">Server error ${res.status}</div>`; return; }
-  app.projectList = await res.json();
   if (app.pinnedProjects.size > 0) {
     app.projectList.sort((a, b) => {
       const ap = app.pinnedProjects.has(a.id) ? 0 : 1;
@@ -1350,7 +1225,7 @@ async function init() {
   renderProjectChips();
   renderTagFilters();
   updateSummaryStats();
-  try { await fetch('/api/stats').then(r => r.json()); } catch {}
+  try { await fetchJson('/api/stats'); } catch {}
   // (SSE/WS moved to top-level — must connect even if project fetch fails)
   startClock();
   renderReadme();
@@ -1368,7 +1243,7 @@ async function init() {
     nb.textContent = app.notifyEnabled ? 'On' : 'Off';
     nb.className = 'btn' + (app.notifyEnabled ? '' : ' off-btn');
   }
-  fetch('/api/notify/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: app.notifyEnabled }) }).catch(() => {});
+  postJson('/api/notify/toggle', { enabled: app.notifyEnabled }).catch(() => {});
   // Restore chart period
   if (app.chartPeriod !== 30) setChartPeriod(app.chartPeriod);
   // Restore card sort

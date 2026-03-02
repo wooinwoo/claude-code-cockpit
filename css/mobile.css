@@ -1,0 +1,333 @@
+/* ─── Mobile: Bottom Tab Bar ─── */
+@media (max-width: 600px) {
+  header {
+    position: fixed;
+    bottom: 0;
+    top: auto;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+    height: 52px;
+    border-top: 1px solid var(--border);
+    border-bottom: none;
+    padding: 0 4px;
+    flex-direction: row;
+    justify-content: space-between;
+  }
+  .logo { display: none; }
+  .header-right { display: none; }
+  .nav-tabs {
+    flex: 1;
+    justify-content: space-around;
+    background: transparent;
+    border: none;
+    padding: 0;
+    gap: 0;
+  }
+  .nav-tab {
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 8px;
+    font-size: .62rem;
+  }
+  .nav-tab svg { width: 18px; height: 18px; }
+  .nav-tab span.tab-label { display: block; font-size: .58rem; }
+  body { padding-top: 0; padding-bottom: 56px; }
+  .view { height: calc(100vh - 56px); }
+
+  /* Cards: vertical stack */
+  .project-grid {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
+    gap: 8px;
+    padding-bottom: 60px;
+  }
+  .project-grid-wrap { overflow: visible; }
+  .scroll-ind { display: none !important; }
+  .card { min-width: auto; width: 100%; }
+
+  /* Diff: sidebar on top, collapsed */
+  .diff-layout { flex-direction: column; }
+  .diff-sidebar {
+    width: 100%;
+    max-height: 180px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    overflow-y: auto;
+  }
+  .diff-toolbar { flex-wrap: wrap; gap: 4px; padding: 6px 8px; }
+  .diff-toolbar select { max-width: 120px; }
+  .dt-actions { flex-wrap: wrap; }
+  .dl-code { font-size: .7rem; }
+  .dl-gutter { font-size: .6rem; min-width: 28px; }
+
+  /* Terminal mobile: handled by dedicated mobile terminal section below */
+  .term-search input { font-size: .8rem; }
+
+  /* Dialogs: full width on mobile */
+  .stash-dialog, .mobile-connect-dialog { min-width: unset; width: 95vw; }
+
+  /* Project search bar */
+  .project-search-bar { flex-wrap: wrap; gap: 4px; }
+  .project-filter-btns { order: 2; flex-basis: 100%; }
+  .card-sort-select { order: 3; }
+
+  /* Settings panel: full screen */
+  .settings-panel { width: 100vw; max-width: 100vw; height: 100vh; }
+
+  /* ─── More menu: open upward on mobile (bottom nav) ─── */
+  .nav-more-menu {
+    top: auto;
+    bottom: calc(100% + 8px);
+    right: 4px;
+    max-height: 60vh;
+    overflow-y: auto;
+  }
+
+  /* ─── CI/CD table: card-style on mobile ─── */
+  .cicd-toolbar { flex-wrap: wrap; gap: 6px; padding: 8px; }
+  .cicd-toolbar select { flex: 1; min-width: 0; }
+  .cicd-summary { margin-left: 0; width: 100%; justify-content: center; }
+  .cicd-table th:nth-child(5),
+  .cicd-table td:nth-child(5),
+  .cicd-table th:nth-child(6),
+  .cicd-table td:nth-child(6),
+  .cicd-table th:nth-child(7),
+  .cicd-table td:nth-child(7) { display: none; }
+  .cicd-table th { font-size: .65rem; padding: 6px 6px; }
+  .cicd-table td { font-size: .75rem; padding: 6px 6px; }
+  .cicd-detail { width: 100vw; right: -100vw; }
+  .cicd-detail.open { right: 0; }
+
+  /* ─── Notes/Docs: single column on mobile ─── */
+  .docs-layout { flex-direction: column; }
+  .docs-sidebar {
+    width: 100%;
+    max-height: 50vh;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .docs-main { min-width: 0; }
+  .docs-toc { display: none; }
+
+  /* ─── README: single column on mobile ─── */
+  .rm-layout { flex-direction: column; }
+  .rm-sidebar {
+    width: 100%;
+    max-height: 40vh;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .rm-main { min-width: 0; padding: 16px; }
+  .rm-main article { padding: 0; }
+  .rm-toc { display: none; }
+
+  /* ─── Jira toolbar: wrap on mobile ─── */
+  .jira-toolbar { flex-wrap: wrap; gap: 4px; }
+  .jira-toolbar select { flex: 1; min-width: 80px; max-width: 45%; font-size: .75rem; }
+  .jira-toolbar input[type="text"] { width: 100%; order: 10; }
+  .jira-view-toggle { order: 11; }
+
+  /* ─── More menu: Settings divider ─── */
+  .nav-more-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 8px;
+  }
+}
+
+/* ─── Mobile: touch improvements ─── */
+@media (hover: none) and (pointer: coarse) {
+  .btn, .dt-act-btn, .nav-tab, .pf-btn {
+    min-height: 36px;
+    min-width: 36px;
+  }
+  .diff-file-item { padding: 8px 10px; }
+  .fi-actions { gap: 4px; }
+  .fi-action { width: 28px; height: 28px; }
+  .stash-item { padding: 12px 16px; }
+  .stash-actions .btn { padding: 6px 12px; min-height: 32px; }
+  /* Terminal touch: close button always visible, larger targets */
+  .term-head .th-close { opacity: 1; min-width: 32px; min-height: 28px; }
+  .term-tab { min-height: 32px; }
+}
+
+/* ─── Mobile Terminal: Dedicated UI ─── */
+
+/* Hidden by default on desktop */
+.mob-term-tabs,
+.mob-term-actions {
+  display: none;
+}
+
+/* Mobile Tab Bar */
+@media (max-width: 600px), (hover: none) and (pointer: coarse) and (max-width: 900px) {
+  /* Hide desktop per-terminal headers on mobile (they get in the way) */
+  .term-head { display: none !important; }
+
+  /* Hide split dividers (no splits on mobile) */
+  .split-divider { display: none !important; }
+  .split-container { display: block !important; }
+  .split-child { width: 100% !important; height: 100% !important; }
+  .drop-overlay { display: none !important; }
+
+  /* Mobile tab bar */
+  .mob-term-tabs {
+    display: flex !important;
+    align-items: center;
+    gap: 0;
+    height: 36px;
+    flex-shrink: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    background: var(--bg-0);
+    border-bottom: 1px solid var(--border);
+    scrollbar-width: none;
+  }
+  .mob-term-tabs::-webkit-scrollbar { display: none; }
+
+  .mob-tab {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 14px;
+    height: 36px;
+    border: none;
+    background: transparent;
+    color: var(--text-3);
+    font-size: .75rem;
+    font-family: inherit;
+    white-space: nowrap;
+    flex-shrink: 0;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all .15s ease;
+    position: relative;
+  }
+  .mob-tab.active {
+    color: var(--text-0);
+    background: var(--bg-1);
+    border-bottom-color: var(--accent);
+  }
+  .mob-tab-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .mob-tab-name {
+    max-width: 90px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .mob-tab-add {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text-3);
+    padding: 0 16px;
+    min-width: 44px;
+    justify-content: center;
+  }
+  .mob-tab-add:hover,
+  .mob-tab-add:active {
+    color: var(--accent);
+    background: rgba(99, 102, 241, .08);
+  }
+
+  /* Terminal panels on mobile: full remaining height, no splits */
+  #terminal-view.active {
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    height: calc(100vh - 56px);
+    overflow: hidden;
+  }
+  .term-panels {
+    flex: 1;
+    height: auto !important;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .term-panels .split-leaf {
+    flex: 1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+  }
+  .term-panels .xterm-wrap {
+    flex: 1;
+    min-height: 0;
+  }
+  .term-panels .xterm {
+    height: 100% !important;
+  }
+  .term-panels .xterm-viewport {
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Mobile Quick-Action Bar */
+  .mob-term-actions {
+    display: flex !important;
+    align-items: center;
+    gap: 4px;
+    height: 38px;
+    flex-shrink: 0;
+    padding: 2px 6px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    background: var(--bg-1);
+    border-top: 1px solid var(--border);
+    scrollbar-width: none;
+  }
+  .mob-term-actions::-webkit-scrollbar { display: none; }
+
+  .mob-term-actions button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 30px;
+    min-width: 36px;
+    padding: 0 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-2);
+    color: var(--text-1);
+    font-family: var(--mono);
+    font-size: .72rem;
+    font-weight: 500;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: all .1s ease;
+    -webkit-tap-highlight-color: transparent;
+    user-select: none;
+  }
+  .mob-term-actions button:active,
+  .mob-btn-flash {
+    background: var(--accent) !important;
+    color: #fff !important;
+    border-color: var(--accent) !important;
+    transform: scale(.94);
+  }
+
+  /* Empty state on mobile */
+  .term-empty {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .term-empty .btn {
+    font-size: .85rem;
+    padding: 12px 24px;
+    min-height: 44px;
+  }
+
+  /* Search bar position on mobile */
+  .term-search { top: 36px; }
+}
+

@@ -20,7 +20,16 @@
     <script src="/vendor/addon-webgl.min.js"></script>
     <script src="/vendor/addon-search.min.js"></script>
     <script src="/vendor/addon-image.min.js"></script>
-    <link rel="stylesheet" href="style.css" />
+    <link rel="stylesheet" href="/css/base.css" />
+    <link rel="stylesheet" href="/css/dashboard.css" />
+    <link rel="stylesheet" href="/css/terminal.css" />
+    <link rel="stylesheet" href="/css/diff.css" />
+    <link rel="stylesheet" href="/css/dialogs.css" />
+    <link rel="stylesheet" href="/css/views.css" />
+    <link rel="stylesheet" href="/css/jira.css" />
+    <link rel="stylesheet" href="/css/mobile.css" />
+    <link rel="stylesheet" href="/css/workflows.css" />
+    <link rel="stylesheet" href="/css/agent.css" />
   </head>
   <body>
     <header>
@@ -75,36 +84,50 @@
           </svg>
           Changes
         </button>
-        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="jira-view" title="Jira (Ctrl+4)" data-action="switch-view" data-view="jira">
+        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="pr-view" title="Pull Requests (Ctrl+4)" data-action="switch-view" data-view="pr">
+          <svg viewBox="0 0 24 24">
+            <circle cx="7.5" cy="4.5" r="2.5"/><path d="M7.5 7v10"/><circle cx="7.5" cy="19.5" r="2.5"/><circle cx="16.5" cy="4.5" r="2.5"/><path d="M16.5 7v3a3 3 0 01-3 3h-6"/>
+          </svg>
+          <span class="tab-label">PRs</span>
+        </button>
+        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="jira-view" title="Jira (Ctrl+5)" data-action="switch-view" data-view="jira">
           <svg viewBox="0 0 24 24">
             <path d="M11.53 2c-.55 0-1.07.22-1.46.6L2.6 10.07a2.07 2.07 0 000 2.93l7.47 7.47c.39.38.91.6 1.46.6s1.07-.22 1.46-.6l7.47-7.47a2.07 2.07 0 000-2.93L13 2.6c-.39-.38-.91-.6-1.47-.6z"/>
           </svg>
           Jira
         </button>
-        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="cicd-view" title="CI/CD (Ctrl+5)" data-action="switch-view" data-view="cicd">
+        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="cicd-view" title="CI/CD (Ctrl+6)" data-action="switch-view" data-view="cicd">
           <svg viewBox="0 0 24 24">
             <circle cx="12" cy="12" r="10"/><path d="M8 12l2 2 4-4"/>
           </svg>
           <span class="tab-label">CI/CD</span>
         </button>
-        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="notes-view" title="Docs (Ctrl+6)" data-action="switch-view" data-view="notes">
+        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="notes-view" title="Docs (Ctrl+7)" data-action="switch-view" data-view="notes">
           <svg viewBox="0 0 24 24">
             <path d="M4 19.5A2.5 2.5 0 016.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z"/>
           </svg>
           <span class="tab-label">Docs</span>
         </button>
-        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="workflows-view" title="Workflows (Ctrl+7)" data-action="switch-view" data-view="workflows">
+        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="workflows-view" title="Workflows (Ctrl+8)" data-action="switch-view" data-view="workflows">
           <svg viewBox="0 0 24 24">
             <circle cx="5" cy="12" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="19" cy="19" r="2"/>
             <path d="M7 11l10-5M7 13l10 5"/>
           </svg>
           <span class="tab-label">Workflows</span>
         </button>
-        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="forge-view" title="Forge (Ctrl+8)" data-action="switch-view" data-view="forge">
+        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="forge-view" title="Forge (Ctrl+9)" data-action="switch-view" data-view="forge">
           <svg viewBox="0 0 24 24">
             <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
           </svg>
           <span class="tab-label">Forge</span>
+        </button>
+        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="ports-view" title="Ports" data-action="switch-view" data-view="ports">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+          <span class="tab-label">Ports</span>
+        </button>
+        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="api-tester-view" title="API Tester" data-action="switch-view" data-view="api-tester">
+          <svg viewBox="0 0 24 24"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+          <span class="tab-label">API</span>
         </button>
         <button class="nav-tab" role="tab" aria-selected="false" aria-controls="readme-view" title="README (Ctrl+9)" data-action="switch-view" data-view="readme">
           <svg viewBox="0 0 24 24">
@@ -715,6 +738,28 @@
         </div>
       </div>
 
+      <!-- Pull Requests View -->
+      <div class="view" id="pr-view" role="tabpanel">
+        <div class="pr-toolbar">
+          <select id="pr-project-filter" data-action="pr-project-filter">
+            <option value="">All Projects</option>
+          </select>
+          <select id="pr-status-filter" data-action="pr-status-filter">
+            <option value="all">All</option>
+            <option value="open">Open</option>
+            <option value="merged">Merged</option>
+            <option value="closed">Closed</option>
+          </select>
+          <input type="text" class="pr-search" placeholder="Search PRs..." data-action="pr-search">
+          <div class="pr-summary" id="pr-summary"></div>
+          <button class="dt-icon-btn" data-action="refresh-prs" title="Refresh">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-8.36L1 10"/></svg>
+          </button>
+        </div>
+        <div class="pr-content" id="pr-content"></div>
+        <div class="pr-detail" id="pr-detail"></div>
+      </div>
+
       <!-- CI/CD View -->
       <div class="view" id="cicd-view" role="tabpanel">
         <div class="cicd-toolbar">
@@ -881,6 +926,63 @@
       <!-- Forge View -->
       <div class="view" id="forge-view" role="tabpanel">
         <div id="forge-content"></div>
+      </div>
+
+      <!-- Ports View -->
+      <div class="view" id="ports-view" role="tabpanel">
+        <div class="port-toolbar">
+          <div class="port-toolbar-left">
+            <h3 class="port-title">Listening Ports</h3>
+            <input type="text" class="port-search" id="port-search" placeholder="Filter by port or process..." data-action="port-search">
+          </div>
+          <div class="port-toolbar-right">
+            <label class="port-dev-filter"><input type="checkbox" id="port-dev-only" data-action="port-filter-dev"> Dev only</label>
+            <button class="dt-icon-btn" id="port-pause-btn" data-action="port-toggle-pause" title="Pause">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+            </button>
+            <button class="dt-icon-btn" data-action="port-refresh" title="Refresh">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-8.36L1 10"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="port-content" id="port-content"></div>
+      </div>
+
+      <!-- API Tester View -->
+      <div class="view" id="api-tester-view" role="tabpanel">
+        <div class="at-layout">
+          <nav class="at-sidebar" id="at-sidebar">
+            <div class="at-sidebar-head">
+              <span class="at-sidebar-title">Requests</span>
+              <button class="dt-icon-btn" data-action="at-new" title="New Request">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              </button>
+            </div>
+            <div class="at-request-list" id="at-request-list"></div>
+          </nav>
+          <main class="at-main" id="at-main">
+            <div class="at-request-bar">
+              <select class="at-method" id="at-method">
+                <option>GET</option><option>POST</option><option>PUT</option>
+                <option>PATCH</option><option>DELETE</option><option>HEAD</option>
+              </select>
+              <input type="text" class="at-url" id="at-url" placeholder="Enter request URL...">
+              <button class="btn primary at-send-btn" data-action="at-send">Send</button>
+              <button class="dt-icon-btn" data-action="at-save" title="Save request">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+              </button>
+            </div>
+            <div class="at-config-tabs">
+              <button class="at-config-tab active" data-action="at-config-tab" data-tab="params">Params</button>
+              <button class="at-config-tab" data-action="at-config-tab" data-tab="headers">Headers</button>
+              <button class="at-config-tab" data-action="at-config-tab" data-tab="body">Body</button>
+            </div>
+            <div class="at-config-panel" id="at-config-panel"></div>
+            <div class="at-response" id="at-response">
+              <div class="at-empty">Send a request to see the response</div>
+            </div>
+          </main>
+        </div>
       </div>
     </div>
 

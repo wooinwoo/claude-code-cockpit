@@ -1,6 +1,7 @@
 // ─── Dashboard: Overview tab, SSE, stats, cards, charts, usage ───
 import { app } from './state.js';
-import { esc, timeAgo, showToast, fmtTok, timeUntil, row } from './utils.js';
+import { esc, timeAgo, showToast, fmtTok, timeUntil, row, fetchJson, postJson } from './utils.js';
+import { registerClickActions, registerChangeActions, registerInputActions } from './actions.js';
 
 // ─── Notifications ───
 if ('Notification' in window && Notification.permission === 'default') {
@@ -476,6 +477,7 @@ export function switchView(name) {
   const safeInit = (fn) => { try { const r = fn(); if (r?.catch) r.catch(e => console.error('[View]', name, e)); } catch (e) { console.error('[View]', name, e); } };
   if (name === 'terminal') { safeInit(() => window.renderLayout?.()); setTimeout(() => window.fitAllTerminals?.(), 200); }
   if (name === 'diff') safeInit(() => window.loadDiff?.());
+  if (name === 'pr') safeInit(() => window.initPR?.());
   if (name === 'jira') safeInit(() => window.initJira?.());
   if (name === 'cicd') safeInit(() => window.initCicd?.());
   if (name === 'notes') safeInit(() => window.initNotes?.());
@@ -483,6 +485,8 @@ export function switchView(name) {
   if (name === 'forge') safeInit(() => window.initForge?.());
   if (name === 'logs') safeInit(() => window.initLogs?.());
   if (name === 'monitor') safeInit(() => window.initMonitor?.());
+  if (name === 'ports') safeInit(() => window.initPorts?.());
+  if (name === 'api-tester') safeInit(() => window.initApiTester?.());
   try { localStorage.setItem('dl-view', name); } catch {}
 }
 
@@ -506,8 +510,22 @@ export function renderCard(id) {
   }
   if (q('.model-val')) q('.model-val').textContent = s.model || '-';
   if (q('.last-val')) q('.last-val').textContent = s.lastActivity ? timeAgo(s.lastActivity) : '-';
+  // Badges row (stash, worktrees, PRs)
+  const badgesRow = q('.card-badges-row');
+  if (badgesRow) {
+    const badges = [];
+    if (g.stashCount > 0) badges.push(`<span class="card-badge card-badge-stash" title="${g.stashCount} stash${g.stashCount > 1 ? 'es' : ''}"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 002 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0022 16z"/></svg> ${g.stashCount}</span>`);
+    if (g.worktrees?.length > 1) badges.push(`<span class="card-badge card-badge-wt" title="${g.worktrees.length} worktrees"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 22V6a2 2 0 00-2-2H4a2 2 0 00-2 2v12a2 2 0 002 2h12z"/><path d="M22 22V9a2 2 0 00-2-2h-2"/></svg> ${g.worktrees.length}</span>`);
+    if (prs.length) {
+      const approved = prs.filter(pr => pr.reviewDecision === 'APPROVED').length;
+      const changes = prs.filter(pr => pr.reviewDecision === 'CHANGES_REQUESTED').length;
+      const prCls = changes > 0 ? 'card-badge-pr-changes' : approved > 0 ? 'card-badge-pr-ok' : 'card-badge-pr';
+      badges.push(`<span class="card-badge ${prCls}" title="${prs.length} PR${prs.length > 1 ? 's' : ''}${approved ? `, ${approved} approved` : ''}${changes ? `, ${changes} needs changes` : ''}"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 012 2v7"/><path d="M6 9v12"/></svg> ${prs.length}</span>`);
+    }
+    badgesRow.innerHTML = badges.join('');
+  }
   const cl = q('.commits');
-  if (cl && g.recentCommits) cl.innerHTML = g.recentCommits.slice(0, 3).map(c => `<li><span style="color:var(--text-3);opacity:0.7">${esc(c.hash)}</span> ${esc(c.message)}</li>`).join('');
+  if (cl && g.recentCommits) cl.innerHTML = g.recentCommits.slice(0, 3).map(c => `<li><span class="commit-hash">${esc(c.hash)}</span> <span class="commit-msg">${esc(c.message)}</span><span class="commit-ago">${esc(c.ago)}</span></li>`).join('');
   const pl = q('.pr-list');
   if (pl) pl.innerHTML = prs.length ? prs.slice(0, 2).map(pr => `<div class="pr-item"><span class="pr-num">#${pr.number}</span><span class="pr-title">${esc(pr.title)}</span><span class="pr-review ${pr.reviewDecision}">${pr.reviewDecision === 'APPROVED' ? 'OK' : pr.reviewDecision === 'CHANGES_REQUESTED' ? 'Changes' : 'Pending'}</span></div>`).join('') : '';
   const resumeBtn = document.getElementById(`resume-last-${id}`);
@@ -565,6 +583,7 @@ export function cardHTML(p) {
           </div>
         </div>
         <div style="margin-bottom:4px"><span class="status no_data"><span class="dot"></span>Loading</span></div>
+        <div class="card-badges-row"></div>
         <div class="card-info">
           <div class="info-row"><span class="info-label">Branch</span><span class="info-value branch branch-val">-</span></div>
           <div class="info-row"><span class="info-label">Uncommitted</span><span class="info-value uncommitted-val" data-action="jump-changes" data-id="${p.id}" title="View changes">-</span></div>
@@ -640,13 +659,13 @@ function openInFirefoxDev(projectId) {
   const dsInfo = app.devServerState?.find(d => d.projectId === projectId);
   const url = dsInfo?.port ? `http://localhost:${dsInfo.port}` : null;
   if (url) {
-    fetch('/api/open-url', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url, browser: 'firefox-dev' }) })
+    postJson('/api/open-url', { url, browser: 'firefox-dev' })
       .then(() => showToast(`Firefox Dev → localhost:${dsInfo.port}`))
       .catch(() => showToast('Failed to open', 'error'));
   } else {
     const input = prompt('No dev server running. Enter URL to open in Firefox Developer Edition:', 'http://localhost:3000');
     if (input) {
-      fetch('/api/open-url', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: input, browser: 'firefox-dev' }) })
+      postJson('/api/open-url', { url: input, browser: 'firefox-dev' })
         .then(() => showToast(`Firefox Dev → ${input}`))
         .catch(() => showToast('Failed to open', 'error'));
     }
@@ -720,10 +739,7 @@ export function renderCosts() {
 
 // ─── Usage Dashboard ───
 export function fetchUsage() {
-  fetch('/api/usage').then(r => {
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    return r.json();
-  }).then(data => {
+  fetchJson('/api/usage').then(data => {
     app.state.usage = data;
     app._usageLastUpdated = Date.now();
     app._usageRetryCount = 0;
@@ -811,8 +827,7 @@ export async function showConvList() {
   body.innerHTML = '<div class="conv-empty">Loading...</div>';
   overlay.classList.remove('hidden');
   try {
-    const res = await fetch('/api/activity');
-    const data = await res.json();
+    const data = await fetchJson('/api/activity');
     if (!data.length) { body.innerHTML = '<div class="conv-empty">No recent conversations</div>'; return; }
     let html = '', lastDate = '';
     for (const e of data) {
@@ -926,7 +941,7 @@ export function toggleNotifications() {
     btn.className = 'btn' + (app.notifyEnabled ? '' : ' off-btn');
   }
   showToast(app.notifyEnabled ? 'Notifications enabled' : 'Notifications disabled', 'info');
-  fetch('/api/notify/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: app.notifyEnabled }) }).catch(() => {});
+  postJson('/api/notify/toggle', { enabled: app.notifyEnabled }).catch(() => {});
 }
 
 // ─── Notification Filter (per-project) ───
@@ -1029,7 +1044,7 @@ export async function fetchAllProjects() {
   let ok = 0, fail = 0;
   const total = app.projectList.length;
   const update = () => { btn.textContent = `Fetching... ${ok + fail}/${total}`; };
-  const promises = app.projectList.map(p => fetch(`/api/projects/${p.id}/fetch`, { method: 'POST' }).then(r => r.json()).then(d => { if (d.error) fail++; else ok++; update(); }).catch(() => { fail++; update(); }));
+  const promises = app.projectList.map(p => postJson(`/api/projects/${p.id}/fetch`, {}).then(d => { if (d.error) fail++; else ok++; update(); }).catch(() => { fail++; update(); }));
   await Promise.all(promises);
   btn.disabled = false;
   btn.textContent = 'Fetch All';
@@ -1043,7 +1058,7 @@ export async function pullAllProjects() {
   let ok = 0, fail = 0;
   const total = app.projectList.length;
   const update = () => { btn.textContent = `Pulling... ${ok + fail}/${total}`; };
-  const promises = app.projectList.map(p => fetch(`/api/projects/${p.id}/pull`, { method: 'POST' }).then(r => r.json()).then(d => { if (d.error) fail++; else ok++; update(); }).catch(() => { fail++; update(); }));
+  const promises = app.projectList.map(p => postJson(`/api/projects/${p.id}/pull`, {}).then(d => { if (d.error) fail++; else ok++; update(); }).catch(() => { fail++; update(); }));
   await Promise.all(promises);
   btn.disabled = false;
   btn.textContent = 'Pull All';
@@ -1075,7 +1090,7 @@ export function onVisibilityChange() {
     updateClock();
     if (!app.usageTimer) app.usageTimer = setInterval(fetchUsage, 60000);
   }
-  fetch('/api/polling-speed', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ multiplier: document.hidden ? 5 : 1 }) }).catch(() => {});
+  postJson('/api/polling-speed', { multiplier: document.hidden ? 5 : 1 }).catch(() => {});
 }
 
 // ─── Session Elapsed Timer ───
@@ -1192,7 +1207,7 @@ export async function showSessionTimeline(projectId, sessionId) {
   document.body.appendChild(overlay);
 
   try {
-    const data = await fetch(`/api/projects/${projectId}/sessions/${sessionId}/timeline`).then(r => r.json());
+    const data = await fetchJson(`/api/projects/${projectId}/sessions/${sessionId}/timeline`);
     if (data.error) throw new Error(data.error);
 
     const body = overlay.querySelector('.modal-body');
@@ -1234,7 +1249,7 @@ export async function loadBriefing() {
   }
 
   try {
-    const data = await fetch('/api/briefing').then(r => r.json());
+    const data = await fetchJson('/api/briefing');
     if (!data || data.items?.length === 0) { banner.style.display = 'none'; return; }
 
     banner.style.display = '';
@@ -1265,10 +1280,10 @@ export async function loadBriefing() {
 
 export async function checkSmartAlerts() {
   try {
-    const alerts = await fetch('/api/alerts').then(r => r.json());
+    const alerts = await fetchJson('/api/alerts');
     if (!Array.isArray(alerts) || alerts.length === 0) return;
 
-    const prefs = await fetch('/api/alerts/prefs').then(r => r.json());
+    const prefs = await fetchJson('/api/alerts/prefs');
     if (!prefs.enabled) return;
     const disabled = new Set(prefs.disabledProjects || []);
 
@@ -1305,7 +1320,7 @@ export async function showBatchModal() {
   document.body.appendChild(overlay);
 
   try {
-    const whitelist = await fetch('/api/batch/whitelist').then(r => r.json());
+    const whitelist = await fetchJson('/api/batch/whitelist');
     const projects = app.projectList || [];
 
     overlay.querySelector('.modal-body').innerHTML = `
@@ -1352,11 +1367,7 @@ export async function executeBatchCmd() {
   }
 
   try {
-    const result = await fetch('/api/batch/execute', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ commandId, projectIds, parallel }),
-    }).then(r => r.json());
+    const result = await postJson('/api/batch/execute', { commandId, projectIds, parallel });
 
     if (result.error) throw new Error(result.error);
 
@@ -1376,3 +1387,22 @@ export async function executeBatchCmd() {
     if (resultsEl) resultsEl.innerHTML = `<div class="batch-error">Error: ${esc(err.message)}</div>`;
   }
 }
+
+// ─── Action Registration ───
+registerClickActions({
+  'switch-view': (el) => switchView(el.dataset.view),
+  'toggle-nav-more': toggleNavMore,
+  'toggle-notifications': toggleNotifications,
+  'toggle-theme': toggleTheme,
+  'set-project-filter': (el) => setProjectFilter(el.dataset.filterVal),
+  'set-chart-period': (el) => setChartPeriod(Number(el.dataset.period)),
+  'toggle-activity-log': () => document.getElementById('activity-log-list')?.classList.toggle('collapsed'),
+  'close-conv-overlay': (el, e) => { if (e.target === el) closeConvList(); },
+  'close-conv-list': closeConvList,
+});
+registerChangeActions({
+  'set-project-sort': (el) => setProjectSort(el.value),
+});
+registerInputActions({
+  'filter-projects': filterProjects,
+});

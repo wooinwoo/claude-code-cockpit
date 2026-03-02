@@ -1,7 +1,8 @@
 // ─── Diff: Changes tab, diff rendering, git ops, auto-commit, branches ───
 import { app } from './state.js';
-import { esc, showToast, DIFF_LINE_LIMIT } from './utils.js';
+import { esc, showToast, DIFF_LINE_LIMIT, fetchJson, postJson } from './utils.js';
 import { highlightLine, getLangFromPath } from './highlight.js';
+import { registerClickActions, registerChangeActions, registerInputActions } from './actions.js';
 
 // ─── Diff Utilities ───
 function parseDiffToFiles(diffText) {
@@ -283,8 +284,7 @@ export async function loadDiff() {
   mainEl.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-3)">Loading...</div>';
   updateDiffBranchInfo();
   try {
-    const res = await fetch(`/api/projects/${projectId}/diff`, { signal });
-    const data = await res.json();
+    const data = await fetchJson(`/api/projects/${projectId}/diff`, { signal });
     const stagedFiles = data.staged?.files || [], unstagedFiles = data.unstaged?.files || [];
     const stagedDiff = data.staged?.diff || '', unstagedDiff = data.unstaged?.diff || '';
     if (!stagedFiles.length && !unstagedFiles.length) {
@@ -320,9 +320,7 @@ async function _diffGitAction(action, files) {
   const projectId = _diffProjectId();
   if (!projectId) return;
   try {
-    const res = await fetch(`/api/projects/${projectId}/git/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ files }) });
-    const data = await res.json();
-    if (data.error) { showToast(data.error, 'error'); return; }
+    await postJson(`/api/projects/${projectId}/git/${action}`, { files });
     loadDiff();
   } catch (err) { showToast(`${action} failed: ${err.message}`, 'error'); }
 }
@@ -369,10 +367,8 @@ export async function doManualCommit() {
   btn.disabled = true; const origHTML = btn.innerHTML;
   btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:acSpin 1s linear infinite;width:13px;height:13px"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>Committing...';
   try {
-    const res = await fetch(`/api/projects/${projectId}/git/commit`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: msg }) });
-    const data = await res.json();
-    if (data.error) showToast('Commit failed: ' + data.error, 'error');
-    else { showToast('Committed: ' + msg, 'success'); document.getElementById('diff-commit-msg').value = ''; }
+    await postJson(`/api/projects/${projectId}/git/commit`, { message: msg });
+    showToast('Committed: ' + msg, 'success'); document.getElementById('diff-commit-msg').value = '';
     loadDiff();
   } catch (err) { showToast('Commit error: ' + err.message, 'error'); }
   btn.disabled = false; btn.innerHTML = origHTML;
@@ -387,10 +383,8 @@ export async function generateCommitMsg() {
   textarea.classList.add('ai-loading'); textarea.value = '';
   textarea.placeholder = '\u2726 AI analyzing staged changes...';
   try {
-    const res = await fetch(`/api/projects/${projectId}/generate-commit-msg`, { method: 'POST' });
-    const data = await res.json();
-    if (data.error) showToast(data.error, 'error');
-    else if (data.message) { textarea.value = data.message; textarea.focus(); textarea.style.height = 'auto'; textarea.style.height = textarea.scrollHeight + 'px'; showToast('Commit message generated', 'success'); }
+    const data = await postJson(`/api/projects/${projectId}/generate-commit-msg`, {});
+    if (data.message) { textarea.value = data.message; textarea.focus(); textarea.style.height = 'auto'; textarea.style.height = textarea.scrollHeight + 'px'; showToast('Commit message generated', 'success'); }
   } catch (err) { showToast('AI error: ' + err.message, 'error'); }
   btn.disabled = false; btn.classList.remove('loading');
   textarea.classList.remove('ai-loading'); textarea.placeholder = 'Commit message (Ctrl+Enter to commit)';
@@ -403,12 +397,14 @@ export async function updateDiffBranchInfo() {
   const projectId = document.getElementById('diff-project')?.value;
   if (!projectId) { el.innerHTML = ''; app._acBranchInfo = null; return; }
   try {
-    const res = await fetch(`/api/projects/${projectId}/git`);
-    const data = await res.json();
+    const data = await fetchJson(`/api/projects/${projectId}/git`);
     app._acBranchInfo = { branch: data.branch || 'unknown', worktrees: data.worktrees || [] };
     const branchSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v12"/><path d="M18 9a3 3 0 100-6 3 3 0 000 6z"/><path d="M6 21a3 3 0 100-6 3 3 0 000 6z"/><path d="M18 9c0 6-12 6-12 12"/></svg>`;
     let html = `<span class="dbi-branch" data-action="toggle-branch-dd">${branchSvg}${esc(data.branch || 'unknown')}<span class="dbi-chevron">\u25BC</span></span>`;
     if (data.worktrees?.length > 1) html += `<span class="dbi-wt" data-action="toggle-wt-dd">${data.worktrees.length} worktrees</span>`;
+    // Stash count badge from SSE data
+    const gitData = app.state.projects.get(projectId)?.git;
+    if (gitData?.stashCount > 0) html += `<span class="dbi-stash" data-action="stash-list" title="View stashes">${gitData.stashCount} stash${gitData.stashCount > 1 ? 'es' : ''}</span>`;
     html += '<div class="branch-dropdown" id="branch-dropdown"></div>';
     el.innerHTML = html;
     if (!el.dataset.delegated) {
@@ -432,8 +428,7 @@ export async function toggleBranchDropdown(e) {
   dd.innerHTML = '<div style="padding:12px;text-align:center;color:var(--text-3);font-size:.76rem">Loading...</div>';
   dd.classList.add('open');
   try {
-    const res = await fetch(`/api/projects/${projectId}/branches`);
-    const data = await res.json();
+    const data = await fetchJson(`/api/projects/${projectId}/branches`);
     const current = data.current || app._acBranchInfo?.branch || '';
     const locals = data.local || [];
     const remotes = (data.remote || []).filter(r => !locals.includes(r.replace(/^origin\//, '')));
@@ -499,10 +494,8 @@ export async function switchBranch(branch) {
   if (branch === app._acBranchInfo?.branch) return;
   showToast(`Switching to ${branch}...`, 'info');
   try {
-    const res = await fetch(`/api/projects/${projectId}/git/checkout`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ branch }) });
-    const data = await res.json();
-    if (data.error) showToast('Switch failed: ' + data.error, 'error');
-    else { showToast(`Switched to ${branch}`, 'success'); loadDiff(); }
+    await postJson(`/api/projects/${projectId}/git/checkout`, { branch });
+    showToast(`Switched to ${branch}`, 'success'); loadDiff();
   } catch (err) { showToast('Switch error: ' + err.message, 'error'); }
 }
 
@@ -514,9 +507,7 @@ export async function startAutoCommit() {
   btn.classList.add('loading');
   btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>Analyzing...`;
   try {
-    const res = await fetch(`/api/projects/${projectId}/auto-commit/plan`, { method: 'POST' });
-    const data = await res.json();
-    if (data.error) { showToast(data.error, 'error'); resetAcBtn(); return; }
+    const data = await postJson(`/api/projects/${projectId}/auto-commit/plan`, {});
     if (!data.commits?.length) { showToast('No changes to commit', 'info'); resetAcBtn(); return; }
     app._acPlan = { projectId, commits: data.commits, pending: [], truncated: !!data.truncated };
     renderAutoCommitPlan();
@@ -649,12 +640,11 @@ export async function executeAutoCommit() {
     const card = document.getElementById(`ac-card-${i}`); if (!card) continue;
     card.classList.add('executing'); card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     try {
-      const res = await fetch(`/api/projects/${projectId}/auto-commit/execute`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: c.message, files: c.files }) });
-      const data = await res.json(); card.classList.remove('executing');
-      if (data.error) { card.classList.add('failed'); card.querySelector('.ac-card-num').textContent = '!'; showToast(`Commit ${i + 1} failed: ${data.error}`, 'error'); failed = true; break; }
+      await postJson(`/api/projects/${projectId}/auto-commit/execute`, { message: c.message, files: c.files });
+      card.classList.remove('executing');
       card.classList.add('done'); card.querySelector('.ac-card-num').innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" width="14" height="14"><polyline points="20 6 9 17 4 12"/></svg>`;
       completed++; progressFill.style.width = Math.round(completed / activeCommits.length * 100) + '%'; progressText.textContent = `${completed}/${activeCommits.length}`;
-    } catch (err) { card.classList.remove('executing'); card.classList.add('failed'); showToast(`Network error: ${err.message}`, 'error'); failed = true; break; }
+    } catch (err) { card.classList.remove('executing'); card.classList.add('failed'); card.querySelector('.ac-card-num').textContent = '!'; showToast(`Commit ${i + 1} failed: ${err.message}`, 'error'); failed = true; break; }
   }
   app._acExecuting = false;
   const footer = document.getElementById('ac-footer');
@@ -669,10 +659,8 @@ export async function doPush(projectId) {
   pushBtn.disabled = true;
   pushBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:acSpin 1s linear infinite"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>Pushing...`;
   try {
-    const res = await fetch(`/api/projects/${projectId}/push`, { method: 'POST' });
-    const data = await res.json();
-    if (data.error) { showToast('Push failed: ' + data.error, 'error'); pushBtn.disabled = false; pushBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 19V5M5 12l7-7 7 7"/></svg>Push`; }
-    else { showToast('Pushed successfully!', 'success'); pushBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>Pushed!`; pushBtn.style.background = 'rgba(16,185,129,.2)'; pushBtn.style.border = '1px solid rgba(16,185,129,.3)'; }
+    await postJson(`/api/projects/${projectId}/push`, {});
+    showToast('Pushed successfully!', 'success'); pushBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>Pushed!`; pushBtn.style.background = 'rgba(16,185,129,.2)'; pushBtn.style.border = '1px solid rgba(16,185,129,.3)';
   } catch (err) { showToast('Push error: ' + err.message, 'error'); pushBtn.disabled = false; pushBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 19V5M5 12l7-7 7 7"/></svg>Push`; }
 }
 
@@ -689,8 +677,8 @@ export function doPull() {
     const pid = getDiffProjectId(); if (!pid) return showToast('Select a project first', 'error');
     const btn = document.getElementById('dt-pull-btn'); btn.classList.add('loading'); btn.disabled = true; btn.textContent = 'Pulling...';
     try {
-      const res = await fetch(`/api/projects/${pid}/pull`, { method: 'POST' }); const data = await res.json();
-      if (data.error) showToast('Pull failed: ' + data.error, 'error'); else { showToast('Pull complete', 'success'); loadDiff(); }
+      await postJson(`/api/projects/${pid}/pull`, {});
+      showToast('Pull complete', 'success'); loadDiff();
     } catch (err) { showToast('Pull error: ' + err.message, 'error'); }
     btn.classList.remove('loading'); btn.disabled = false;
     btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M19 12l-7 7-7-7"/></svg>Pull`;
@@ -702,8 +690,8 @@ export function doFetch() {
     const pid = getDiffProjectId(); if (!pid) return showToast('Select a project first', 'error');
     const btn = document.getElementById('dt-fetch-btn'); btn.classList.add('loading'); btn.disabled = true; btn.textContent = 'Fetching...';
     try {
-      const res = await fetch(`/api/projects/${pid}/fetch`, { method: 'POST' }); const data = await res.json();
-      if (data.error) showToast('Fetch failed: ' + data.error, 'error'); else showToast('Fetch complete', 'success');
+      await postJson(`/api/projects/${pid}/fetch`, {});
+      showToast('Fetch complete', 'success');
     } catch (err) { showToast('Fetch error: ' + err.message, 'error'); }
     btn.classList.remove('loading'); btn.disabled = false;
     btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Fetch`;
@@ -714,9 +702,8 @@ export function doStash() {
   withGitActionLock('stash', async () => {
     const pid = getDiffProjectId(); if (!pid) return showToast('Select a project first', 'error');
     try {
-      const res = await fetch(`/api/projects/${pid}/git/stash`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ includeUntracked: true }) });
-      const data = await res.json();
-      if (data.error) showToast('Stash failed: ' + data.error, 'error'); else { showToast('Changes stashed', 'success'); loadDiff(); }
+      await postJson(`/api/projects/${pid}/git/stash`, { includeUntracked: true });
+      showToast('Changes stashed', 'success'); loadDiff();
     } catch (err) { showToast('Stash error: ' + err.message, 'error'); }
   });
 }
@@ -725,8 +712,8 @@ export function doStashPop() {
   withGitActionLock('stash-pop', async () => {
     const pid = getDiffProjectId(); if (!pid) return showToast('Select a project first', 'error');
     try {
-      const res = await fetch(`/api/projects/${pid}/git/stash-pop`, { method: 'POST' }); const data = await res.json();
-      if (data.error) showToast('Stash pop failed: ' + data.error, 'error'); else { showToast('Stash popped', 'success'); loadDiff(); }
+      await postJson(`/api/projects/${pid}/git/stash-pop`, {});
+      showToast('Stash popped', 'success'); loadDiff();
     } catch (err) { showToast('Stash pop error: ' + err.message, 'error'); }
   });
 }
@@ -738,20 +725,16 @@ export async function createBranch(projectId) {
   if (!name) return showToast('Enter a branch name', 'error');
   if (!/^[a-zA-Z0-9._\-/]+$/.test(name)) return showToast('Invalid branch name', 'error');
   try {
-    const res = await fetch(`/api/projects/${projectId}/git/create-branch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ branch: name }) });
-    const data = await res.json();
-    if (data.error) showToast('Create failed: ' + data.error, 'error');
-    else { showToast(`Branch '${name}' created`, 'success'); input.value = ''; loadDiff(); updateDiffBranchInfo(); }
+    await postJson(`/api/projects/${projectId}/git/create-branch`, { branch: name });
+    showToast(`Branch '${name}' created`, 'success'); input.value = ''; loadDiff(); updateDiffBranchInfo();
   } catch (err) { showToast('Create error: ' + err.message, 'error'); }
 }
 
 export async function deleteBranch(projectId, branch) {
   if (!confirm(`Delete branch '${branch}'?`)) return;
   try {
-    const res = await fetch(`/api/projects/${projectId}/git/delete-branch`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ branch }) });
-    const data = await res.json();
-    if (data.error) showToast('Delete failed: ' + data.error, 'error');
-    else { showToast(`Branch '${branch}' deleted`, 'success'); updateDiffBranchInfo(); }
+    await postJson(`/api/projects/${projectId}/git/delete-branch`, { branch });
+    showToast(`Branch '${branch}' deleted`, 'success'); updateDiffBranchInfo();
   } catch (err) { showToast('Delete error: ' + err.message, 'error'); }
 }
 
@@ -771,8 +754,7 @@ export async function showStashList() {
   body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-3)">Loading...</div>';
   dialog.showModal();
   try {
-    const res = await fetch(`/api/projects/${pid}/stash-list`);
-    const data = await res.json();
+    const data = await fetchJson(`/api/projects/${pid}/stash-list`);
     if (!data.stashes?.length) {
       body.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-3)">No stashes</div>';
       return;
@@ -810,26 +792,16 @@ export async function showStashList() {
 export async function doStashApply(ref) {
   const pid = getDiffProjectId(); if (!pid) return;
   try {
-    const res = await fetch(`/api/projects/${pid}/git/stash-apply`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ref })
-    });
-    const data = await res.json();
-    if (data.error) showToast('Stash apply failed: ' + data.error, 'error');
-    else { showToast('Stash applied', 'success'); loadDiff(); }
+    await postJson(`/api/projects/${pid}/git/stash-apply`, { ref });
+    showToast('Stash applied', 'success'); loadDiff();
   } catch (err) { showToast('Error: ' + err.message, 'error'); }
 }
 
 export async function doStashPopRef(ref) {
   const pid = getDiffProjectId(); if (!pid) return;
   try {
-    const res = await fetch(`/api/projects/${pid}/git/stash-pop`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ref })
-    });
-    const data = await res.json();
-    if (data.error) showToast('Stash pop failed: ' + data.error, 'error');
-    else { showToast('Stash popped', 'success'); showStashList(); loadDiff(); }
+    await postJson(`/api/projects/${pid}/git/stash-pop`, { ref });
+    showToast('Stash popped', 'success'); showStashList(); loadDiff();
   } catch (err) { showToast('Error: ' + err.message, 'error'); }
 }
 
@@ -837,13 +809,8 @@ export async function doStashDrop(ref) {
   if (!confirm(`Drop ${ref}? This cannot be undone.`)) return;
   const pid = getDiffProjectId(); if (!pid) return;
   try {
-    const res = await fetch(`/api/projects/${pid}/git/stash-drop`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ref })
-    });
-    const data = await res.json();
-    if (data.error) showToast('Stash drop failed: ' + data.error, 'error');
-    else { showToast('Stash dropped', 'success'); showStashList(); }
+    await postJson(`/api/projects/${pid}/git/stash-drop`, { ref });
+    showToast('Stash dropped', 'success'); showStashList();
   } catch (err) { showToast('Error: ' + err.message, 'error'); }
 }
 
@@ -884,19 +851,12 @@ export async function forgeReviewDiff() {
   if (btn) { btn.disabled = true; btn.textContent = '🔥 Reviewing...'; }
 
   try {
-    const res = await fetch(`/api/projects/${projectId}/diff`);
-    const data = await res.json();
+    const data = await fetchJson(`/api/projects/${projectId}/diff`);
     const diff = ((data.staged?.diff || '') + '\n' + (data.unstaged?.diff || '')).trim();
     if (!diff) { showToast('No changes to review', 'info'); return; }
 
     const allFiles = [...(data.staged?.files || []), ...(data.unstaged?.files || [])];
-    const reviewRes = await fetch('/api/forge/review', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectId, diff, files: allFiles }),
-    });
-    const review = await reviewRes.json();
-    if (review.error) throw new Error(review.error);
+    const review = await postJson('/api/forge/review', { projectId, diff, files: allFiles });
     _showReviewResults(review, projectId);
   } catch (err) {
     showToast('Review failed: ' + err.message, 'error');
@@ -972,3 +932,26 @@ export function forgeFixFromReview() {
     sourceRef: 'review',
   });
 }
+
+// ─── Action Registration ───
+registerClickActions({
+  'diff-expand-all': diffExpandAll,
+  'diff-collapse-all': diffCollapseAll,
+  'refresh-diff': loadDiff,
+  'start-auto-commit': startAutoCommit,
+  'forge-review-diff': forgeReviewDiff,
+  'do-pull': doPull,
+  'do-fetch': doFetch,
+  'do-stash': doStash,
+  'do-stash-pop': doStashPop,
+  'show-stash-list': showStashList,
+  'generate-commit-msg': generateCommitMsg,
+  'do-manual-commit': doManualCommit,
+});
+registerChangeActions({
+  'load-diff': loadDiff,
+});
+registerInputActions({
+  'filter-diff-files': filterDiffFiles,
+  'commit-msg-input': (el) => { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 120) + 'px'; },
+});

@@ -1,6 +1,7 @@
 // ─── CI/CD Module: GitHub Actions Integration ───
 import { app } from './state.js';
-import { esc, showToast, timeAgo } from './utils.js';
+import { esc, showToast, timeAgo, fetchJson, fetchText, postJson } from './utils.js';
+import { registerClickActions, registerChangeActions } from './actions.js';
 
 // ─── Init ───
 export function initCicd() {
@@ -38,10 +39,9 @@ export async function loadCicdRuns() {
   renderCicdLoading();
   try {
     const [runs, workflows] = await Promise.all([
-      fetch(`/api/cicd/runs/${app._cicdProject}`).then(r => r.json()),
-      fetch(`/api/cicd/workflows/${app._cicdProject}`).then(r => r.json()),
+      fetchJson(`/api/cicd/runs/${app._cicdProject}`),
+      fetchJson(`/api/cicd/workflows/${app._cicdProject}`),
     ]);
-    if (runs.error) throw new Error(runs.error);
     app.cicdRuns = Array.isArray(runs) ? runs : [];
     app.cicdWorkflows = Array.isArray(workflows) ? workflows : [];
     renderCicdRuns();
@@ -181,8 +181,7 @@ export async function showCicdDetail(runId) {
     });
   }
   try {
-    const detail = await fetch(`/api/cicd/runs/${app._cicdProject}/${runId}`).then(r => r.json());
-    if (detail.error) throw new Error(detail.error);
+    const detail = await fetchJson(`/api/cicd/runs/${app._cicdProject}/${runId}`);
     renderCicdDetail(detail);
   } catch (err) {
     panel.innerHTML = `<div class="cicd-empty"><div class="je-title">Error</div><div class="je-sub">${esc(err.message)}</div></div>`;
@@ -242,10 +241,7 @@ export function closeCicdDetail() {
 // ─── Actions ───
 export async function rerunCicd(runId, failed) {
   try {
-    await fetch(`/api/cicd/runs/${app._cicdProject}/${runId}/rerun`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ failed })
-    });
+    await postJson(`/api/cicd/runs/${app._cicdProject}/${runId}/rerun`, { failed });
     showToast(failed ? 'Rerunning failed jobs...' : 'Rerunning all jobs...');
     setTimeout(loadCicdRuns, 2000);
   } catch (err) { showToast('Rerun failed: ' + err.message, 'error'); }
@@ -253,7 +249,7 @@ export async function rerunCicd(runId, failed) {
 
 export async function cancelCicdRun(runId) {
   try {
-    await fetch(`/api/cicd/runs/${app._cicdProject}/${runId}/cancel`, { method: 'POST' });
+    await postJson(`/api/cicd/runs/${app._cicdProject}/${runId}/cancel`, {});
     showToast('Run cancelled');
     setTimeout(loadCicdRuns, 1000);
   } catch (err) { showToast('Cancel failed: ' + err.message, 'error'); }
@@ -265,8 +261,7 @@ export async function viewCicdLogs(runId) {
   if (!logsEl) return;
   logsEl.innerHTML = '<div class="cicd-loading">Fetching logs...</div>';
   try {
-    const resp = await fetch(`/api/cicd/runs/${app._cicdProject}/${runId}/logs`);
-    const text = await resp.text();
+    const text = await fetchText(`/api/cicd/runs/${app._cicdProject}/${runId}/logs`);
     logsEl.innerHTML = `<pre class="cd-logs">${esc(text)}</pre>`;
   } catch { logsEl.innerHTML = '<div class="cicd-empty">Failed to load logs</div>'; }
 }
@@ -335,8 +330,7 @@ export async function forgeFixCicd(runId) {
   showToast('Fetching failure logs...', 'info');
 
   try {
-    const resp = await fetch(`/api/cicd/runs/${app._cicdProject}/${runId}/logs`);
-    const logsText = await resp.text();
+    const logsText = await fetchText(`/api/cicd/runs/${app._cicdProject}/${runId}/logs`);
 
     const run = app.cicdRuns?.find(r => r.databaseId === runId);
     const failedJobs = (run?.jobs || [])
@@ -398,3 +392,12 @@ function _extractFilePaths(logs) {
   while ((m = regex.exec(logs)) !== null) paths.add(m[1]);
   return [...paths].slice(0, 10);
 }
+
+// ─── Action Registration ───
+registerClickActions({
+  'refresh-cicd': loadCicdRuns,
+});
+registerChangeActions({
+  'cicd-project-filter': (el) => filterCicdByProject(el.value),
+  'cicd-workflow-filter': filterCicdByWorkflow,
+});

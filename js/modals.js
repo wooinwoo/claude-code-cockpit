@@ -1,7 +1,8 @@
 // ─── Modals: settings, project CRUD, folder picker, dev servers, command palette,
 //     file preview, context menu, error log, discover, notifications, git log, sessions ───
 import { app } from './state.js';
-import { esc, escapeHtml, showToast, timeAgo, fuzzyMatch, IMG_EXT } from './utils.js';
+import { esc, escapeHtml, showToast, timeAgo, fuzzyMatch, IMG_EXT, fetchJson, fetchText, postJson } from './utils.js';
+import { registerClickActions, registerChangeActions } from './actions.js';
 
 // ─── Settings Panel ───
 export function openSettingsPanel() {
@@ -12,8 +13,7 @@ export function openSettingsPanel() {
 }
 async function loadSettingsApiKeys() {
   try {
-    const res = await fetch('/api/ai/config');
-    const data = await res.json();
+    const data = await fetchJson('/api/ai/config');
     const inp = document.getElementById('settings-gemini-key');
     if (inp && data.configured && data.geminiApiKey) {
       inp.value = '';
@@ -26,8 +26,7 @@ export async function saveSettingsGeminiKey() {
   const key = inp?.value?.trim();
   if (!key || key.startsWith('****')) { showToast('새 API key를 입력하세요', 'error'); return; }
   try {
-    const res = await fetch('/api/ai/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ geminiApiKey: key }) });
-    const data = await res.json();
+    const data = await postJson('/api/ai/config', { geminiApiKey: key });
     if (data.success) showToast('Gemini API Key 저장 완료', 'success');
     else showToast(data.error || 'Save failed', 'error');
   } catch (err) { showToast(err.message, 'error'); }
@@ -97,8 +96,7 @@ export async function loadPkgScripts() {
   list.style.display = '';
   list.innerHTML = '<div style="padding:8px 12px;color:var(--text-3);font-size:.78rem">Loading...</div>';
   try {
-    const res = await fetch(`/api/scripts-by-path?path=${encodeURIComponent(pathInput)}`);
-    const data = await res.json();
+    const data = await fetchJson(`/api/scripts-by-path?path=${encodeURIComponent(pathInput)}`);
     const scripts = data.scripts || {};
     const entries = Object.entries(scripts);
     if (!entries.length) {
@@ -150,10 +148,10 @@ export async function saveProject() {
   const tag = document.getElementById('pm-tag').value.trim();
   if (editId) window.setProjectTag?.(editId, tag);
   if (editId) {
-    await fetch(`/api/projects/${editId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    await postJson(`/api/projects/${editId}`, data, { method: 'PUT' });
     showToast('Project updated', 'success');
   } else {
-    await fetch('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
+    await postJson('/api/projects', data);
     showToast('Project added', 'success');
   }
   document.getElementById('project-modal').close();
@@ -184,8 +182,7 @@ export async function browseTo(dir) {
   app.fpCurrentDir = dir;
   const qs = dir ? `?dir=${encodeURIComponent(dir)}` : '';
   try {
-    const res = await fetch(`/api/browse${qs}`);
-    const data = await res.json();
+    const data = await fetchJson(`/api/browse${qs}`);
     if (data.error) { showToast(data.error, 'error'); return; }
     renderBreadcrumb(data.current || null, data.parent);
     const list = document.getElementById('fp-list');
@@ -220,13 +217,12 @@ export function selectCurrentFolder() {
 export async function confirmDeleteProject(id) {
   const p = app.projectList.find(x => x.id === id);
   if (!confirm(`Delete "${p?.name}"? (Dashboard only, not from disk)`)) return;
-  await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+  await fetchJson(`/api/projects/${id}`, { method: 'DELETE' });
   showToast(`${p?.name} removed`, 'info');
   await refreshProjectList();
 }
 export async function refreshProjectList() {
-  const res = await fetch('/api/projects');
-  app.projectList = await res.json();
+  app.projectList = await fetchJson('/api/projects');
   window.renderAllCards?.(app.projectList);
   app.projectList.forEach(p => {
     if (app.state.projects.has(p.id)) window.renderCard?.(p.id);
@@ -283,8 +279,7 @@ export async function promptDevCmd(projectId) {
   _setupDevDialogDelegation(dlg);
   dlg.showModal();
   try {
-    const res = await fetch(`/api/scripts-by-path?path=${encodeURIComponent(p.path)}`);
-    const data = await res.json();
+    const data = await fetchJson(`/api/scripts-by-path?path=${encodeURIComponent(p.path)}`);
     const entries = Object.entries(data.scripts || {});
     let html = '';
     if (entries.length) {
@@ -312,7 +307,7 @@ export async function setDevCmd(projectId, cmd) {
   const p = app.projectList.find(x => x.id === projectId);
   if (!p) return;
   p.devCmd = cmd.trim();
-  await fetch(`/api/projects/${projectId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...p, devCmd: p.devCmd }) });
+  await postJson(`/api/projects/${projectId}`, { ...p, devCmd: p.devCmd }, { method: 'PUT' });
   document.getElementById('dev-dialog').close();
   showToast(`Dev command set: ${cmd.trim()}`, 'success');
   await refreshProjectList();
@@ -321,14 +316,8 @@ export async function toggleDevServer(projectId) {
   const isRunning = app.devServerState.some(d => d.projectId === projectId);
   const endpoint = isRunning ? 'stop' : 'start';
   try {
-    const res = await fetch(`/api/projects/${projectId}/dev-server/${endpoint}`, { method: 'POST' });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      showToast(err.error || 'Dev server action failed', 'error');
-      return;
-    }
-    const listRes = await fetch('/api/dev-servers');
-    const data = await listRes.json();
+    await postJson(`/api/projects/${projectId}/dev-server/${endpoint}`, {});
+    const data = await fetchJson('/api/dev-servers');
     app.devServerState = data.running || [];
     updateDevBadge();
     window.renderCard?.(projectId);
@@ -358,8 +347,7 @@ export async function showDevServerDialog() {
   const content = document.getElementById('dev-dialog-content');
   document.querySelector('#dev-dialog .modal-header h2').textContent = 'Dev Servers';
   try {
-    const res = await fetch('/api/dev-servers');
-    const data = await res.json();
+    const data = await fetchJson('/api/dev-servers');
     if (!data.running?.length) {
       content.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-3)">No dev servers running</div>';
     } else {
@@ -394,11 +382,7 @@ export function updateDevBadge() {
 export function openIDE(projectId, ide) {
   const p = app.projectList.find(x => x.id === projectId);
   if (!p) return;
-  fetch('/api/open-in-ide', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ path: p.path, ide }),
-  }).then(r => r.json()).then(d => {
+  postJson('/api/open-in-ide', { path: p.path, ide }).then(d => {
     if (d.opened) showToast(`Opened in ${ide}`);
     else showToast(d.error || 'Failed', 'error');
   }).catch(() => showToast('Failed to open', 'error'));
@@ -419,11 +403,7 @@ export async function doStartSession() {
   const model = document.getElementById('modal-model').value;
   const prompt = document.getElementById('modal-prompt').value;
   document.getElementById('start-modal').close();
-  await fetch(`/api/sessions/${id}/start`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: model || undefined, prompt: prompt || undefined }),
-  });
+  await postJson(`/api/sessions/${id}/start`, { model: model || undefined, prompt: prompt || undefined });
 }
 
 // ─── Resume Last Session ───
@@ -431,12 +411,7 @@ export async function resumeLastSession(projectId) {
   const p = app.state.projects.get(projectId);
   if (!p?.session?.sessionId) return;
   try {
-    const res = await fetch(`/api/sessions/${projectId}/resume`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId: p.session.sessionId }),
-    });
-    const data = await res.json();
+    const data = await postJson(`/api/sessions/${projectId}/resume`, { sessionId: p.session.sessionId });
     if (data.launched) showToast('Session resumed in Windows Terminal', 'success');
     else showToast(data.error || 'Failed', 'error');
   } catch (err) {
@@ -591,8 +566,7 @@ export function setupCommandPaletteListeners() {
 // ─── Settings Export/Import ───
 export async function exportSettings() {
   try {
-    const res = await fetch('/api/settings/export');
-    const data = await res.json();
+    const data = await fetchJson('/api/settings/export');
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -611,8 +585,7 @@ export async function importSettings(input) {
   try {
     const text = await file.text();
     const data = JSON.parse(text);
-    const res = await fetch('/api/settings/import', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
-    const result = await res.json();
+    const result = await postJson('/api/settings/import', data);
     if (result.error) showToast('Import failed: ' + result.error, 'error');
     else { showToast(`Imported ${result.imported} projects`, 'success'); location.reload(); }
   } catch (err) {
@@ -641,8 +614,7 @@ export async function openDiscoverModal() {
   footer.style.display = 'none';
   dialog.showModal();
   try {
-    const res = await fetch('/api/discover-projects');
-    app._discoverData = await res.json();
+    app._discoverData = await fetchJson('/api/discover-projects');
     renderDiscoverList();
   } catch (err) {
     body.innerHTML = `<div class="discover-empty">Failed to scan: ${esc(err.message)}</div>`;
@@ -703,8 +675,7 @@ export async function addDiscoveredProjects() {
   if (app._discoverSelected.size === 0) { showToast('Select at least one project', 'warn'); return; }
   const projects = [...app._discoverSelected].map(i => app._discoverData[i]).map(p => ({ name: p.name, path: p.path }));
   try {
-    const res = await fetch('/api/discover-projects/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ projects }) });
-    const result = await res.json();
+    const result = await postJson('/api/discover-projects/add', { projects });
     if (result.error) { showToast('Failed: ' + result.error, 'error'); return; }
     showToast(`Added ${result.added} project${result.added > 1 ? 's' : ''}`, 'success');
     document.getElementById('discover-dialog').close();
@@ -805,8 +776,7 @@ export async function showGitLog(projectId) {
   content.innerHTML = '<div style="padding:14px;color:var(--text-3)">Loading\u2026</div>';
   dlg.showModal();
   try {
-    const res = await fetch(`/api/projects/${projectId}/git/log?limit=50`);
-    const data = await res.json();
+    const data = await fetchJson(`/api/projects/${projectId}/git/log?limit=50`);
     if (!data.commits?.length) {
       content.innerHTML = '<div style="padding:14px;color:var(--text-3)">No commits found</div>';
       return;
@@ -843,8 +813,7 @@ export async function showSessionHistory(projectId) {
   content.innerHTML = '<div style="color:var(--text-3)">Loading\u2026</div>';
   dlg.showModal();
   try {
-    const res = await fetch(`/api/projects/${projectId}/sessions`);
-    const sessions = await res.json();
+    const sessions = await fetchJson(`/api/projects/${projectId}/sessions`);
     if (!sessions?.length) {
       content.innerHTML = '<div style="color:var(--text-3)">No sessions found</div>';
       return;
@@ -872,7 +841,7 @@ export async function showSessionHistory(projectId) {
 export async function resumeSessionFromHistory(projectId, sessionId) {
   document.getElementById('session-dialog').close();
   try {
-    await fetch(`/api/sessions/${projectId}/resume`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId }) });
+    await postJson(`/api/sessions/${projectId}/resume`, { sessionId });
     showToast('Resuming session...', 'info');
   } catch (err) {
     showToast('Resume failed: ' + err.message, 'error');
@@ -905,8 +874,7 @@ export async function viewSessionConversation(projectId, sessionId) {
   content.innerHTML = '<div style="color:var(--text-3);padding:20px">Loading conversation...</div>';
   dlg.showModal();
   try {
-    const res = await fetch(`/api/projects/${projectId}/sessions/${sessionId}/messages`);
-    const msgs = await res.json();
+    const msgs = await fetchJson(`/api/projects/${projectId}/sessions/${sessionId}/messages`);
     if (!msgs?.length) {
       content.innerHTML = '<div style="color:var(--text-3);padding:20px">No messages found</div>';
       return;
@@ -1019,8 +987,7 @@ export function openFilePreview(filePath) {
     el.querySelector('.fp-size').textContent = 'Image';
     return;
   }
-  fetch('/api/file?path=' + encodeURIComponent(filePath))
-    .then(r => r.json())
+  fetchJson('/api/file?path=' + encodeURIComponent(filePath))
     .then(data => {
       if (data.error) { body.innerHTML = `<div style="padding:20px;color:var(--red)">${esc(data.error)}</div>`; return; }
       el._content = data.content;
@@ -1103,13 +1070,12 @@ export function getFilePathAtPosition(xterm, x, y) {
   return null;
 }
 export function openInIde(filePath, ide) {
-  fetch('/api/open-in-ide', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: filePath, ide }) })
-    .then(r => r.json())
+  postJson('/api/open-in-ide', { path: filePath, ide })
     .then(d => { if (d.opened) showToast(`Opened in ${ide}`); else showToast(d.error || 'Failed', 'error'); })
     .catch(() => showToast('Failed to open', 'error'));
 }
 export function openContainingFolder(filePath) {
-  fetch('/api/open-folder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: filePath }) })
+  postJson('/api/open-folder', { path: filePath })
     .then(() => showToast('Opened in Explorer'))
     .catch(() => {});
 }
@@ -1117,3 +1083,31 @@ export function setupCtxMenuListeners() {
   document.addEventListener('click', hideCtxMenu);
   document.addEventListener('contextmenu', hideCtxMenu);
 }
+
+// ─── Action Registration ───
+registerClickActions({
+  'show-dev-dialog': showDevServerDialog,
+  'open-notif-settings': openNotifSettings,
+  'open-error-log': openErrorLog,
+  'open-settings': openSettingsPanel,
+  'close-settings': closeSettingsPanel,
+  'export-settings': exportSettings,
+  'import-settings': () => document.getElementById('import-file')?.click(),
+  'open-discover': openDiscoverModal,
+  'add-discovered': addDiscoveredProjects,
+  'open-add-project': openAddProjectModal,
+  'save-project': saveProject,
+  'close-dialog': (el) => document.getElementById(el.dataset.dialog)?.close(),
+  'close-parent-dialog': (el) => el.closest('dialog')?.close(),
+  'do-start-session': doStartSession,
+  'toggle-folder-picker': toggleFolderPicker,
+  'select-current-folder': selectCurrentFolder,
+  'load-pkg-scripts': loadPkgScripts,
+  'clear-error-log': clearErrorLog,
+  'save-settings-gemini-key': saveSettingsGeminiKey,
+  'close-cmd-palette-overlay': (el, e) => { if (e.target === el) closeCommandPalette(); },
+  'close-shortcut-overlay': (el, e) => { if (e.target === el) hideShortcutHelp(); },
+});
+registerChangeActions({
+  'import-file-change': (el) => importSettings(el),
+});

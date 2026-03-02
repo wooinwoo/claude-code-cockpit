@@ -1,6 +1,7 @@
 // ─── Agent Module v3: 9-Tool Agentic UI with Multi-Tool support ───
 import { app } from './state.js';
-import { esc, showToast } from './utils.js';
+import { esc, showToast, fetchJson, postJson } from './utils.js';
+import { registerClickActions, registerChangeActions, registerInputActions } from './actions.js';
 
 const TOOL_ICONS = {
   BASH: '⚡', READ: '📄', SEARCH: '🔍',
@@ -77,8 +78,7 @@ export function showAgentFabBadge() {
 // ─── Model Selection ───
 async function loadModelSetting() {
   try {
-    const res = await fetch('/api/agent/model');
-    const data = await res.json();
+    const data = await fetchJson('/api/agent/model');
     const sel = document.getElementById('agent-model-select');
     if (sel && data.model) sel.value = data.model;
   } catch {}
@@ -86,11 +86,7 @@ async function loadModelSetting() {
 
 export async function changeAgentModel(model) {
   try {
-    await fetch('/api/agent/model', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model })
-    });
+    await postJson('/api/agent/model', { model });
     showToast(`모델 변경: ${model}`, 'success');
   } catch (err) {
     showToast('모델 변경 실패: ' + err.message, 'error');
@@ -107,8 +103,7 @@ export function toggleAgentSidebar() {
 
 async function loadConversationList() {
   try {
-    const res = await fetch('/api/agent/conversations');
-    _convList = await res.json();
+    _convList = await fetchJson('/api/agent/conversations');
     renderConversationList();
   } catch {}
 }
@@ -154,7 +149,7 @@ export async function switchAgentConversation(id) {
 
 export async function deleteAgentConversation(id) {
   try {
-    await fetch(`/api/agent/conversations/${id}`, { method: 'DELETE' });
+    await fetchJson(`/api/agent/conversations/${id}`, { method: 'DELETE' });
     if (id === _convId) {
       _convId = null;
       app._agentMessages = [];
@@ -166,14 +161,12 @@ export async function deleteAgentConversation(id) {
 
 async function loadOrCreateConversation() {
   try {
-    const res = await fetch('/api/agent/conversations');
-    const convs = await res.json();
+    const convs = await fetchJson('/api/agent/conversations');
     if (convs.length) {
       _convId = convs[0].id;
       await loadMessages();
     } else {
-      const r = await fetch('/api/agent/conversations', { method: 'POST' });
-      const data = await r.json();
+      const data = await postJson('/api/agent/conversations', {});
       _convId = data.id;
     }
   } catch { /* ignore */ }
@@ -183,8 +176,7 @@ async function loadOrCreateConversation() {
 async function loadMessages() {
   if (!_convId) return;
   try {
-    const res = await fetch(`/api/agent/conversations/${_convId}`);
-    const conv = await res.json();
+    const conv = await fetchJson(`/api/agent/conversations/${_convId}`);
     app._agentMessages = conv.messages || [];
   } catch { app._agentMessages = []; }
 }
@@ -414,11 +406,7 @@ export async function sendAgentMessage() {
 export async function stopAgentLoop() {
   if (!_running || !_convId) return;
   try {
-    await fetch('/api/agent/stop', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ convId: _convId })
-    });
+    await postJson('/api/agent/stop', { convId: _convId });
   } catch { /* ignore */ }
 }
 
@@ -1217,8 +1205,7 @@ export async function newAgentConversation() {
     await stopAgentLoop();
   }
   try {
-    const res = await fetch('/api/agent/conversations', { method: 'POST' });
-    const data = await res.json();
+    const data = await postJson('/api/agent/conversations', {});
     _convId = data.id;
     app._agentMessages = [];
     _running = false;
@@ -1268,8 +1255,7 @@ export async function openAiSettings() {
   if (!dialog) return;
   // Load current config
   try {
-    const res = await fetch('/api/ai/config');
-    const data = await res.json();
+    const data = await fetchJson('/api/ai/config');
     const inp = document.getElementById('ai-gemini-key');
     if (inp && data.configured) inp.placeholder = data.geminiApiKey || 'AIzaSy...';
   } catch {}
@@ -1286,8 +1272,7 @@ export async function testAiKey() {
   btn.disabled = true; btn.textContent = 'Testing...';
   result.textContent = '';
   try {
-    const res = await fetch('/api/ai/test', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ geminiApiKey: key }) });
-    const data = await res.json();
+    const data = await postJson('/api/ai/test', { geminiApiKey: key });
     if (data.success) { result.textContent = 'Connection successful!'; result.style.color = 'var(--green)'; }
     else { result.textContent = data.error || 'Test failed'; result.style.color = 'var(--red)'; }
   } catch (err) { result.textContent = err.message; result.style.color = 'var(--red)'; }
@@ -1299,11 +1284,34 @@ export async function saveAiConfig() {
   const key = inp?.value?.trim();
   if (!key) { showToast('API key를 입력하세요', 'error'); return; }
   try {
-    const res = await fetch('/api/ai/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ geminiApiKey: key }) });
-    const data = await res.json();
+    const data = await postJson('/api/ai/config', { geminiApiKey: key });
     if (data.success) {
       showToast('AI 설정 저장 완료', 'success');
       document.getElementById('ai-settings-dialog')?.close();
     } else { showToast(data.error || 'Save failed', 'error'); }
   } catch (err) { showToast(err.message, 'error'); }
 }
+
+// ─── Action Registration ───
+registerClickActions({
+  'toggle-agent': toggleAgentPanel,
+  'toggle-agent-sidebar': toggleAgentSidebar,
+  'open-ai-settings': openAiSettings,
+  'test-ai-key': testAiKey,
+  'save-ai-config': saveAiConfig,
+  'toggle-wake-word': toggleWakeWord,
+  'toggle-voice-input': toggleVoiceInput,
+  'toggle-tts': toggleTTS,
+  'send-agent-msg': sendAgentMessage,
+  'stop-agent': stopAgentLoop,
+  'new-agent-conv': newAgentConversation,
+});
+registerChangeActions({
+  'change-agent-model': (el) => changeAgentModel(el.value),
+});
+registerInputActions({
+  'agent-input': (el) => { el.style.height = 'auto'; el.style.height = Math.min(el.scrollHeight, 120) + 'px'; },
+  'set-tts-volume': (el) => setTTSVolume(el.value),
+  'set-tts-rate': (el) => setTTSRate(el.value),
+  'set-tts-pitch': (el) => setTTSPitch(el.value),
+});

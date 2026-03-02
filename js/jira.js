@@ -1,6 +1,7 @@
 // ─── Jira Integration Module ───
 import { app } from './state.js';
 import { esc, showToast, timeAgo, sanitizeHtml } from './utils.js';
+import { registerClickActions, registerChangeActions, registerInputActions } from './actions.js';
 
 let _refreshTimer = null;
 let _sortCol = 'updated';
@@ -48,9 +49,14 @@ export function initJira() {
       document.querySelectorAll('.jira-view-btn').forEach(b => b.classList.toggle('active', b.dataset.view === view));
       if (!app._jiraInitialized) {
         app._jiraInitialized = true;
-        loadJiraIssues();
-        loadJiraProjects();
-        startAutoRefresh();
+        // Validate token before loading data (search API may return 200 with empty even on expired tokens)
+        validateJiraToken().then(valid => {
+          if (valid) {
+            loadJiraIssues();
+            loadJiraProjects();
+            startAutoRefresh();
+          }
+        });
       }
     } else {
       console.warn('[Jira] No config found, showing setup');
@@ -87,6 +93,30 @@ async function jiraFetch(path, opts) {
     throw new Error(msg);
   }
   return res.json();
+}
+
+async function validateJiraToken() {
+  try {
+    await jiraFetch('/api/jira/boards');
+    return true;
+  } catch (e) {
+    if (e instanceof JiraAuthError) {
+      showToast('Jira 토큰이 만료되었습니다', 'error');
+      const container = document.getElementById(`jira-${app._jiraView}-view`);
+      if (container) container.innerHTML = `<div class="jira-auth-error">
+        <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="#ef4444" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="13"/><circle cx="12" cy="16" r="0.5" fill="#ef4444"/></svg>
+        <div class="jae-title">Jira 인증 만료</div>
+        <div class="jae-msg">${esc(e.message)}</div>
+        <div class="jae-hint">Atlassian에서 새 API 토큰을 생성한 후 재설정하세요.</div>
+        <div class="jae-actions">
+          <button class="btn jae-link" data-action="open-atlassian-tokens">Atlassian 토큰 관리</button>
+          <button class="btn jae-btn" data-action="open-jira-settings">토큰 재설정</button>
+        </div>
+      </div>`;
+      return false;
+    }
+    return true; // non-auth errors — proceed anyway
+  }
 }
 
 async function loadJiraConfig() {
@@ -200,7 +230,7 @@ export async function loadJiraIssues() {
         <div class="jae-msg">${esc(e.message)}</div>
         <div class="jae-hint">Atlassian에서 새 API 토큰을 생성한 후 재설정하세요.</div>
         <div class="jae-actions">
-          <a class="btn jae-link" href="https://id.atlassian.com/manage-profile/security/api-tokens" target="_blank" rel="noopener">Atlassian 토큰 관리</a>
+          <button class="btn jae-link" data-action="open-atlassian-tokens">Atlassian 토큰 관리</button>
           <button class="btn jae-btn" data-action="open-jira-settings">토큰 재설정</button>
         </div>
       </div>`;
@@ -911,3 +941,21 @@ export function forgeFromJira(issueKey) {
     sourceRef: issueKey,
   });
 }
+
+// ─── Action Registration ───
+registerClickActions({
+  'test-jira': testJiraConnection,
+  'save-jira': saveJiraSetup,
+  'set-jira-view': (el) => setJiraView(el.dataset.view),
+  'refresh-jira': loadJiraIssues,
+  'open-jira-settings': openJiraSettings,
+  'open-atlassian-tokens': () => fetch('/api/open-url', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: 'https://id.atlassian.com/manage-profile/security/api-tokens' }) }),
+});
+registerChangeActions({
+  'jira-project-filter': (el) => filterJiraByProject(el.value),
+  'jira-status-filter': filterJiraByStatus,
+  'jira-type-filter': filterJiraByType,
+});
+registerInputActions({
+  'filter-jira-issues': filterJiraIssues,
+});

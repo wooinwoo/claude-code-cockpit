@@ -1,6 +1,6 @@
 // ─── Forge Module: Autonomous Development Engine UI ───
 import { app } from './state.js';
-import { esc, showToast, simpleMarkdown } from './utils.js';
+import { esc, showToast, simpleMarkdown, fetchJson, postJson } from './utils.js';
 
 const ROLE_ICONS = {
   architect: '🏗️', critic: '🔍', builder_react: '⚛️', builder_nest: '🐈',
@@ -40,7 +40,7 @@ export function initForge() {
 
 async function loadForgeRuns() {
   try {
-    _forgeRuns = await fetch('/api/forge/runs').then(r => r.json());
+    _forgeRuns = await fetchJson('/api/forge/runs');
     renderRunList();
   } catch {}
 }
@@ -210,13 +210,7 @@ export async function submitForgeTask() {
   const referenceFiles = refsText.split('\n').map(l => l.trim()).filter(Boolean);
 
   try {
-    const result = await fetch('/api/forge/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectId, task, referenceFiles, mode, modelPreset, costLimit }),
-    }).then(r => r.json());
-
-    if (result.error) throw new Error(result.error);
+    const result = await postJson('/api/forge/start', { projectId, task, referenceFiles, mode, modelPreset, costLimit });
 
     _activeTaskId = result.taskId;
     showToast(`Forge started (${FRAMEWORK_LABELS[result.framework] || result.framework})`);
@@ -240,8 +234,7 @@ async function showForgeRunView(taskId) {
 
   let run;
   try {
-    run = await fetch(`/api/forge/runs/${taskId}`).then(r => r.json());
-    if (run.error) throw new Error(run.error);
+    run = await fetchJson(`/api/forge/runs/${taskId}`);
   } catch (err) {
     main.innerHTML = `<div class="forge-empty">Error: ${esc(err.message)}</div>`;
     return;
@@ -338,15 +331,14 @@ function renderForgeResult(run) {
 }
 
 export async function stopForgeRun(taskId) {
-  await fetch(`/api/forge/stop/${taskId}`, { method: 'POST' });
+  await postJson(`/api/forge/stop/${taskId}`, {});
   showToast('Forge stopped');
   setTimeout(() => selectForgeRun(taskId), 500);
 }
 
 export async function applyForgeResult(taskId) {
   try {
-    const result = await fetch(`/api/forge/apply/${taskId}`, { method: 'POST' }).then(r => r.json());
-    if (result.error) throw new Error(result.error);
+    const result = await postJson(`/api/forge/apply/${taskId}`, {});
     const applied = result.filter(r => r.status === 'applied').length;
     showToast(`Applied ${applied} files`);
   } catch (err) {

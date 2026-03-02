@@ -1,6 +1,7 @@
 // ─── Workflows Module: LangGraph workflow management ───
 import { app } from './state.js';
-import { esc, showToast, timeAgo, simpleMarkdown } from './utils.js';
+import { esc, showToast, timeAgo, simpleMarkdown, fetchJson, postJson } from './utils.js';
+import { registerClickActions, registerInputActions } from './actions.js';
 
 // ─── Init ───
 export function initWorkflows() {
@@ -45,8 +46,7 @@ export function initWorkflows() {
 // ─── Load Definitions ───
 export async function loadWorkflowDefs() {
   try {
-    const res = await fetch('/api/workflows');
-    app.workflowDefs = await res.json();
+    app.workflowDefs = await fetchJson('/api/workflows');
   } catch { app.workflowDefs = []; }
   renderDefList();
 }
@@ -54,8 +54,7 @@ export async function loadWorkflowDefs() {
 // ─── Load Runs ───
 export async function loadWorkflowRuns() {
   try {
-    const res = await fetch('/api/workflows/runs');
-    app.workflowRuns = await res.json();
+    app.workflowRuns = await fetchJson('/api/workflows/runs');
   } catch { app.workflowRuns = []; }
   renderRunList();
 }
@@ -347,23 +346,20 @@ export async function wfAutoFill(inputKey, fillType) {
 
   try {
     if (fillType === 'diff') {
-      const res = await fetch(`/api/projects/${projectId}/diff`);
-      const data = await res.json();
+      const data = await fetchJson(`/api/projects/${projectId}/diff`);
       // API returns { staged: { diff, files }, unstaged: { diff, files } }
       let diffText = '';
       if (data.staged?.diff) diffText += data.staged.diff;
       if (data.unstaged?.diff) diffText += (diffText ? '\n\n' : '') + data.unstaged.diff;
       if (!diffText) {
-        const gitRes = await fetch(`/api/projects/${projectId}/git`);
-        const git = await gitRes.json();
+        const git = await fetchJson(`/api/projects/${projectId}/git`);
         diffText = git.status || 'No changes detected';
       }
       field.value = diffText;
       const fileCount = (data.staged?.files?.length || 0) + (data.unstaged?.files?.length || 0);
       showToast(fileCount ? `Loaded diff (${fileCount} files)` : 'No changes', fileCount ? 'success' : 'info');
     } else if (fillType === 'log') {
-      const res = await fetch(`/api/projects/${projectId}/git/log?limit=30`);
-      const data = await res.json();
+      const data = await fetchJson(`/api/projects/${projectId}/git/log?limit=30`);
       const commits = data.commits || [];
       field.value = commits.map(c => `${c.short || c.hash?.slice(0, 7) || '???'} ${c.message || ''}`).join('\n');
       showToast(`Loaded ${commits.length} commits`, 'success');
@@ -372,8 +368,7 @@ export async function wfAutoFill(inputKey, fillType) {
       showToast('Filled project name', 'success');
     } else if (fillType === 'version') {
       try {
-        const res = await fetch(`/api/file?path=${encodeURIComponent(project.path + '/package.json')}`);
-        const pkg = await res.json();
+        const pkg = await fetchJson(`/api/file?path=${encodeURIComponent(project.path + '/package.json')}`);
         const parsed = typeof pkg === 'string' ? JSON.parse(pkg) : pkg;
         field.value = parsed.version || '';
         showToast(`Version: ${parsed.version}`, 'success');
@@ -421,8 +416,7 @@ export async function selectWorkflowDef(id) {
   // Load full definition
   let def;
   try {
-    const res = await fetch(`/api/workflows/${id}`);
-    def = await res.json();
+    def = await fetchJson(`/api/workflows/${id}`);
   } catch { main.innerHTML = '<div class="wf-empty-msg">Failed to load workflow</div>'; return; }
 
   // Cache full definition for startRun
@@ -531,13 +525,7 @@ export async function startWorkflowRun() {
   }
 
   try {
-    const res = await fetch('/api/workflows/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ workflowId: id, inputs })
-    });
-    const data = await res.json();
-    if (data.error) { showToast('Error: ' + data.error, 'error'); return; }
+    const data = await postJson('/api/workflows/run', { workflowId: id, inputs });
     showToast('Workflow started', 'info');
     showImmediateProgress(data.runId, def, inputs);
     setTimeout(() => loadWorkflowRuns(), 500);
@@ -552,24 +540,17 @@ export async function startWorkflowRun() {
 export async function rerunWorkflow(runId) {
   let run;
   try {
-    const res = await fetch(`/api/workflows/runs/${runId}`);
-    run = await res.json();
+    run = await fetchJson(`/api/workflows/runs/${runId}`);
   } catch { showToast('Failed to load run', 'error'); return; }
 
   if (!run?.workflowId || !run?.inputs) { showToast('Missing run data', 'error'); return; }
 
   try {
-    const res = await fetch('/api/workflows/run', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ workflowId: run.workflowId, inputs: run.inputs })
-    });
-    const data = await res.json();
-    if (data.error) { showToast('Error: ' + data.error, 'error'); return; }
+    const data = await postJson('/api/workflows/run', { workflowId: run.workflowId, inputs: run.inputs });
     showToast('Re-run started', 'info');
 
     // Load full def for immediate progress
-    const def = await fetch(`/api/workflows/${run.workflowId}`).then(r => r.json()).catch(() => null);
+    const def = await fetchJson(`/api/workflows/${run.workflowId}`).catch(() => null);
     if (def) {
       showImmediateProgress(data.runId, def, run.inputs);
     }
@@ -582,7 +563,7 @@ export async function rerunWorkflow(runId) {
 // ─── Stop Run ───
 export async function stopWorkflowRun(runId) {
   try {
-    await fetch(`/api/workflows/runs/${runId}/stop`, { method: 'POST' });
+    await postJson(`/api/workflows/runs/${runId}/stop`, {});
     showToast('Workflow stopped', 'info');
   } catch { showToast('Failed to stop', 'error'); }
 }
@@ -622,8 +603,7 @@ export async function selectWorkflowRun(runId) {
 
   let run;
   try {
-    const res = await fetch(`/api/workflows/runs/${runId}`);
-    run = await res.json();
+    run = await fetchJson(`/api/workflows/runs/${runId}`);
   } catch { main.innerHTML = '<div class="wf-empty-msg">Failed to load run</div>'; return; }
 
   renderRunDetail(run);
@@ -911,8 +891,7 @@ const DAY_LABELS = ['일', '월', '화', '수', '목', '금', '토'];
 
 async function loadSchedules() {
   try {
-    const res = await fetch('/api/workflows/schedules');
-    app.workflowSchedules = await res.json();
+    app.workflowSchedules = await fetchJson('/api/workflows/schedules');
   } catch { app.workflowSchedules = []; }
 }
 
@@ -1026,18 +1005,10 @@ async function saveSchedule() {
 
   try {
     if (existing) {
-      await fetch(`/api/workflows/schedules/${existing.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ preset, hour, day, inputs })
-      });
+      await postJson(`/api/workflows/schedules/${existing.id}`, { preset, hour, day, inputs }, { method: 'PUT' });
       showToast('스케줄 수정됨', 'success');
     } else {
-      await fetch('/api/workflows/schedules', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workflowId: id, workflowName: def?.name || id, inputs, preset, hour, day })
-      });
+      await postJson('/api/workflows/schedules', { workflowId: id, workflowName: def?.name || id, inputs, preset, hour, day });
       showToast('스케줄 등록됨', 'success');
     }
     await loadSchedules();
@@ -1052,11 +1023,7 @@ async function toggleSchedule(schedId) {
   const sched = (app.workflowSchedules || []).find(s => s.id === schedId);
   if (!sched) return;
   try {
-    await fetch(`/api/workflows/schedules/${schedId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled: !sched.enabled })
-    });
+    await postJson(`/api/workflows/schedules/${schedId}`, { enabled: !sched.enabled }, { method: 'PUT' });
     showToast(sched.enabled ? '스케줄 일시정지' : '스케줄 활성화', 'info');
     await loadSchedules();
     openSchedulePanel();
@@ -1068,7 +1035,7 @@ async function toggleSchedule(schedId) {
 
 async function deleteSchedule(schedId) {
   try {
-    await fetch(`/api/workflows/schedules/${schedId}`, { method: 'DELETE' });
+    await fetchJson(`/api/workflows/schedules/${schedId}`, { method: 'DELETE' });
     showToast('스케줄 삭제됨', 'info');
     await loadSchedules();
     closeSchedulePanel();
@@ -1077,3 +1044,11 @@ async function deleteSchedule(schedId) {
     showToast('삭제 실패: ' + err.message, 'error');
   }
 }
+
+// ─── Action Registration ───
+registerClickActions({
+  'refresh-workflows': loadWorkflowDefs,
+});
+registerInputActions({
+  'filter-wf-runs': (el) => filterWorkflowRuns(el.value),
+});

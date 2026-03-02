@@ -1,6 +1,10 @@
 // ─── Logs Module: Project Log Viewer ───
 import { app } from './state.js';
-import { esc, showToast } from './utils.js';
+import { esc, showToast, fetchJson } from './utils.js';
+
+let _logWrap = false;
+let _logTailLines = 500;
+let _logRegex = false;
 
 // ─── Init ───
 export function initLogs() {
@@ -37,8 +41,7 @@ async function loadLogFiles() {
   const fileList = document.getElementById('logs-file-list');
   if (fileList) fileList.innerHTML = '<div class="logs-loading-sm">Scanning...</div>';
   try {
-    const files = await fetch(`/api/logs/files/${app._logsProject}`).then(r => r.json());
-    if (files.error) throw new Error(files.error);
+    const files = await fetchJson(`/api/logs/files/${app._logsProject}`);
     app.logsFiles = Array.isArray(files) ? files : [];
     renderLogFileList();
     if (!app.logsFiles.length) {
@@ -86,8 +89,7 @@ async function loadLogContent(path) {
   if (!viewer) return;
   viewer.innerHTML = '<div class="logs-loading">Loading log file...</div>';
   try {
-    const data = await fetch(`/api/logs/tail?path=${encodeURIComponent(path)}&lines=500`).then(r => r.json());
-    if (data.error) throw new Error(data.error);
+    const data = await fetchJson(`/api/logs/tail?path=${encodeURIComponent(path)}&lines=${_logTailLines}`);
     app.logsContent = data;
     renderLogContent();
   } catch (err) {
@@ -122,10 +124,21 @@ function renderLogContent() {
       <div class="logs-file-info">
         <span class="lfi-name">${esc(data.name)}</span>
         <span class="lfi-lines">${data.totalLines.toLocaleString()} lines</span>
-        <span class="lfi-tail">tail -500</span>
+        <select class="logs-tail-select" data-action="change-tail" title="Lines to show">
+          ${[100, 500, 1000, 2000].map(n => `<option value="${n}" ${_logTailLines === n ? 'selected' : ''}>tail -${n}</option>`).join('')}
+        </select>
       </div>
       <div class="logs-filters">${filterBtns}</div>
-      <input type="text" class="logs-search" placeholder="Search logs..." data-action="search-logs">
+      <div class="logs-search-wrap">
+        <input type="text" class="logs-search" placeholder="${_logRegex ? 'Regex...' : 'Search logs...'}" data-action="search-logs">
+        <button class="logs-regex-btn ${_logRegex ? 'active' : ''}" data-action="toggle-regex" title="Regex search">.*</button>
+      </div>
+      <button class="dt-icon-btn ${_logWrap ? 'logs-wrap-active' : ''}" data-action="toggle-wrap" title="Word wrap${_logWrap ? ' (ON)' : ' (OFF)'}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18"/><path d="M3 12h15a3 3 0 110 6h-4"/><polyline points="16 16 14 18 16 20"/><path d="M3 18h7"/></svg>
+      </button>
+      <button class="dt-icon-btn" data-action="export-logs" title="Export visible logs">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      </button>
       <button class="dt-icon-btn ${followActive ? 'logs-follow-active' : ''}" data-action="toggle-follow" title="Follow mode${followActive ? ' (ON)' : ' (OFF)'}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14"/><path d="M19 12l-7 7-7-7"/></svg>
       </button>
@@ -133,7 +146,7 @@ function renderLogContent() {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-8.36L1 10"/></svg>
       </button>
     </div>
-    <div class="logs-output" id="logs-output">${html}</div>
+    <div class="logs-output ${_logWrap ? 'logs-wrap' : ''}" id="logs-output">${html}</div>
   `;
 
   if (!viewer.dataset.delegated) {
@@ -144,9 +157,15 @@ function renderLogContent() {
       if (btn.dataset.action === 'filter-level') filterLogLevel(btn.dataset.level);
       else if (btn.dataset.action === 'toggle-follow') toggleLogsFollow();
       else if (btn.dataset.action === 'refresh') refreshLogs();
+      else if (btn.dataset.action === 'toggle-wrap') toggleLogWrap();
+      else if (btn.dataset.action === 'export-logs') exportLogs();
+      else if (btn.dataset.action === 'toggle-regex') toggleRegex();
     });
     viewer.addEventListener('input', e => {
       if (e.target.dataset.action === 'search-logs') searchLogs(e.target.value);
+    });
+    viewer.addEventListener('change', e => {
+      if (e.target.dataset.action === 'change-tail') changeTailLines(+e.target.value);
     });
   }
   // Auto-scroll to bottom if follow mode
@@ -165,11 +184,22 @@ export function filterLogLevel(level) {
 
 export function searchLogs(query) {
   const lines = document.querySelectorAll('.log-line');
-  const q = query.toLowerCase();
-  lines.forEach(el => {
-    const text = el.querySelector('.log-text')?.textContent.toLowerCase() || '';
-    el.style.display = (!q || text.includes(q)) ? '' : 'none';
-  });
+  if (!query) { lines.forEach(el => { el.style.display = ''; }); return; }
+  if (_logRegex) {
+    try {
+      const rx = new RegExp(query, 'i');
+      lines.forEach(el => {
+        const text = el.querySelector('.log-text')?.textContent || '';
+        el.style.display = rx.test(text) ? '' : 'none';
+      });
+    } catch { /* invalid regex, show all */ lines.forEach(el => { el.style.display = ''; }); }
+  } else {
+    const q = query.toLowerCase();
+    lines.forEach(el => {
+      const text = el.querySelector('.log-text')?.textContent.toLowerCase() || '';
+      el.style.display = text.includes(q) ? '' : 'none';
+    });
+  }
 }
 
 export function toggleLogsFollow() {
@@ -199,6 +229,37 @@ function manageLogsRefresh() {
 
 export function refreshLogs() {
   if (app._logsActiveFile) loadLogContent(app._logsActiveFile);
+}
+
+function toggleLogWrap() {
+  _logWrap = !_logWrap;
+  const output = document.getElementById('logs-output');
+  if (output) output.classList.toggle('logs-wrap', _logWrap);
+  const btn = document.querySelector('[data-action="toggle-wrap"]');
+  if (btn) btn.classList.toggle('logs-wrap-active', _logWrap);
+}
+
+function exportLogs() {
+  const data = app.logsContent;
+  if (!data?.lines?.length) return showToast('No logs to export', 'error');
+  const filtered = filterLines(data.lines);
+  const blob = new Blob([filtered.join('\n')], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (data.name || 'logs') + '.txt';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast(`Exported ${filtered.length} lines`);
+}
+
+function changeTailLines(n) {
+  _logTailLines = n;
+  if (app._logsActiveFile) loadLogContent(app._logsActiveFile);
+}
+
+function toggleRegex() {
+  _logRegex = !_logRegex;
+  renderLogContent();
 }
 
 // ─── Helpers ───
