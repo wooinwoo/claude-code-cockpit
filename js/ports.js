@@ -6,6 +6,10 @@ import { esc, showToast, fetchJson, postJson } from './utils.js';
 export function initPorts() {
   if (app._portsInitialized) {
     if (app.portsData.length) renderPorts();
+    // Restart timer if it was cleared by destroyPorts()
+    if (!app._portsTimer) {
+      app._portsTimer = setInterval(loadPorts, 5000);
+    }
     return;
   }
   app._portsInitialized = true;

@@ -95,14 +95,8 @@ import { loadBriefing, checkSmartAlerts } from './dashboard.js';
 // ─── PR module ───
 import { initPR } from './pr.js';
 
-// ─── Logs module ───
-import { initLogs } from './logs.js';
-
-// ─── Monitor module ───
-import { initMonitor } from './monitor.js';
-
 // ─── Ports module ───
-import { initPorts, refreshPorts, togglePortPause, filterPortSearch, toggleDevFilter } from './ports.js';
+import { initPorts, destroyPorts, refreshPorts, togglePortPause, filterPortSearch, toggleDevFilter } from './ports.js';
 
 // ─── API Tester module ───
 import { initApiTester } from './api-tester.js';
@@ -908,9 +902,8 @@ window.initNotes = initNotes;
 window.initPR = initPR;
 window.initWorkflows = initWorkflows;
 window.initForge = initForge;
-window.initLogs = initLogs;
-window.initMonitor = initMonitor;
 window.initPorts = initPorts;
+window.destroyPorts = destroyPorts;
 window.initApiTester = initApiTester;
 
 async function showMobileConnect() {

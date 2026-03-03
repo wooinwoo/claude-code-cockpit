@@ -475,6 +475,8 @@ export function switchView(name) {
   if (activeTab) { activeTab.classList.add('active'); activeTab.setAttribute('aria-selected', 'true'); }
   setupNavOverflow();
   const safeInit = (fn) => { try { const r = fn(); if (r?.catch) r.catch(e => console.error('[View]', name, e)); } catch (e) { console.error('[View]', name, e); } };
+  // Cleanup timers from views we're leaving
+  if (name !== 'ports') try { window.destroyPorts?.(); } catch {}
   if (name === 'terminal') { safeInit(() => window.renderLayout?.()); setTimeout(() => window.fitAllTerminals?.(), 200); }
   if (name === 'diff') safeInit(() => window.loadDiff?.());
   if (name === 'pr') safeInit(() => window.initPR?.());
@@ -483,8 +485,6 @@ export function switchView(name) {
   if (name === 'notes') safeInit(() => window.initNotes?.());
   if (name === 'workflows') safeInit(() => window.initWorkflows?.());
   if (name === 'forge') safeInit(() => window.initForge?.());
-  if (name === 'logs') safeInit(() => window.initLogs?.());
-  if (name === 'monitor') safeInit(() => window.initMonitor?.());
   if (name === 'ports') safeInit(() => window.initPorts?.());
   if (name === 'api-tester') safeInit(() => window.initApiTester?.());
   try { localStorage.setItem('dl-view', name); } catch {}

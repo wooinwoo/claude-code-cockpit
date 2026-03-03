@@ -15,6 +15,7 @@ import { getGitHubPRs } from './lib/github-service.js';
 import { computeUsage } from './lib/cost-service.js';
 import { Poller } from './lib/poller.js';
 import { showNotification } from './lib/notify.js';
+import { IS_WIN, getShell, killProcessTree, openUrl as platformOpenUrl } from './lib/platform.js';
 import { gitExec, spawnForProject, parseWslPath, toWinPath } from './lib/wsl-utils.js';
 import { init as initWorkflows, listWorkflowDefs, getWorkflowDef, startRun as startWorkflowRun, listRuns as listWorkflowRuns, getRunDetail as getWorkflowRunDetail } from './lib/workflows-service.js';
 import { init as initScheduler } from './lib/workflow-scheduler.js';
@@ -48,12 +49,8 @@ const { WebSocketServer } = require('ws');
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const poller = new Poller();
 
-// Detect PowerShell 7+ (pwsh.exe) — supports && operator
-import { execFileSync } from 'node:child_process';
-let _winShell = 'powershell.exe';
-if (process.platform === 'win32') {
-  try { execFileSync('where', ['pwsh.exe'], { stdio: 'ignore', timeout: 3000 }); _winShell = 'pwsh.exe'; } catch { /* pwsh not found, using powershell.exe */ }
-}
+// Detect default shell (cross-platform)
+const _defaultShell = getShell();
 
 // Prevent server crash from unhandled promise rejections (e.g., msedge-tts WebSocket errors)
 process.on('unhandledRejection', (reason) => {
@@ -686,9 +683,9 @@ function restoreTerminals() {
       shellArgs = ['-d', wsl.distro, '--cd', wsl.linuxPath];
       cwd = process.env.SYSTEMROOT || 'C:\\Windows';
     } else {
-      shell = process.platform === 'win32' ? _winShell : 'bash';
+      shell = _defaultShell;
       shellArgs = [];
-      cwd = toWinPath(project.path);
+      cwd = IS_WIN ? toWinPath(project.path) : project.path;
     }
 
     const term = pty.spawn(shell, shellArgs, {
@@ -743,13 +740,7 @@ function onShutdown() {
   for (const [, t] of terminals) { try { t.pty.kill(); } catch {} }
   // Kill dev server processes
   for (const [, ds] of devServers) {
-    try {
-      if (process.platform === 'win32') {
-        execFile('taskkill', ['/pid', String(ds.process.pid), '/T', '/F'], { timeout: 3000 }, () => {});
-      } else {
-        process.kill(-ds.process.pid, 'SIGTERM');
-      }
-    } catch {}
+    try { killProcessTree(ds.process.pid); } catch {}
   }
   devServers.clear();
 }
@@ -791,9 +782,9 @@ wss.on('connection', (ws) => {
           shellArgs = ['-d', wsl.distro, '--cd', wsl.linuxPath];
           cwd = process.env.SYSTEMROOT || 'C:\\Windows';
         } else {
-          shell = process.platform === 'win32' ? _winShell : 'bash';
+          shell = _defaultShell;
           shellArgs = [];
-          cwd = toWinPath(termPath);
+          cwd = IS_WIN ? toWinPath(termPath) : termPath;
         }
 
         const term = pty.spawn(shell, shellArgs, {
@@ -897,7 +888,7 @@ wss.on('connection', (ws) => {
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`\n  Claude Code Dashboard`);
   console.log(`  http://localhost:${PORT}`);
-  if (process.platform === 'win32') console.log(`  Shell: ${_winShell}`);
+  console.log(`  Shell: ${_defaultShell}`);
   // Show network IPs — M6: mask token in console, show only last 4 chars
   const getNetworkIPs = routeCtx.getNetworkIPs;
   const netIPs = getNetworkIPs ? getNetworkIPs() : [];
@@ -912,7 +903,7 @@ server.listen(PORT, '0.0.0.0', () => {
   }
   console.log('');
   if (!process.argv.includes('--no-open')) {
-    spawn('cmd', ['/c', 'start', `http://localhost:${PORT}`], { detached: true, stdio: 'ignore' }).unref();
+    platformOpenUrl(`http://localhost:${PORT}`);
   }
 }).on('error', (err) => {
   if (err.code === 'EADDRINUSE') {

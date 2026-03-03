@@ -1,11 +1,19 @@
 // ─── API Tester Module ───
 import { app } from './state.js';
 import { esc, showToast, fetchJson, postJson } from './utils.js';
-import { registerClickActions, registerInputActions, registerChangeActions } from './actions.js';
+import { registerClickActions } from './actions.js';
 
 const MAX_HISTORY = 30;
 let _requestHistory = [];
 let _resBodyMode = 'pretty'; // 'pretty' | 'raw'
+
+function _timeAgo(ts) {
+  const d = Date.now() - ts;
+  if (d < 60000) return 'just now';
+  if (d < 3600000) return Math.floor(d / 60000) + 'm ago';
+  if (d < 86400000) return Math.floor(d / 3600000) + 'h ago';
+  return Math.floor(d / 86400000) + 'd ago';
+}
 
 // ─── Init ───
 export function initApiTester() {
@@ -362,7 +370,8 @@ function renderResponse() {
   // History panel
   const historyHtml = _requestHistory.length ? _requestHistory.slice(0, 10).map(h => {
     const sCls = typeof h.status === 'number' ? (h.status < 300 ? 'at-status-2xx' : h.status < 400 ? 'at-status-3xx' : h.status < 500 ? 'at-status-4xx' : 'at-status-5xx') : 'at-status-5xx';
-    return `<div class="at-hist-item"><span class="at-req-method at-method-${h.method.toLowerCase()}">${h.method}</span><span class="at-hist-url" title="${esc(h.url)}">${esc(h.url)}</span><span class="at-status-badge at-status-sm ${sCls}">${h.status}</span><span class="at-res-time">${h.time}ms</span></div>`;
+    const ago = _timeAgo(h.ts);
+    return `<div class="at-hist-item"><span class="at-req-method at-method-${h.method.toLowerCase()}">${h.method}</span><span class="at-hist-url" title="${esc(h.url)}">${esc(h.url)}</span><span class="at-status-badge at-status-sm ${sCls}">${h.status}</span><span class="at-res-time">${h.time}ms</span><span class="at-hist-ts">${ago}</span></div>`;
   }).join('') : '<div class="at-body-none">No history yet</div>';
 
   el.innerHTML = `
@@ -371,9 +380,9 @@ function renderResponse() {
       <span class="at-res-time">${r.time}ms</span>
       <span class="at-res-size">${sizeStr}</span>
       <div class="at-res-tabs">
-        <button class="at-res-tab active" data-action="at-res-tab" data-tab="body">Body</button>
-        <button class="at-res-tab" data-action="at-res-tab" data-tab="headers">Headers ${r.headers ? `(${Object.keys(r.headers).length})` : ''}</button>
-        <button class="at-res-tab" data-action="at-res-tab" data-tab="history">History (${_requestHistory.length})</button>
+        <button class="at-res-tab active" data-action="at-res-tab" data-tab="body" role="tab" aria-selected="true">Body</button>
+        <button class="at-res-tab" data-action="at-res-tab" data-tab="headers" role="tab" aria-selected="false">Headers ${r.headers ? `(${Object.keys(r.headers).length})` : ''}</button>
+        <button class="at-res-tab" data-action="at-res-tab" data-tab="history" role="tab" aria-selected="false">History (${_requestHistory.length})</button>
       </div>
       <div class="at-res-actions">
         <button class="at-res-mode ${_resBodyMode === 'pretty' ? 'active' : ''}" data-action="at-res-mode" data-mode="pretty" title="Pretty">{ }</button>
@@ -394,7 +403,11 @@ function renderResponse() {
       if (!btn) return;
       if (btn.dataset.action === 'at-res-tab') {
         const tab = btn.dataset.tab;
-        el.querySelectorAll('.at-res-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+        el.querySelectorAll('.at-res-tab').forEach(t => {
+          const selected = t.dataset.tab === tab;
+          t.classList.toggle('active', selected);
+          t.setAttribute('aria-selected', String(selected));
+        });
         document.getElementById('at-res-body')?.style.setProperty('display', tab === 'body' ? '' : 'none');
         document.getElementById('at-res-headers')?.style.setProperty('display', tab === 'headers' ? '' : 'none');
         document.getElementById('at-res-history')?.style.setProperty('display', tab === 'history' ? '' : 'none');
@@ -405,7 +418,7 @@ function renderResponse() {
         const r = app.apiTester.response;
         if (r && !r.error) {
           const text = typeof r.body === 'object' ? JSON.stringify(r.body, null, 2) : String(r.body || '');
-          navigator.clipboard.writeText(text).then(() => showToast('Copied to clipboard'));
+          navigator.clipboard.writeText(text).then(() => showToast('Copied to clipboard')).catch(() => showToast('Clipboard access denied', 'error'));
         }
       }
     });
@@ -419,5 +432,5 @@ registerClickActions({
   'at-new': newRequest,
   'at-config-tab': (el) => switchConfigTab(el.dataset.tab),
   'at-select': (el) => selectRequest(el.dataset.id),
-  'at-delete': (el) => { event.stopPropagation(); deleteReq(el.dataset.id); },
+  'at-delete': (el, e) => { e.stopPropagation(); deleteReq(el.dataset.id); },
 });

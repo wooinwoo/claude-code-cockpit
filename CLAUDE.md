@@ -1,22 +1,23 @@
 # Cockpit Dashboard
 
-Claude Code 프로젝트 관리 대시보드. Tauri (Rust + WebView2) 데스크톱 앱으로 패키징되어 있음.
+Claude Code 프로젝트 관리 대시보드. Tauri 2 (Rust) 데스크톱 앱으로 패키징. Windows + macOS 지원.
 
 ## 아키텍처
 
 ```
-Tauri Shell (cockpit.exe)
-  └─ WebView2 (index.html + ES Modules)
+Tauri Shell (cockpit.exe / Cockpit.app)
+  └─ WebView (index.html + ES Modules)
        ↕ HTTP/WS
   └─ Node.js Server (server.js, port 3847)
        ├─ node-pty (터미널 멀티플렉서)
        ├─ SSE (프로젝트 상태 폴링)
        ├─ WebSocket (터미널 I/O)
+       ├─ routes/ (API 라우트 모듈)
        └─ lib/ (서비스 모듈들)
 ```
 
 - **프론트엔드**: Vanilla JS ES Modules, 프레임워크 없음. `<script type="module" src="js/main.js">`
-- **백엔드**: Node.js, 의존성 최소 (ws, node-pty만). 자체 라우터 (`addRoute(method, pattern, handler)`)
+- **백엔드**: Node.js, 의존성 최소 (ws, node-pty, msedge-tts). 자체 라우터 (`addRoute(method, pattern, handler)`)
 - **빌드 도구 없음**: 번들러/트랜스파일러 없이 ES 모듈 직접 서빙. CDN 안 쓰고 `vendor/` 로컬 번들.
 
 ## 핵심 배포 규칙
@@ -73,9 +74,24 @@ dashboard/
 │   ├── forge.js        # Forge: AI 코드 생성
 │   ├── workflows.js    # Workflows: 커스텀 자동화
 │   ├── highlight.js    # diff 구문 강조
-│   ├── logs.js         # 로그 뷰어
-│   └── monitor.js      # 시스템 모니터
+│   ├── ports.js        # 포트 매니저 UI
+│   └── api-tester.js   # API 테스터 UI
+├── routes/             # API 라우트 모듈 (server.js에서 분리)
+│   ├── system.js           # IDE/브라우저/폴더 열기, 인증, 헬스, 설정, 배치
+│   ├── git.js              # git 작업 (diff, stage, commit, push, pull, stash, branch)
+│   ├── projects.js         # 프로젝트 CRUD, dev server
+│   ├── sessions.js         # Claude 세션 시작/재개/이력
+│   ├── agent.js            # AI 에이전트 API
+│   ├── forge.js            # AI 코드 생성 API
+│   ├── jira.js             # Jira 이슈/보드/스프린트
+│   ├── workflows.js        # 워크플로우 정의/실행
+│   ├── notes.js            # 노트 CRUD
+│   ├── cicd.js             # GitHub Actions
+│   ├── ports.js            # 포트 매니저
+│   ├── pr.js               # GitHub PR
+│   └── api-tester.js       # HTTP 요청 프록시
 ├── lib/                # 서버 서비스 모듈
+│   ├── platform.js         # 크로스 플랫폼 헬퍼 (셸, kill, URL, IDE 경로)
 │   ├── agent-service.js    # Gemini API 클라이언트, 에이전트 도구 시스템 (98KB)
 │   ├── forge-service.js    # AI 코드 생성 서비스 (57KB)
 │   ├── claude-data.js      # Claude 세션/대화 데이터 파서
@@ -89,11 +105,11 @@ dashboard/
 │   ├── briefing-service.js # 일일 브리핑 생성
 │   ├── batch-service.js    # 배치 작업 실행
 │   ├── notes-service.js    # 노트 CRUD (파일시스템)
+│   ├── ports-service.js    # 포트 스캔 + 프로세스 관리
+│   ├── monitor-service.js  # CPU/메모리/디스크/프로세스 모니터링
 │   ├── poller.js           # 주기적 데이터 폴링
 │   ├── session-control.js  # Claude 세션 시작/재개
-│   ├── notify.js           # 알림 시스템
-│   ├── monitor-service.js  # 시스템 리소스 모니터
-│   ├── logs-service.js     # 로그 파일 파서
+│   ├── notify.js           # 네이티브 알림 (Windows/macOS/Linux)
 │   ├── wsl-utils.js        # WSL 경로 변환
 │   └── qr.js               # QR 코드 생성 (모바일 접속)
 ├── vendor/             # 로컬 번들 라이브러리
@@ -163,18 +179,21 @@ addRoute('POST', '/api/projects/:id/git/commit', handler);
 ```
 `:id` 파라미터 → `req.params.id`, 쿼리 → `req.query`
 
-### 주요 API 그룹
-- `/api/projects` — CRUD, git 작업 (diff, stage, commit, push, pull, stash, branch)
-- `/api/sessions` — Claude 세션 시작/재개/이력
-- `/api/ai` — Gemini API 키 관리, 에이전트 채팅
-- `/api/jira` — Jira 이슈, 보드, 스프린트, 상태 전환
-- `/api/cicd` — GitHub Actions 파이프라인
-- `/api/notes` — 노트 CRUD
-- `/api/workflows` — 워크플로우 정의/실행
-- `/api/forge` — AI 코드 생성
-- `/api/dev-servers` — Dev 서버 시작/중지/상태
-- `/api/open-in-ide` — IDE에서 파일 열기 (code, cursor, zed, windsurf, antigravity)
-- `/api/open-url` — 브라우저에서 URL 열기 (default, firefox-dev)
+### 주요 API 그룹 (routes/*.js)
+- `/api/projects` — CRUD, dev server (routes/projects.js)
+- `/api/projects/:id/git/*` — diff, stage, commit, push, pull, stash, branch (routes/git.js)
+- `/api/sessions` — Claude 세션 시작/재개/이력 (routes/sessions.js)
+- `/api/ai` — Gemini API 키 관리, 에이전트 채팅 (routes/agent.js)
+- `/api/jira` — Jira 이슈, 보드, 스프린트, 상태 전환 (routes/jira.js)
+- `/api/cicd` — GitHub Actions 파이프라인 (routes/cicd.js)
+- `/api/notes` — 노트 CRUD (routes/notes.js)
+- `/api/workflows` — 워크플로우 정의/실행 (routes/workflows.js)
+- `/api/forge` — AI 코드 생성 (routes/forge.js)
+- `/api/ports` — 시스템 포트 스캔/프로세스 관리 (routes/ports.js)
+- `/api/api-tester` — HTTP 요청 프록시 (routes/api-tester.js)
+- `/api/open-in-ide` — IDE에서 파일 열기 (routes/system.js)
+- `/api/open-url` — 브라우저에서 URL 열기 (routes/system.js)
+- `/api/open-folder` — 파일 매니저에서 폴더 열기 (routes/system.js)
 
 ### 보안
 - CORS: localhost만 허용, LAN 접근 시 토큰 인증
@@ -191,13 +210,33 @@ addRoute('POST', '/api/projects/:id/git/commit', handler);
 
 ## 로컬 도구 경로
 
-| 도구 | 경로 |
-|------|------|
-| Zed | `C:\Users\RST\AppData\Local\Programs\Zed\bin\zed.exe` |
-| Firefox Dev Edition | `C:\Program Files\Firefox Developer Edition\firefox.exe` |
-| VS Code | `code.cmd` (PATH) |
-| Cursor | `cursor.cmd` (PATH) |
-| Antigravity | `antigravity.cmd` (PATH) |
+`lib/platform.js`에서 OS별 경로를 중앙 관리. 새 IDE/도구 추가 시 `platform.js`만 수정.
+
+| 도구 | Windows | macOS |
+|------|---------|-------|
+| Zed | `%LOCALAPPDATA%/Programs/Zed/bin/zed.exe` | `/Applications/Zed.app/Contents/MacOS/cli` |
+| Firefox Dev | `%ProgramFiles%/Firefox Developer Edition/firefox.exe` | `/Applications/Firefox Developer Edition.app/.../firefox` |
+| VS Code | `code.cmd` | `code` |
+| Cursor | `cursor.cmd` | `cursor` |
+| Antigravity | `antigravity.cmd` | `antigravity` |
+
+## 크로스 플랫폼 (lib/platform.js)
+
+모든 OS별 분기가 `lib/platform.js`에 집중됨. 각 서비스에서는 platform 함수를 import해서 사용.
+
+```javascript
+import { IS_WIN, IS_MAC, openUrl, killProcessTree, getShell, getIdeBin } from './platform.js';
+```
+
+| 기능 | Windows | macOS | Linux |
+|------|---------|-------|-------|
+| 셸 | pwsh/powershell | zsh/bash | bash |
+| 알림 | PowerShell WinRT | osascript | notify-send |
+| URL 열기 | `cmd /c start` | `open` | `xdg-open` |
+| 프로세스 kill | `taskkill /T /F` | `kill -SIGTERM` | `kill -SIGTERM` |
+| 포트 스캔 | `netstat -ano` | `lsof -iTCP` | `lsof` / `ss` |
+
+**주의**: `toWinPath()`는 Windows 전용 (`/` → `\` 변환). macOS에서 경로를 파일시스템에 넘길 때는 반드시 `IS_WIN ? toWinPath(path) : path` 사용.
 
 ## 데이터 저장소
 
@@ -218,8 +257,9 @@ addRoute('POST', '/api/projects/:id/git/commit', handler);
 |------|------|
 | UI 변경/뷰 추가 | `index.html` + 해당 `js/*.js` + `style.css` |
 | 새 액션/버튼 | `index.html` (data-action) + `js/main.js` (switch case) |
-| API 라우트 추가 | `server.js` (`addRoute()`) |
+| API 라우트 추가 | `routes/*.js` (기능별 모듈) |
 | 서비스 로직 | `lib/*.js` |
+| 플랫폼별 분기 | `lib/platform.js` (OS별 경로, 명령어) |
 | 모바일 반응형 | `style.css` (`@media (max-width: 600px)` 블록, line 6070+) |
 | 프로젝트 카드 버튼 | `js/dashboard.js:cardHTML()` (line ~570) |
 | 터미널 우클릭 메뉴 | `js/terminal.js:showTermCtxMenu()` (line ~580) |

@@ -120,13 +120,6 @@ const _app = {
     pollTimer: null,
   },
 
-  monitor: {
-    stats: null,
-    timer: null,
-    initialized: false,
-    paused: false,
-  },
-
   ports: {
     data: [],
     timer: null,
@@ -160,17 +153,6 @@ const _app = {
     dirty: false,
     saveTimer: null,
     saveState: null, // null | 'saving' | 'saved'
-  },
-
-  logs: {
-    files: [],
-    content: null,
-    project: null,
-    activeFile: null,
-    initialized: false,
-    filter: 'all',
-    followMode: true,
-    refreshTimer: null,
   },
 
   jira: {
@@ -220,11 +202,6 @@ const COMPAT_MAP = {
   _cicdInitialized: ['cicd', 'initialized'],
   _cicdDetailRun: ['cicd', 'detailRun'],
   _cicdPollTimer: ['cicd', 'pollTimer'],
-  // Monitor
-  monitorStats: ['monitor', 'stats'],
-  _monitorTimer: ['monitor', 'timer'],
-  _monitorInitialized: ['monitor', 'initialized'],
-  _monitorPaused: ['monitor', 'paused'],
   // Ports
   portsData: ['ports', 'data'],
   _portsTimer: ['ports', 'timer'],
@@ -237,15 +214,6 @@ const COMPAT_MAP = {
   _notesDirty: ['notes', 'dirty'],
   _notesSaveTimer: ['notes', 'saveTimer'],
   _notesSaveState: ['notes', 'saveState'],
-  // Logs
-  logsFiles: ['logs', 'files'],
-  logsContent: ['logs', 'content'],
-  _logsProject: ['logs', 'project'],
-  _logsActiveFile: ['logs', 'activeFile'],
-  _logsInitialized: ['logs', 'initialized'],
-  _logsFilter: ['logs', 'filter'],
-  _logsFollowMode: ['logs', 'followMode'],
-  _logsRefreshTimer: ['logs', 'refreshTimer'],
   // Jira
   jiraIssues: ['jira', 'issues'],
   jiraSprints: ['jira', 'sprints'],

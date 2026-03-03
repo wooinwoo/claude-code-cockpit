@@ -81,7 +81,10 @@ if (!existsSync(iconsDir)) {
 }
 
 // ─── Step 4: Build ───
-console.log('🔨 Step 4: Building Tauri NSIS installer...');
+const isMac = process.platform === 'darwin';
+const isWin = process.platform === 'win32';
+const bundleType = isMac ? 'DMG' : 'NSIS';
+console.log(`🔨 Step 4: Building Tauri ${bundleType} installer...`);
 console.log('   This may take several minutes on first build.\n');
 
 try {
@@ -95,18 +98,33 @@ try {
   console.error('   - Install Rust: https://rustup.rs/');
   console.error('   - Install Tauri CLI: cargo install tauri-cli');
   console.error('   - Check Node.js is in PATH');
+  if (isMac) console.error('   - Install Xcode Command Line Tools: xcode-select --install');
   process.exit(1);
 }
 
 // ─── Step 5: Locate output ───
-const nsisDir = join(ROOT, 'src-tauri', 'target', 'release', 'bundle', 'nsis');
-if (existsSync(nsisDir)) {
-  const installers = readdirSync(nsisDir).filter(f => f.endsWith('.exe'));
-  if (installers.length) {
-    console.log('\n✅ Installer built successfully!');
-    console.log(`   📂 ${join(nsisDir, installers[0])}`);
+if (isMac) {
+  const dmgDir = join(ROOT, 'src-tauri', 'target', 'release', 'bundle', 'dmg');
+  if (existsSync(dmgDir)) {
+    const installers = readdirSync(dmgDir).filter(f => f.endsWith('.dmg'));
+    if (installers.length) {
+      console.log('\n✅ DMG built successfully!');
+      console.log(`   📂 ${join(dmgDir, installers[0])}`);
+    }
+  } else {
+    console.log('\n⚠️  Build completed but DMG output not found.');
+    console.log('   Check src-tauri/target/release/bundle/');
   }
 } else {
-  console.log('\n⚠️  Build completed but NSIS output not found.');
-  console.log('   Check src-tauri/target/release/bundle/');
+  const nsisDir = join(ROOT, 'src-tauri', 'target', 'release', 'bundle', 'nsis');
+  if (existsSync(nsisDir)) {
+    const installers = readdirSync(nsisDir).filter(f => f.endsWith('.exe'));
+    if (installers.length) {
+      console.log('\n✅ Installer built successfully!');
+      console.log(`   📂 ${join(nsisDir, installers[0])}`);
+    }
+  } else {
+    console.log('\n⚠️  Build completed but NSIS output not found.');
+    console.log('   Check src-tauri/target/release/bundle/');
+  }
 }

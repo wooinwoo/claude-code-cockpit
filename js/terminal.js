@@ -79,18 +79,23 @@ function remapLayoutIds(idMap) {
 // ─── WebSocket ───
 export function connectWS() {
   if (app._wsReconnTimer) { clearTimeout(app._wsReconnTimer); app._wsReconnTimer = null; }
+  let ws;
   try {
-    app.ws = new WebSocket(`ws://${location.host}`);
+    ws = new WebSocket(`ws://${location.host}`);
+    app.ws = ws;
   } catch (e) {
     console.error('[WS] constructor error', e);
     return;
   }
-  app.ws.onopen = () => {
+  ws.onopen = () => {
     app._wsBackoff = 1000;
     app._wsConnectedAt = Date.now();
     showDisconnectIndicator(false);
+    // Refresh terminal headers every 30s for session timer
+    if (app._termTimerInterval) clearInterval(app._termTimerInterval);
+    app._termTimerInterval = setInterval(() => { if (app.termMap.size) updateTermHeaders(); }, 30000);
   };
-  app.ws.onmessage = e => {
+  ws.onmessage = e => {
     const msg = JSON.parse(e.data);
     try {
     switch (msg.type) {
@@ -133,9 +138,13 @@ export function connectWS() {
     }
     } catch (err) { console.error('[WS] message handler error', err); }
   };
-  app.ws.onerror = err => { console.error('[WS] error', err); };
-  app.ws.onclose = (ev) => {
+  ws.onerror = err => { console.error('[WS] error', err); };
+  ws.onclose = (ev) => {
+    // Skip cleanup if a newer WS connection has already taken over
+    if (app.ws !== ws) return;
     showDisconnectIndicator(true);
+    // Clear terminal header refresh timer
+    if (app._termTimerInterval) { clearInterval(app._termTimerInterval); app._termTimerInterval = null; }
     // Flush pending writeBuffers to prevent stale RAF timers
     for (const [id, wb] of app.writeBuffers) { if (wb.timer) cancelAnimationFrame(wb.timer); }
     app.writeBuffers.clear();
@@ -516,7 +525,8 @@ export function updateTermHeaders() {
     const nv = app.nodeVersion || '';
     const bufUsed = t.xterm.buffer.active.length;
     const bufPct = Math.round(bufUsed / getScrollback() * 100);
-    const cacheKey = `${t.label}|${t.color}|${g.branch || ''}|${g.uncommittedCount || 0}|${model}|${nv}|${wt.length}|${tid === app.activeTermId}|${bufPct}`;
+    const timerStr = t.createdAt ? fmtDuration(Date.now() - t.createdAt) : '';
+    const cacheKey = `${t.label}|${t.color}|${g.branch || ''}|${g.uncommittedCount || 0}|${model}|${nv}|${wt.length}|${tid === app.activeTermId}|${bufPct}|${timerStr}`;
     if (app._headCache.get(tid) === cacheKey) return;
     app._headCache.set(tid, cacheKey);
     const p = app.projectList.find(pp => pp.id === t.projectId);

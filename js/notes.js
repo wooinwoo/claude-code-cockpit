@@ -239,9 +239,8 @@ function renderDocEdit(note) {
 }
 
 function delegateMain(main) {
-  if (main.dataset.delegated2) return;
-  main.dataset.delegated2 = '1';
-  main.addEventListener('click', e => {
+  // Use onclick to avoid listener stacking on mode switches
+  main.onclick = e => {
     const btn = e.target.closest('[data-action]');
     if (!btn) return;
     switch (btn.dataset.action) {
@@ -251,21 +250,17 @@ function delegateMain(main) {
       case 'export-note': exportNote(); break;
       case 'md-insert': mdInsert(btn.dataset.before, btn.dataset.after); break;
     }
-  });
+  };
 }
 
 function enterEditMode() {
   _mode = 'edit';
-  const main = document.getElementById('notes-editor');
-  if (main) main.dataset.delegated2 = '';
   renderDocEdit(app._currentNote || {});
 }
 
 async function exitEditMode() {
   if (app._notesDirty) await saveCurrentNote();
   _mode = 'view';
-  const main = document.getElementById('notes-editor');
-  if (main) main.dataset.delegated2 = '';
   if (app._activeNoteId) {
     const note = await fetchJson(`/api/notes/${app._activeNoteId}`);
     app._currentNote = note;
@@ -291,15 +286,15 @@ function buildToc() {
   });
   html += '</ul>';
   toc.innerHTML = html;
-  // Smooth scroll
-  toc.addEventListener('click', e => {
+  // Smooth scroll (onclick = replace, not addEventListener = stack)
+  toc.onclick = e => {
     const link = e.target.closest('.docs-toc-link');
     if (link) {
       e.preventDefault();
       const target = document.getElementById(link.getAttribute('href').slice(1));
       if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-  });
+  };
 }
 
 function clearToc() {
@@ -335,6 +330,7 @@ async function saveCurrentNote() {
     await postJson(`/api/notes/${app._activeNoteId}`, updates, { method: 'PUT' });
     app._notesDirty = false;
     app._notesSaveState = 'saved';
+    app._notesSaveFailCount = 0;
     updateSaveStatus();
     app._currentNote = { ...app._currentNote, ...updates };
     setTimeout(() => { if (app._notesSaveState === 'saved') { app._notesSaveState = null; updateSaveStatus(); } }, 2000);
@@ -346,7 +342,19 @@ async function saveCurrentNote() {
       app.notesList[idx].updatedAt = Date.now();
       renderSidebar();
     }
-  } catch { /* retry on next change */ }
+  } catch {
+    app._notesSaveFailCount = (app._notesSaveFailCount || 0) + 1;
+    app._notesSaveState = 'error';
+    updateSaveStatus();
+    if (app._notesSaveFailCount >= 3) {
+      showToast('Failed to save note after multiple attempts', 'error');
+    } else {
+      // Retry with exponential backoff: 3s, 6s
+      const delay = 3000 * app._notesSaveFailCount;
+      if (app._notesSaveTimer) clearTimeout(app._notesSaveTimer);
+      app._notesSaveTimer = setTimeout(saveCurrentNote, delay);
+    }
+  }
 }
 
 function updateSaveStatus() {
@@ -354,6 +362,7 @@ function updateSaveStatus() {
   if (!el) return;
   if (app._notesSaveState === 'saving') { el.textContent = 'Saving...'; el.className = 'docs-save-status saving'; }
   else if (app._notesSaveState === 'saved') { el.textContent = 'Saved'; el.className = 'docs-save-status saved'; }
+  else if (app._notesSaveState === 'error') { el.textContent = 'Save failed — retrying...'; el.className = 'docs-save-status error'; }
   else if (app._notesDirty) { el.textContent = 'Unsaved'; el.className = 'docs-save-status unsaved'; }
   else { el.textContent = ''; el.className = 'docs-save-status'; }
 }
@@ -377,8 +386,6 @@ export async function createNewNote() {
     app._currentNote = note;
     _mode = 'edit';
     renderSidebar();
-    const main = document.getElementById('notes-editor');
-    if (main) main.dataset.delegated2 = '';
     renderDocEdit(note);
     setTimeout(() => { const t = document.getElementById('docs-edit-title'); if (t) { t.focus(); t.select(); } }, 50);
   } catch (err) { showToast('Failed to create page', 'error'); }
@@ -437,11 +444,14 @@ export function searchNotes(query) {
 function exportNote() {
   const note = app._currentNote;
   if (!note) return;
-  const content = `# ${note.title || 'Untitled'}\n\n${note.content || ''}`;
+  // In edit mode, use current textarea/title values instead of stale note data
+  const title = (_mode === 'edit' ? document.getElementById('docs-edit-title')?.value : null) ?? note.title ?? 'Untitled';
+  const body = (_mode === 'edit' ? document.getElementById('docs-edit-textarea')?.value : null) ?? note.content ?? '';
+  const content = `# ${title}\n\n${body}`;
   const blob = new Blob([content], { type: 'text/markdown' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = (note.title || 'note').replace(/[^a-zA-Z0-9가-힣_-]/g, '_') + '.md';
+  a.download = (title || 'note').replace(/[^a-zA-Z0-9가-힣_-]/g, '_') + '.md';
   a.click();
   URL.revokeObjectURL(a.href);
   showToast('Note exported');

@@ -414,6 +414,7 @@ export async function updateDiffBranchInfo() {
         if (!action) return;
         if (action.dataset.action === 'toggle-branch-dd') { e.stopPropagation(); toggleBranchDropdown(e); }
         else if (action.dataset.action === 'toggle-wt-dd') { e.stopPropagation(); toggleWorktreeDropdown(e); }
+        else if (action.dataset.action === 'stash-list') { e.stopPropagation(); showStashList(); }
       });
     }
   } catch { el.innerHTML = ''; app._acBranchInfo = null; }

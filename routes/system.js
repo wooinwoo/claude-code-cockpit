@@ -2,9 +2,9 @@ import { computeUsage, getStatsCache } from '../lib/cost-service.js';
 import { getRecentActivity, discoverProjects } from '../lib/claude-data.js';
 import { showNotification } from '../lib/notify.js';
 import { generateQRSvg } from '../lib/qr.js';
-import { getAllStats as getMonitorStats } from '../lib/monitor-service.js';
 import { checkAlerts, generateBriefing, getAlertPrefs, saveAlertPrefs } from '../lib/briefing-service.js';
 import { getWhitelist, executeBatch, stopBatch, getBatchStatus } from '../lib/batch-service.js';
+import { IS_WIN, getIdeBin, getIdeSpawnOpts, getFirefoxDevBin, openUrl as platformOpenUrl, openFolder as platformOpenFolder } from '../lib/platform.js';
 
 export function register(ctx) {
   const { addRoute, json, readBody, getProjects, getProjectById, addProject, poller, LAN_TOKEN, isInsideAnyProject, isLocalhost, authCookie, toWinPath, PORT, LIMITS, join, resolve, normalize, readFile, readdir, stat, writeFile, mkdir, existsSync, spawn, tmpdir, randomBytes, timingSafeEqual } = ctx;
@@ -157,26 +157,24 @@ export function register(ctx) {
     // Resolve relative paths against project root if projectId provided
     if (body.projectId && !/^[A-Za-z]:/.test(filePath) && !filePath.startsWith('/')) {
       const proj = getProjectById(body.projectId);
-      if (proj) filePath = join(toWinPath(proj.path), filePath);
+      if (proj) filePath = join(IS_WIN ? toWinPath(proj.path) : proj.path, filePath);
     }
     if (!isInsideProject(filePath)) return json(res, { error: 'Path outside project directories' }, 403);
     const known = ['code', 'cursor', 'windsurf', 'antigravity', 'zed'];
     if (!known.includes(ide)) return json(res, { error: 'Unknown IDE' }, 400);
-    const winPath = toWinPath(filePath);
-    const isWin = process.platform === 'win32';
+    const resolvedPath = IS_WIN ? toWinPath(filePath) : filePath;
     // Zed uses its own exe path and different CLI args
     if (ide === 'zed') {
-      const zedBin = isWin ? join(process.env.LOCALAPPDATA || '', 'Programs', 'Zed', 'bin', 'zed.exe') : 'zed';
-      const args = line > 0 ? [`${winPath}:${line}`] : [winPath];
+      const zedBin = getIdeBin('zed');
+      const args = line > 0 ? [`${resolvedPath}:${line}`] : [resolvedPath];
       spawn(zedBin, args, { detached: true, stdio: 'ignore', shell: false, windowsHide: true }).unref();
     } else {
       // VS Code/Cursor support --goto file:line:column
       const args = [];
-      if (line > 0) { args.push('--goto', `${winPath}:${line}${column > 0 ? ':' + column : ''}`); }
-      else { args.push(winPath); }
-      // M1: .cmd needs shell on Windows — IDE name is from known[] whitelist so safe
-      const ideBin = isWin ? `${ide}.cmd` : ide;
-      spawn(ideBin, args, { detached: true, stdio: 'ignore', shell: isWin, windowsHide: true }).unref();
+      if (line > 0) { args.push('--goto', `${resolvedPath}:${line}${column > 0 ? ':' + column : ''}`); }
+      else { args.push(resolvedPath); }
+      const ideBin = getIdeBin(ide);
+      spawn(ideBin, args, getIdeSpawnOpts()).unref();
     }
     json(res, { opened: true });
   });
@@ -188,24 +186,22 @@ export function register(ctx) {
     if (!url || typeof url !== 'string') return json(res, { error: 'Missing url' }, 400);
     if (!/^https?:\/\//i.test(url)) return json(res, { error: 'Only http/https URLs allowed' }, 400);
     const browser = body.browser || 'default';
-    const isWin = process.platform === 'win32';
     if (browser === 'firefox-dev') {
-      const ffBin = isWin ? join(process.env.ProgramFiles || 'C:\\Program Files', 'Firefox Developer Edition', 'firefox.exe') : 'firefox-developer-edition';
+      const ffBin = getFirefoxDevBin();
       spawn(ffBin, [url], { detached: true, stdio: 'ignore', shell: false, windowsHide: true }).unref();
     } else {
-      const cmd = isWin ? 'cmd' : process.platform === 'darwin' ? 'open' : 'xdg-open';
-      const args = isWin ? ['/c', 'start', '', url] : [url];
-      spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+      platformOpenUrl(url);
     }
     json(res, { opened: true });
   });
 
-  // Open containing folder in Explorer
+  // Open containing folder in file manager
   addRoute('POST', '/api/open-folder', async (req, res) => {
     const body = await readBody(req);
     if (!body.path) return json(res, { error: 'Missing path' }, 400);
     if (!isInsideProject(body.path)) return json(res, { error: 'Path outside project directories' }, 403);
-    spawn('explorer', ['/select,', toWinPath(body.path)], { detached: true, stdio: 'ignore', shell: false, windowsHide: true }).unref();
+    const resolvedPath = IS_WIN ? toWinPath(body.path) : body.path;
+    platformOpenFolder(resolvedPath);
     json(res, { opened: true });
   });
 
@@ -326,10 +322,4 @@ export function register(ctx) {
   });
 
   addRoute('POST', '/api/batch/stop', (_req, res) => { json(res, { stopped: stopBatch() }); });
-
-  // ──────────── Monitor ────────────
-
-  addRoute('GET', '/api/monitor/stats', (_req, res) => {
-    json(res, getMonitorStats());
-  });
 }
