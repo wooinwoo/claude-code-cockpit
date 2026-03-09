@@ -1,4 +1,54 @@
-/* ─── Mobile: Bottom Tab Bar ─── */
+/* ═══════════════════════════════════════════════════════════════
+   Responsive Design — Comprehensive Mobile & Tablet Support
+   Breakpoints: 1200px → 768px → 600px → 480px
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ─── Tablet: 768px ─── */
+@media (max-width: 768px) {
+  /* Dashboard: single column layout */
+  .overview-columns { grid-template-columns: 1fr; }
+  .overview-sidebar { position: static; }
+  .charts-grid { grid-template-columns: 1fr; }
+  .usage-grid { grid-template-columns: 1fr; }
+
+  /* Header: reduce padding */
+  header { padding: 0 10px; }
+  .nav-tab { padding: 5px 10px; font-size: .76rem; }
+
+  /* Dashboard padding */
+  #dashboard-view { padding: 16px; }
+
+  /* Diff sidebar narrower */
+  .diff-sidebar { width: 220px; }
+
+  /* Notes article padding */
+  .docs-article { padding: 24px 20px 48px; max-width: 100%; }
+
+  /* Jira detail panel */
+  .jira-detail { width: 380px; right: -400px; }
+
+  /* PR detail panel */
+  .pr-detail { width: 100vw; right: -100vw; }
+  .pr-detail.open { right: 0; }
+
+  /* PR search */
+  .pr-search { width: 140px; }
+
+  /* Jira board: allow smaller columns */
+  .jira-board-col { min-width: 220px; }
+
+  /* Agent panel */
+  .agent-panel { width: calc(100vw - 32px); max-width: 440px; }
+
+  /* Terminal search narrower */
+  .term-search input { width: 160px; }
+
+  /* Workflows */
+  .wf-sidebar { width: 220px; min-width: 180px; }
+  .wf-main { padding: 16px 20px; }
+}
+
+/* ─── Mobile: 600px — Bottom Tab Bar ─── */
 @media (max-width: 600px) {
   header {
     position: fixed;
@@ -28,14 +78,15 @@
     flex-direction: column;
     gap: 2px;
     padding: 4px 8px;
-    font-size: .62rem;
+    font-size: .7rem;
   }
   .nav-tab svg { width: 18px; height: 18px; }
-  .nav-tab span.tab-label { display: block; font-size: .58rem; }
+  .nav-tab span.tab-label { display: block; font-size: .62rem; }
   body { padding-top: 0; padding-bottom: 56px; }
   .view { height: calc(100vh - 56px); }
 
-  /* Cards: vertical stack */
+  /* ─── Dashboard ─── */
+  #dashboard-view { padding: 10px 12px; }
   .project-grid {
     display: flex;
     flex-direction: column;
@@ -47,8 +98,17 @@
   .project-grid-wrap { overflow: visible; }
   .scroll-ind { display: none !important; }
   .card { min-width: auto; width: 100%; }
+  .stats-row { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 6px; }
+  .stat-card { padding: 10px 12px; }
+  .stat-card .stat-value { font-size: 1.1rem; }
+  .chart-wrap { height: 160px; }
+  .smart-actions { gap: 6px; }
+  .sa-card { min-width: 100%; }
+  .sa-quick-links { margin-left: 0; width: 100%; }
+  .quick-actions { gap: 4px; }
+  .qa-btn { font-size: .72rem; padding: 5px 10px; }
 
-  /* Diff: sidebar on top, collapsed */
+  /* ─── Diff ─── */
   .diff-layout { flex-direction: column; }
   .diff-sidebar {
     width: 100%;
@@ -61,32 +121,41 @@
   .diff-toolbar select { max-width: 120px; }
   .dt-actions { flex-wrap: wrap; }
   .dl-code { font-size: .7rem; }
-  .dl-gutter { font-size: .6rem; min-width: 28px; }
+  .dl-gutter { font-size: .65rem; min-width: 28px; }
+  .diff-main-inner { padding: 8px 8px 10px; }
+  .diff-panel-head { padding: 6px 8px; gap: 4px; }
+  .diff-panel-head .dp-path { font-size: .7rem; }
+  .diff-branch-info { font-size: .72rem; flex-wrap: wrap; gap: 4px; }
+  .branch-dropdown { min-width: 200px; max-width: 90vw; }
 
-  /* Terminal mobile: handled by dedicated mobile terminal section below */
-  .term-search input { font-size: .8rem; }
+  /* ─── Terminal ─── */
+  .term-search input { font-size: .8rem; width: 140px; }
 
-  /* Dialogs: full width on mobile */
+  /* ─── Dialogs ─── */
   .stash-dialog, .mobile-connect-dialog { min-width: unset; width: 95vw; }
+  .settings-panel { width: 100vw; max-width: 100vw; height: 100vh; }
 
-  /* Project search bar */
+  /* ─── Project search bar ─── */
   .project-search-bar { flex-wrap: wrap; gap: 4px; }
   .project-filter-btns { order: 2; flex-basis: 100%; }
   .card-sort-select { order: 3; }
 
-  /* Settings panel: full screen */
-  .settings-panel { width: 100vw; max-width: 100vw; height: 100vh; }
-
-  /* ─── More menu: open upward on mobile (bottom nav) ─── */
+  /* ─── More menu: open upward on mobile ─── */
   .nav-more-menu {
     top: auto;
     bottom: calc(100% + 8px);
     right: 4px;
     max-height: 60vh;
+    max-width: 90vw;
     overflow-y: auto;
   }
+  .nav-more-divider {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 8px;
+  }
 
-  /* ─── CI/CD table: card-style on mobile ─── */
+  /* ─── CI/CD ─── */
   .cicd-toolbar { flex-wrap: wrap; gap: 6px; padding: 8px; }
   .cicd-toolbar select { flex: 1; min-width: 0; }
   .cicd-summary { margin-left: 0; width: 100%; justify-content: center; }
@@ -101,7 +170,7 @@
   .cicd-detail { width: 100vw; right: -100vw; }
   .cicd-detail.open { right: 0; }
 
-  /* ─── Notes/Docs: single column on mobile ─── */
+  /* ─── Notes/Docs ─── */
   .docs-layout { flex-direction: column; }
   .docs-sidebar {
     width: 100%;
@@ -111,8 +180,13 @@
   }
   .docs-main { min-width: 0; }
   .docs-toc { display: none; }
+  .docs-article { padding: 16px 14px 40px; max-width: 100%; }
+  .docs-toolbar { padding: 6px 12px; }
+  .docs-edit-title { padding: 12px 14px 6px; font-size: 1.1rem; }
+  .docs-edit-textarea { padding: 14px; }
+  .docs-edit-md-bar { padding: 6px 14px; }
 
-  /* ─── README: single column on mobile ─── */
+  /* ─── README ─── */
   .rm-layout { flex-direction: column; }
   .rm-sidebar {
     width: 100%;
@@ -124,18 +198,93 @@
   .rm-main article { padding: 0; }
   .rm-toc { display: none; }
 
-  /* ─── Jira toolbar: wrap on mobile ─── */
+  /* ─── Jira ─── */
   .jira-toolbar { flex-wrap: wrap; gap: 4px; }
   .jira-toolbar select { flex: 1; min-width: 80px; max-width: 45%; font-size: .75rem; }
   .jira-toolbar input[type="text"] { width: 100%; order: 10; }
   .jira-view-toggle { order: 11; }
+  .jira-setup-card { max-width: 90vw; padding: 20px; }
+  .jira-detail { width: 100vw; right: -100vw; }
+  .jira-detail.open { right: 0; }
+  .jira-board-view { padding: 10px; gap: 8px; }
+  .jira-board-col { min-width: 200px; max-width: 280px; }
+  .jira-table td { font-size: .75rem; padding: 5px 6px; }
+  .jira-table th { font-size: .62rem; padding: 5px 6px; }
+  /* Hide assignee and updated columns on mobile */
+  .jira-table th:nth-child(4),
+  .jira-table td:nth-child(4),
+  .jira-table th:nth-child(6),
+  .jira-table td:nth-child(6) { display: none; }
+  .jira-summary-bar { padding: 6px 10px; font-size: .72rem; gap: 10px; }
+  .jira-sprint-bar { padding: 6px 10px; }
 
-  /* ─── More menu: Settings divider ─── */
-  .nav-more-divider {
-    height: 1px;
-    background: var(--border);
-    margin: 4px 8px;
-  }
+  /* ─── PR ─── */
+  .pr-toolbar { flex-wrap: wrap; gap: 4px; padding: 6px 8px; }
+  .pr-search { width: 100%; order: 10; }
+  .pr-summary { margin-left: 0; width: 100%; justify-content: center; order: 11; }
+  .pr-detail { width: 100vw; right: -100vw; }
+  .pr-detail.open { right: 0; }
+  .pr-row { padding: 8px 10px; flex-direction: column; gap: 4px; }
+  .pr-row-left { flex-direction: column; gap: 4px; }
+  .pr-row-title { font-size: .78rem; }
+  .pr-title-text { white-space: normal; word-break: break-word; }
+  .pr-row-meta { flex-wrap: wrap; }
+  .pr-branch { max-width: 100%; }
+  .pr-row-right { margin-left: 0; }
+
+  /* ─── Workflows ─── */
+  .wf-layout { flex-direction: column; }
+  .wf-sidebar { width: 100%; min-width: 0; max-height: 40vh; border-right: none; border-bottom: 1px solid var(--border); }
+  .wf-main { padding: 14px; }
+  .wf-gv-branch::before { display: none; }
+  .wf-gv-parallel-nodes { flex-direction: column; }
+  .wf-detail-title { font-size: 1rem; }
+  .wf-run-head { gap: 8px; }
+
+  /* ─── Agent panel ─── */
+  .agent-panel { max-height: 80vh; }
+  .ag-sidebar.open { width: 180px; }
+
+  /* ─── Auto-commit overlay ─── */
+  .ac-header { padding: 10px 12px; gap: 8px; }
+  .ac-header h3 { font-size: .85rem; }
+  .ac-body { padding: 10px 12px; }
+  .ac-card-files { padding: 8px 10px 10px 40px; }
+  .ac-footer { padding: 10px 12px; }
+  .ac-commit-btn, .ac-push-btn { padding: 8px 14px; font-size: .78rem; }
+
+  /* ─── Company ─── */
+  .co-chatbar-feed { display: none; }
+  .co-right { height: 45%; }
+  .co-left { height: 55%; }
+  .co-workspace.open { max-height: 160px; }
+  .co-reports { max-height: 100px; }
+  .co-profile-pop { width: 170px; }
+  .co-msg-result-content { font-size: .6rem; }
+  .co-right-header { padding: 8px 12px; }
+  .co-sprite-face { width: 26px; height: 26px; font-size: 13px; }
+  .co-sprite-name { font-size: .4rem; }
+}
+
+/* ─── Small phones: 480px ─── */
+@media (max-width: 480px) {
+  .stats-row { grid-template-columns: 1fr 1fr; }
+  .card-body { padding: 14px 12px 10px 14px; }
+  .card-name { font-size: .9rem; }
+  .card-info { grid-template-columns: 1fr; }
+  .info-row { padding: 4px 8px; }
+  .nav-tab { padding: 4px 6px; font-size: .65rem; }
+  .nav-tab svg { width: 16px; height: 16px; }
+  .nav-tab span.tab-label { font-size: .56rem; }
+  .co-chat-input { font-size: .72rem; padding: 8px 10px; }
+  .co-chat-send { padding: 8px 14px; font-size: .7rem; }
+  .co-msg-bubble { max-width: 80%; font-size: .7rem; }
+  .co-right { height: 50%; }
+  .co-left { height: 50%; }
+  .jira-board-col { min-width: 180px; }
+  .pr-row-title { font-size: .72rem; }
+  .diff-commit-box textarea { min-height: 44px; font-size: .75rem; }
+  .wf-detail-title { font-size: .9rem; }
 }
 
 /* ─── Mobile: touch improvements ─── */
@@ -145,13 +294,26 @@
     min-width: 36px;
   }
   .diff-file-item { padding: 8px 10px; }
-  .fi-actions { gap: 4px; }
+  .fi-actions { gap: 4px; display: flex; }
   .fi-action { width: 28px; height: 28px; }
   .stash-item { padding: 12px 16px; }
   .stash-actions .btn { padding: 6px 12px; min-height: 32px; }
-  /* Terminal touch: close button always visible, larger targets */
   .term-head .th-close { opacity: 1; min-width: 32px; min-height: 28px; }
   .term-tab { min-height: 32px; }
+  /* Show file actions always on touch devices */
+  .diff-file-item .fi-actions { display: flex; }
+  .diff-file-item .fi-stat { display: none; }
+  /* Larger touch targets for buttons */
+  .header-btn { width: 36px; height: 36px; }
+  .qa-btn { min-height: 36px; }
+  .jira-view-btn { min-width: 36px; min-height: 32px; }
+  .cr-act-btn { width: 32px; height: 32px; }
+  .dp-action { width: 28px; height: 28px; }
+  .ds-action { width: 28px; height: 28px; }
+  /* PR actions */
+  .prd-btn { min-height: 36px; }
+  /* Jira card touch */
+  .jira-card { padding: 12px 14px; }
 }
 
 /* ─── Mobile Terminal: Dedicated UI ─── */
@@ -164,10 +326,10 @@
 
 /* Mobile Tab Bar */
 @media (max-width: 600px), (hover: none) and (pointer: coarse) and (max-width: 900px) {
-  /* Hide desktop per-terminal headers on mobile (they get in the way) */
+  /* Hide desktop per-terminal headers on mobile */
   .term-head { display: none !important; }
 
-  /* Hide split dividers (no splits on mobile) */
+  /* Hide split dividers */
   .split-divider { display: none !important; }
   .split-container { display: block !important; }
   .split-child { width: 100% !important; height: 100% !important; }
@@ -237,7 +399,7 @@
     background: rgba(99, 102, 241, .08);
   }
 
-  /* Terminal panels on mobile: full remaining height, no splits */
+  /* Terminal panels on mobile */
   #terminal-view.active {
     display: flex;
     flex-direction: column;
@@ -330,4 +492,3 @@
   /* Search bar position on mobile */
   .term-search { top: 36px; }
 }
-

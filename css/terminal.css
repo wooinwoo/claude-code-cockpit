@@ -741,3 +741,40 @@
   margin-left: auto;
 }
 
+/* ─── Selection Floating Toolbar ─── */
+.term-selection-toolbar {
+  position: absolute;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 4px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-lg);
+  pointer-events: auto;
+}
+.term-selection-toolbar button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--text-2);
+  font-size: .72rem;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all .12s ease;
+}
+.term-selection-toolbar button:hover {
+  background: var(--accent);
+  color: #fff;
+}
+.term-selection-toolbar button svg {
+  flex-shrink: 0;
+}
+
