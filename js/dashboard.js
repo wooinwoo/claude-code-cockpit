@@ -1,7 +1,26 @@
-// ─── Dashboard: Overview tab, SSE, stats, cards, charts, usage ───
-import { app } from './state.js';
-import { esc, timeAgo, showToast, fmtTok, timeUntil, row, fetchJson, postJson } from './utils.js';
+// ─── Dashboard Core: SSE, notifications, stats, views, theme ───
+import { app, notify } from './state.js';
+import { esc, timeAgo, showToast, fmtTok, timeUntil, row, fetchJson, postJson, simpleMarkdown } from './utils.js';
 import { registerClickActions, registerChangeActions, registerInputActions } from './actions.js';
+
+// ─── Re-export from sub-modules ───
+export {
+  renderCard, cardHTML, renderAllCards, renderSkeletons,
+  togglePin, savePins, setProjectSort, sortAndRenderProjects,
+  setProjectFilter, filterProjects,
+  getProjectTags, setProjectTag, getTagColor, renderTagFilters,
+  updateScrollIndicators, jumpToChanges, updateEmptyProjectState,
+  fetchAllProjects, pullAllProjects,
+  initDashboardCards,
+} from './dashboard-cards.js';
+
+export {
+  setChartPeriod, renderCosts, fetchUsage, renderUsage, updateUsageTimestamp,
+} from './dashboard-charts.js';
+
+// Import for internal use (SSE, action registration, init)
+import { renderCard, initDashboardCards, setProjectFilter, filterProjects, setProjectSort } from './dashboard-cards.js';
+import { renderCosts, renderUsage, fetchUsage, updateUsageTimestamp, setChartPeriod } from './dashboard-charts.js';
 
 // ─── Notifications ───
 if ('Notification' in window && Notification.permission === 'default') {
@@ -23,15 +42,12 @@ export function notifySessionChange(projectId, oldState, newState) {
     body = 'Claude session disconnected.';
   }
   if (!title) return;
-  // 1) Browser Notification API (if permission granted)
   if ('Notification' in window && Notification.permission === 'granted') {
     try {
       new Notification(title, { body, tag: `session-${projectId}`, silent: false });
-    } catch {}
+    } catch { /* notification API unavailable */ }
   }
-  // 2) Audio beep — always plays as backup
   playNotifSound();
-  // 3) Title flash — visible when tab is in background
   flashTitle(title);
 }
 
@@ -59,7 +75,7 @@ function playNotifSound() {
       osc.start(ctx.currentTime + offset);
       osc.stop(ctx.currentTime + offset + 0.3);
     });
-  } catch {}
+  } catch { /* audio API unavailable */ }
 }
 
 // ─── Title flash ───
@@ -72,7 +88,6 @@ function flashTitle(msg) {
     document.title = on ? `🔔 ${msg}` : orig;
     on = !on;
   }, 800);
-  // Stop after 10 seconds or on focus
   const stop = () => {
     if (_flashTimer) { clearInterval(_flashTimer); _flashTimer = null; }
     document.title = orig;
@@ -120,7 +135,7 @@ function renderActivityLog() {
 let _currentES = null;
 export function connectSSE() {
   if (app._sseReconnTimer) { clearTimeout(app._sseReconnTimer); app._sseReconnTimer = null; }
-  if (_currentES) { try { _currentES.close(); } catch {} _currentES = null; }
+  if (_currentES) { try { _currentES.close(); } catch { /* already closed */ } _currentES = null; }
   const es = new EventSource('/api/events');
   _currentES = es;
   es.addEventListener('init', e => {
@@ -133,7 +148,7 @@ export function connectSSE() {
     if (d.git) Object.entries(d.git).forEach(([k, v]) => { if (v) upd(k, 'git', v); });
     if (d.prs) Object.entries(d.prs).forEach(([k, v]) => { if (v) upd(k, 'prs', v); });
     if (d.costs) { app.state.usage = d.costs; renderCosts(); renderUsage(); }
-    if (d.devServers) { app.devServerState = d.devServers; window.updateDevBadge?.(); }
+    if (d.devServers) { app.devServerState = d.devServers; notify('updateDevBadge'); }
     if (d.nodeVersion) app.nodeVersion = d.nodeVersion;
     const changedIds = new Set();
     if (d.sessions) Object.keys(d.sessions).forEach(k => changedIds.add(k));
@@ -158,18 +173,18 @@ export function connectSSE() {
     app.prevSessionStates.set(d.projectId, newState);
     upd(d.projectId, 'session', d);
     queueRender(d.projectId);
-    window.debouncedUpdateTermHeaders?.();
+    notify('debouncedUpdateTermHeaders');
   });
   es.addEventListener('git:update', e => {
     const d = JSON.parse(e.data);
     upd(d.projectId, 'git', d);
     queueRender(d.projectId);
-    window.debouncedUpdateTermHeaders?.();
-    window.populateProjectSelects?.();
-    window.renderProjectChips?.();
+    notify('debouncedUpdateTermHeaders');
+    notify('populateProjectSelects');
+    notify('renderProjectChips');
     if (document.getElementById('diff-view')?.classList.contains('active')) {
       const sel = document.getElementById('diff-project');
-      if (sel?.value === d.projectId) window.debouncedLoadDiff?.();
+      if (sel?.value === d.projectId) notify('debouncedLoadDiff');
     }
   });
   es.addEventListener('pr:update', e => {
@@ -197,38 +212,48 @@ export function connectSSE() {
         app._devStartTimeouts.delete(ds.projectId);
       }
     }
-    window.updateDevBadge?.();
+    notify('updateDevBadge');
     app.devServerState.forEach(ds => queueRender(ds.projectId));
     app.projectList.forEach(p => {
       if (!app.devServerState.some(ds => ds.projectId === p.id)) queueRender(p.id);
     });
   });
-  es.addEventListener('workflow:update', e => { window.handleWorkflowEvent?.('workflow:update', JSON.parse(e.data)); });
-  es.addEventListener('workflow:complete', e => { window.handleWorkflowEvent?.('workflow:complete', JSON.parse(e.data)); });
-  es.addEventListener('workflow:error', e => { window.handleWorkflowEvent?.('workflow:error', JSON.parse(e.data)); });
-  es.addEventListener('schedule:fired', e => { window.handleWorkflowEvent?.('schedule:fired', JSON.parse(e.data)); });
-  es.addEventListener('schedule:update', e => { window.handleWorkflowEvent?.('schedule:update', JSON.parse(e.data)); });
-  es.addEventListener('schedule:error', e => { window.handleWorkflowEvent?.('schedule:error', JSON.parse(e.data)); });
-  es.addEventListener('agent:start', e => { window.handleAgentEvent?.('agent:start', JSON.parse(e.data)); });
-  es.addEventListener('agent:thinking', e => { window.handleAgentEvent?.('agent:thinking', JSON.parse(e.data)); });
-  es.addEventListener('agent:thinking-text', e => { window.handleAgentEvent?.('agent:thinking-text', JSON.parse(e.data)); });
-  es.addEventListener('agent:step', e => { window.handleAgentEvent?.('agent:step', JSON.parse(e.data)); });
-  es.addEventListener('agent:tool', e => { window.handleAgentEvent?.('agent:tool', JSON.parse(e.data)); });
-  es.addEventListener('agent:tool-result', e => { window.handleAgentEvent?.('agent:tool-result', JSON.parse(e.data)); });
-  es.addEventListener('agent:response', e => { window.handleAgentEvent?.('agent:response', JSON.parse(e.data)); });
-  es.addEventListener('agent:done', e => { window.handleAgentEvent?.('agent:done', JSON.parse(e.data)); });
-  es.addEventListener('agent:error', e => { window.handleAgentEvent?.('agent:error', JSON.parse(e.data)); });
-  es.addEventListener('agent:streaming', e => { window.handleAgentEvent?.('agent:streaming', JSON.parse(e.data)); });
-  es.addEventListener('agent:warning', e => { window.handleAgentEvent?.('agent:warning', JSON.parse(e.data)); });
-  es.addEventListener('agent:edit-backup', e => { window.handleAgentEvent?.('agent:edit-backup', JSON.parse(e.data)); });
+  es.addEventListener('workflow:update', e => { notify('handleWorkflowEvent', { event: 'workflow:update', data: JSON.parse(e.data) }); });
+  es.addEventListener('workflow:complete', e => { notify('handleWorkflowEvent', { event: 'workflow:complete', data: JSON.parse(e.data) }); });
+  es.addEventListener('workflow:error', e => { notify('handleWorkflowEvent', { event: 'workflow:error', data: JSON.parse(e.data) }); });
+  es.addEventListener('schedule:fired', e => { notify('handleWorkflowEvent', { event: 'schedule:fired', data: JSON.parse(e.data) }); });
+  es.addEventListener('schedule:update', e => { notify('handleWorkflowEvent', { event: 'schedule:update', data: JSON.parse(e.data) }); });
+  es.addEventListener('schedule:error', e => { notify('handleWorkflowEvent', { event: 'schedule:error', data: JSON.parse(e.data) }); });
+  // Helper: dispatch DOM event for company view listeners
+  const emitDOM = (name, data) => document.dispatchEvent(new CustomEvent(name, { detail: data }));
+  es.addEventListener('agent:start', e => { const d = JSON.parse(e.data); notify('handleAgentEvent', { event: 'agent:start', data: d }); emitDOM('agent:start', d); });
+  es.addEventListener('agent:thinking', e => { const d = JSON.parse(e.data); notify('handleAgentEvent', { event: 'agent:thinking', data: d }); emitDOM('agent:thinking', d); });
+  es.addEventListener('agent:thinking-text', e => { notify('handleAgentEvent', { event: 'agent:thinking-text', data: JSON.parse(e.data) }); });
+  es.addEventListener('agent:step', e => { notify('handleAgentEvent', { event: 'agent:step', data: JSON.parse(e.data) }); });
+  es.addEventListener('agent:tool', e => { const d = JSON.parse(e.data); notify('handleAgentEvent', { event: 'agent:tool', data: d }); emitDOM('agent:tool', d); });
+  es.addEventListener('agent:tool-result', e => { const d = JSON.parse(e.data); notify('handleAgentEvent', { event: 'agent:tool-result', data: d }); emitDOM('agent:tool-result', d); });
+  es.addEventListener('agent:response', e => { const d = JSON.parse(e.data); notify('handleAgentEvent', { event: 'agent:response', data: d }); emitDOM('agent:response', d); });
+  es.addEventListener('agent:done', e => { const d = JSON.parse(e.data); notify('handleAgentEvent', { event: 'agent:done', data: d }); emitDOM('agent:done', d); });
+  es.addEventListener('agent:error', e => { const d = JSON.parse(e.data); notify('handleAgentEvent', { event: 'agent:error', data: d }); emitDOM('agent:error', d); });
+  es.addEventListener('agent:streaming', e => { notify('handleAgentEvent', { event: 'agent:streaming', data: JSON.parse(e.data) }); });
+  es.addEventListener('agent:warning', e => { notify('handleAgentEvent', { event: 'agent:warning', data: JSON.parse(e.data) }); });
+  es.addEventListener('agent:edit-backup', e => { notify('handleAgentEvent', { event: 'agent:edit-backup', data: JSON.parse(e.data) }); });
+  es.addEventListener('agent:proactive', e => { const d = JSON.parse(e.data); notify('handleAgentEvent', { event: 'agent:proactive', data: d }); emitDOM('agent:proactive', d); });
+  es.addEventListener('monitor:review-start', e => { const d = JSON.parse(e.data); emitDOM('monitor:review-start', d); });
+  es.addEventListener('monitor:report', e => { const d = JSON.parse(e.data); emitDOM('monitor:report', d); });
+  // Orchestration events
+  const orchEvents = ['orch:start','orch:plan','orch:sub-start','orch:sub-thinking','orch:sub-tool','orch:sub-tool-result','orch:sub-streaming','orch:sub-done','orch:sub-error','orch:synthesizing','orch:response','orch:done','orch:streaming'];
+  for (const evt of orchEvents) {
+    es.addEventListener(evt, e => { const d = JSON.parse(e.data); notify('handleAgentEvent', { event: evt, data: d }); emitDOM(evt, d); });
+  }
   // Forge events
-  es.addEventListener('forge:start', e => { window.handleForgeEvent?.('forge:start', JSON.parse(e.data)); });
-  es.addEventListener('forge:log', e => { window.handleForgeEvent?.('forge:log', JSON.parse(e.data)); });
-  es.addEventListener('forge:phase', e => { window.handleForgeEvent?.('forge:phase', JSON.parse(e.data)); });
-  es.addEventListener('forge:cost', e => { window.handleForgeEvent?.('forge:cost', JSON.parse(e.data)); });
-  es.addEventListener('forge:done', e => { window.handleForgeEvent?.('forge:done', JSON.parse(e.data)); });
-  es.addEventListener('forge:error', e => { window.handleForgeEvent?.('forge:error', JSON.parse(e.data)); });
-  es.addEventListener('forge:stopped', e => { window.handleForgeEvent?.('forge:stopped', JSON.parse(e.data)); });
+  es.addEventListener('forge:start', e => { notify('handleForgeEvent', { event: 'forge:start', data: JSON.parse(e.data) }); });
+  es.addEventListener('forge:log', e => { notify('handleForgeEvent', { event: 'forge:log', data: JSON.parse(e.data) }); });
+  es.addEventListener('forge:phase', e => { notify('handleForgeEvent', { event: 'forge:phase', data: JSON.parse(e.data) }); });
+  es.addEventListener('forge:cost', e => { notify('handleForgeEvent', { event: 'forge:cost', data: JSON.parse(e.data) }); });
+  es.addEventListener('forge:done', e => { notify('handleForgeEvent', { event: 'forge:done', data: JSON.parse(e.data) }); });
+  es.addEventListener('forge:error', e => { notify('handleForgeEvent', { event: 'forge:error', data: JSON.parse(e.data) }); });
+  es.addEventListener('forge:stopped', e => { notify('handleForgeEvent', { event: 'forge:stopped', data: JSON.parse(e.data) }); });
   es.onerror = () => {
     setConn(false);
     es.close();
@@ -307,10 +332,10 @@ export function renderSmartActions() {
       const btn = e.target.closest('[data-action]');
       if (!btn) return;
       switch (btn.dataset.action) {
-        case 'sa-nav': switchView(btn.dataset.view); if (btn.dataset.extra === 'new-term') openNewTermModal(); break;
+        case 'sa-nav': switchView(btn.dataset.view); if (btn.dataset.extra === 'new-term') notify('openNewTermModal'); break;
         case 'sa-conv-list': showConvList(); break;
-        case 'sa-agent': toggleAgentPanel(); break;
-        case 'sa-cmd-palette': toggleCommandPalette(); break;
+        case 'sa-agent': notify('toggleAgentPanel'); break;
+        case 'sa-cmd-palette': notify('toggleCommandPalette'); break;
       }
     });
   }
@@ -465,352 +490,88 @@ function updateFavicon(activeCount) {
 }
 
 // ─── View Switching ───
+const _viewInited = new Set(); // Track which views have completed first init
 export function switchView(name) {
   // Agent is now a floating panel, not a tab view
-  if (name === 'agent') { window.toggleAgentPanel?.(); return; }
+  if (name === 'agent') { notify('toggleAgentPanel'); return; }
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-  document.getElementById(`${name}-view`)?.classList.add('active');
+  const viewEl = document.getElementById(`${name}-view`);
+  if (viewEl) viewEl.classList.add('active');
+  // Apply per-tab zoom level
+  applyViewZoom(name);
   document.querySelectorAll('.nav-tab').forEach(t => { t.classList.remove('active'); t.setAttribute('aria-selected', 'false'); });
   const activeTab = document.querySelector(`.nav-tab[aria-controls="${name}-view"]`);
   if (activeTab) { activeTab.classList.add('active'); activeTab.setAttribute('aria-selected', 'true'); }
   setupNavOverflow();
   const safeInit = (fn) => { try { const r = fn(); if (r?.catch) r.catch(e => console.error('[View]', name, e)); } catch (e) { console.error('[View]', name, e); } };
   // Cleanup timers from views we're leaving
-  if (name !== 'ports') try { window.destroyPorts?.(); } catch {}
-  if (name === 'terminal') { safeInit(() => window.renderLayout?.()); setTimeout(() => window.fitAllTerminals?.(), 200); }
-  if (name === 'diff') safeInit(() => window.loadDiff?.());
-  if (name === 'pr') safeInit(() => window.initPR?.());
-  if (name === 'jira') safeInit(() => window.initJira?.());
-  if (name === 'cicd') safeInit(() => window.initCicd?.());
-  if (name === 'notes') safeInit(() => window.initNotes?.());
-  if (name === 'workflows') safeInit(() => window.initWorkflows?.());
-  if (name === 'forge') safeInit(() => window.initForge?.());
-  if (name === 'ports') safeInit(() => window.initPorts?.());
-  if (name === 'api-tester') safeInit(() => window.initApiTester?.());
-  try { localStorage.setItem('dl-view', name); } catch {}
-}
-
-// ─── Cards ───
-export function renderCard(id) {
-  const el = document.getElementById(`card-${id}`);
-  if (!el) return;
-  const p = app.state.projects.get(id) || {};
-  const s = p.session || {}, g = p.git || {}, prs = p.prs?.prs || [];
-  const st = s.state || 'no_data';
-  el.dataset.status = st;
-  el.querySelector('.status').className = `status ${st}`;
-  const statusLabel = { busy: 'Busy', waiting: 'Waiting', idle: 'Idle', no_data: 'No Data', no_sessions: 'No Sessions' }[st] || st;
-  const elapsed = (st === 'busy' || st === 'waiting') && s.lastActivity ? ` <span class="status-timer">${fmtElapsed(s.lastActivity)}</span>` : '';
-  el.querySelector('.status').innerHTML = `<span class="dot"></span>${statusLabel}${elapsed}`;
-  const q = c => el.querySelector(c);
-  if (q('.branch-val')) q('.branch-val').textContent = g.branch || '-';
-  if (q('.uncommitted-val')) {
-    q('.uncommitted-val').textContent = g.uncommittedCount ?? '-';
-    q('.uncommitted-val').classList.toggle('has-changes', (g.uncommittedCount || 0) > 0);
-  }
-  if (q('.model-val')) q('.model-val').textContent = s.model || '-';
-  if (q('.last-val')) q('.last-val').textContent = s.lastActivity ? timeAgo(s.lastActivity) : '-';
-  // Badges row (stash, worktrees, PRs)
-  const badgesRow = q('.card-badges-row');
-  if (badgesRow) {
-    const badges = [];
-    if (g.stashCount > 0) badges.push(`<span class="card-badge card-badge-stash" title="${g.stashCount} stash${g.stashCount > 1 ? 'es' : ''}"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 002 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0022 16z"/></svg> ${g.stashCount}</span>`);
-    if (g.worktrees?.length > 1) badges.push(`<span class="card-badge card-badge-wt" title="${g.worktrees.length} worktrees"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 22V6a2 2 0 00-2-2H4a2 2 0 00-2 2v12a2 2 0 002 2h12z"/><path d="M22 22V9a2 2 0 00-2-2h-2"/></svg> ${g.worktrees.length}</span>`);
-    if (prs.length) {
-      const approved = prs.filter(pr => pr.reviewDecision === 'APPROVED').length;
-      const changes = prs.filter(pr => pr.reviewDecision === 'CHANGES_REQUESTED').length;
-      const prCls = changes > 0 ? 'card-badge-pr-changes' : approved > 0 ? 'card-badge-pr-ok' : 'card-badge-pr';
-      badges.push(`<span class="card-badge ${prCls}" title="${prs.length} PR${prs.length > 1 ? 's' : ''}${approved ? `, ${approved} approved` : ''}${changes ? `, ${changes} needs changes` : ''}"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 012 2v7"/><path d="M6 9v12"/></svg> ${prs.length}</span>`);
-    }
-    badgesRow.innerHTML = badges.join('');
-  }
-  const cl = q('.commits');
-  if (cl && g.recentCommits) cl.innerHTML = g.recentCommits.slice(0, 3).map(c => `<li><span class="commit-hash">${esc(c.hash)}</span> <span class="commit-msg">${esc(c.message)}</span><span class="commit-ago">${esc(c.ago)}</span></li>`).join('');
-  const pl = q('.pr-list');
-  if (pl) pl.innerHTML = prs.length ? prs.slice(0, 2).map(pr => `<div class="pr-item"><span class="pr-num">#${pr.number}</span><span class="pr-title">${esc(pr.title)}</span><span class="pr-review ${pr.reviewDecision}">${pr.reviewDecision === 'APPROVED' ? 'OK' : pr.reviewDecision === 'CHANGES_REQUESTED' ? 'Changes' : 'Pending'}</span></div>`).join('') : '';
-  const resumeBtn = document.getElementById(`resume-last-${id}`);
-  if (resumeBtn) {
-    const hasSession = s.sessionId && s.state !== 'no_data' && s.state !== 'no_sessions';
-    resumeBtn.style.display = hasSession ? '' : 'none';
-    if (hasSession) resumeBtn.title = `Resume session (${s.state})`;
-  }
-  const devBtn = document.getElementById(`dev-btn-${id}`);
-  if (devBtn) {
-    const proj = app.projectList.find(pp => pp.id === id);
-    const hasCmd = !!proj?.devCmd;
-    const isRunning = app.devServerState.some(d => d.projectId === id);
-    if (hasCmd) {
-      const dsInfo = app.devServerState.find(d => d.projectId === id);
-      const hasPort = !!dsInfo?.port;
-      const isStarting = isRunning && !hasPort;
-      const dotClass = isStarting ? 'spin' : isRunning ? 'on' : 'off';
-      const btnClass = isStarting ? ' starting' : isRunning ? ' running' : '';
-      const label = isStarting ? 'Starting...' : isRunning ? 'Stop' : 'Dev';
-      const portKey = `${id}:${dsInfo?.port}`;
-      const isNewPort = hasPort && !app._knownPorts.has(portKey);
-      if (isNewPort) app._knownPorts.add(portKey);
-      const portTag = hasPort ? `<span class="dev-port${isNewPort ? ' pop' : ''}" data-action="open-port" data-url="http://localhost:${dsInfo.port}">:${dsInfo.port}</span>` : '';
-      devBtn.className = 'btn dev-btn' + btnClass;
-      devBtn.innerHTML = `<span class="dev-dot ${dotClass}"></span>${label}${portTag}`;
-      devBtn.dataset.action = 'toggle-dev';
-      devBtn.title = proj.devCmd + (hasPort ? ` → localhost:${dsInfo.port}` : '');
-    } else {
-      devBtn.className = 'btn dev-btn';
-      devBtn.innerHTML = `<span class="dev-dot none"></span>Dev`;
-      devBtn.dataset.action = 'prompt-dev';
-      devBtn.title = 'Set dev command';
+  if (name !== 'ports') try { notify('destroyPorts'); } catch { /* cleanup failed */ }
+  // Always-refresh views (need update on every visit)
+  if (name === 'terminal') { safeInit(() => notify('renderLayout')); setTimeout(() => notify('fitAllTerminals'), 200); }
+  if (name === 'diff') safeInit(() => notify('loadDiff'));
+  if (name === 'company') safeInit(() => notify('initCompany'));
+  // First-visit-only init views (each module also has internal guards)
+  const viewInitMap = { pr: 'initPR', jira: 'initJira', cicd: 'initCicd', notes: 'initNotes', workflows: 'initWorkflows', forge: 'initForge', ports: 'initPorts', 'api-tester': 'initApiTester' };
+  if (name in viewInitMap) {
+    if (!_viewInited.has(name)) {
+      _viewInited.add(name);
+      safeInit(() => notify(viewInitMap[name]));
+    } else if (name === 'ports') {
+      // Ports needs restart on re-visit (timer re-init)
+      safeInit(() => notify('initPorts'));
     }
   }
-  const ghBtn = document.getElementById(`github-btn-${id}`);
-  if (ghBtn) {
-    const proj = app.projectList.find(pp => pp.id === id);
-    const ghUrl = proj?.github || g.remoteUrl || '';
-    ghBtn.style.display = ghUrl ? '' : 'none';
-  }
+  try { localStorage.setItem('dl-view', name); } catch { /* storage unavailable */ }
 }
 
-export function cardHTML(p) {
-  const isPinned = app.pinnedProjects.has(p.id);
-  return `<div class="card" id="card-${p.id}">
-      <div class="card-accent" style="background:${p.color};--card-color:${p.color}"></div>
-      <div class="card-body">
-        <div class="card-header" data-action="jump-changes" data-id="${p.id}" style="cursor:pointer" title="View changes">
-          <div><span class="card-name">${esc(p.name)}</span>${(() => { const t = getProjectTags()[p.id]; return t ? `<span class="card-tag" style="background:${getTagColor(t)}">${esc(t)}</span>` : ''; })()}</div>
-          <div class="card-actions">
-            <span class="card-stack">${esc(p.stack || '')}</span>
-            <button class="card-edit-btn" data-action="edit-project" data-id="${p.id}" title="Edit project settings"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>
-            <button class="card-pin ${isPinned ? 'pinned' : ''}" data-action="toggle-pin" data-id="${p.id}" title="${isPinned ? 'Unpin' : 'Pin to front'}"><svg viewBox="0 0 24 24" fill="${isPinned ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87L18.18 21 12 17.77 5.82 21 7 14.14 2 9.27l6.91-1.01L12 2z"/></svg></button>
-          </div>
-        </div>
-        <div style="margin-bottom:4px"><span class="status no_data"><span class="dot"></span>Loading</span></div>
-        <div class="card-badges-row"></div>
-        <div class="card-info">
-          <div class="info-row"><span class="info-label">Branch</span><span class="info-value branch branch-val">-</span></div>
-          <div class="info-row"><span class="info-label">Uncommitted</span><span class="info-value uncommitted-val" data-action="jump-changes" data-id="${p.id}" title="View changes">-</span></div>
-          <div class="info-row"><span class="info-label">Model</span><span class="info-value model-val">-</span></div>
-          <div class="info-row"><span class="info-label">Last</span><span class="info-value last-val">-</span></div>
-        </div>
-        <ul class="commits"></ul>
-        <div class="pr-list"></div>
-        <div class="card-foot">
-          <div class="card-btn-row">
-            <button class="btn primary" data-action="open-term" data-id="${p.id}" data-cmd="claude" title="New Claude session">Claude</button>
-            <button class="btn" data-action="open-term" data-id="${p.id}" data-cmd="claude --resume" title="Resume last conversation">Resume</button>
-            <button class="btn resume-last-btn" id="resume-last-${p.id}" data-action="resume-last" data-id="${p.id}" style="display:none" title="Resume last session in external terminal">Last</button>
-            <button class="btn" data-action="open-term" data-id="${p.id}" data-cmd="" title="Open shell">Shell</button>
-            <button class="btn dev-btn" id="dev-btn-${p.id}" data-action="${p.devCmd ? 'toggle-dev' : 'prompt-dev'}" data-id="${p.id}" title="${p.devCmd ? esc(p.devCmd) : 'Set dev command'}"><span class="dev-dot ${p.devCmd ? 'off' : 'none'}"></span>Dev</button>
-          </div>
-          <div class="card-btn-row">
-            <button class="btn" data-action="open-ide" data-id="${p.id}" data-ide="code" title="VS Code"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg> VS</button>
-            <button class="btn" data-action="open-ide" data-id="${p.id}" data-ide="cursor" title="Cursor">Cursor</button>
-            <button class="btn" data-action="open-ide" data-id="${p.id}" data-ide="zed" title="Zed">Zed</button>
-            <button class="btn" data-action="open-ide" data-id="${p.id}" data-ide="antigravity" title="Antigravity">AG</button>
-            <button class="btn" data-action="open-browser" data-id="${p.id}" title="Open in Firefox Developer Edition">
-              <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z"/></svg> FF
-            </button>
-            <button class="btn card-github-btn" id="github-btn-${p.id}" data-action="open-github" data-id="${p.id}" style="display:none">GitHub</button>
-            <button class="btn" data-action="session-history" data-id="${p.id}" title="Session history">Sessions</button>
-            <button class="btn" data-action="git-log" data-id="${p.id}" title="Git log">Log</button>
-          </div>
-        </div>
-      </div>
-    </div>`;
+// ─── Per-Tab Zoom ───
+
+function _getActiveViewName() {
+  const el = document.querySelector('.view.active');
+  return el?.id?.replace('-view', '') || null;
 }
 
-export function renderAllCards(projects) {
-  const grid = document.getElementById('project-grid');
-  const newIds = projects.map(p => p.id);
-  if (app._renderedCardIds.length === newIds.length && app._renderedCardIds.every((id, i) => id === newIds[i])) {
-    projects.forEach(p => renderCard(p.id));
-  } else {
-    grid.innerHTML = projects.map(p => cardHTML(p)).join('');
-    app._renderedCardIds = newIds;
-  }
-  if (!grid.dataset.delegated) {
-    grid.dataset.delegated = '1';
-    grid.addEventListener('click', e => {
-      const el = e.target.closest('[data-action]');
-      if (!el) return;
-      const { action, id } = el.dataset;
-      if (action === 'edit-project' || action === 'toggle-pin') e.stopPropagation();
-      switch (action) {
-        case 'jump-changes': jumpToChanges(id); break;
-        case 'edit-project': editProject(id); break;
-        case 'toggle-pin': togglePin(id); break;
-        case 'open-term': openTermWith(id, el.dataset.cmd); break;
-        case 'resume-last': resumeLastSession(id); break;
-        case 'toggle-dev': toggleDevServer(id); break;
-        case 'prompt-dev': promptDevCmd(id); break;
-        case 'open-ide': openIDE(id, el.dataset.ide); break;
-        case 'open-browser': openInFirefoxDev(id); break;
-        case 'open-github': openGitHub(id); break;
-        case 'session-history': showSessionHistory(id); break;
-        case 'git-log': showGitLog(id); break;
-        case 'open-port': e.stopPropagation(); window.open(el.dataset.url, '_blank'); break;
-      }
-    });
-  }
-  setTimeout(updateScrollIndicators, 50);
-  updateEmptyProjectState();
+export function applyViewZoom(name) {
+  const viewEl = document.getElementById(`${name}-view`);
+  if (!viewEl) return;
+  const zoom = app.viewZoom[name] || 100;
+  viewEl.style.zoom = zoom === 100 ? '' : `${zoom}%`;
+  _showZoomIndicator(zoom);
 }
 
-function openInFirefoxDev(projectId) {
-  // Find dev server port for this project
-  const dsInfo = app.devServerState?.find(d => d.projectId === projectId);
-  const url = dsInfo?.port ? `http://localhost:${dsInfo.port}` : null;
-  if (url) {
-    postJson('/api/open-url', { url, browser: 'firefox-dev' })
-      .then(() => showToast(`Firefox Dev → localhost:${dsInfo.port}`))
-      .catch(() => showToast('Failed to open', 'error'));
-  } else {
-    const input = prompt('No dev server running. Enter URL to open in Firefox Developer Edition:', 'http://localhost:3000');
-    if (input) {
-      postJson('/api/open-url', { url: input, browser: 'firefox-dev' })
-        .then(() => showToast(`Firefox Dev → ${input}`))
-        .catch(() => showToast('Failed to open', 'error'));
-    }
-  }
+export function changeViewZoom(delta) {
+  const name = _getActiveViewName();
+  if (!name) return;
+  const current = app.viewZoom[name] || 100;
+  const next = Math.max(50, Math.min(200, current + delta));
+  app.viewZoom[name] = next;
+  try { localStorage.setItem('dl-view-zoom', JSON.stringify(app.viewZoom)); } catch { /* storage unavailable */ }
+  applyViewZoom(name);
+  // Refit terminals if terminal tab
+  if (name === 'terminal') setTimeout(() => notify('fitAllTerminals'), 100);
 }
 
-export function renderSkeletons(count) {
-  document.getElementById('project-grid').innerHTML = Array(count).fill('<div class="skeleton skeleton-card"></div>').join('');
+export function resetViewZoom() {
+  const name = _getActiveViewName();
+  if (!name) return;
+  delete app.viewZoom[name];
+  try { localStorage.setItem('dl-view-zoom', JSON.stringify(app.viewZoom)); } catch { /* storage unavailable */ }
+  applyViewZoom(name);
+  if (name === 'terminal') setTimeout(() => notify('fitAllTerminals'), 100);
 }
 
-// ─── Charts ───
-export function setChartPeriod(days) {
-  app.chartPeriod = days;
-  localStorage.setItem('dl-chart-period', days);
-  document.querySelectorAll('.chart-period button').forEach(b => b.classList.toggle('active', parseInt(b.textContent) === days));
-  const lbl = document.getElementById('chart-period-label');
-  if (lbl) lbl.textContent = `(${days}d)`;
-  renderCosts();
-}
-
-let _chartLoading = false;
-let _chartLoaded = typeof Chart !== 'undefined';
-
-function ensureChartJS() {
-  if (_chartLoaded) return Promise.resolve();
-  if (_chartLoading) return _chartLoading;
-  _chartLoading = new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = 'vendor/chart.min.js';
-    s.onload = () => { _chartLoaded = true; resolve(); };
-    s.onerror = reject;
-    document.head.appendChild(s);
-  });
-  return _chartLoading;
-}
-
-export function renderCosts() {
-  const u = app.state.usage;
-  if (!u?.daily) return;
-  if (!_chartLoaded) { ensureChartJS().then(() => renderCosts()); return; }
-  const allDaily = u.daily;
-  const daily = allDaily.slice(-app.chartPeriod);
-  const labels = daily.map(d => d.date?.slice(5) || '');
-  const tokens = daily.map(d => d.outputTokens || 0);
-  const chartColors = { line: '#818cf8', fill: 'rgba(129,140,248,.08)', grid: 'rgba(255,255,255,.03)', tick: '#565868' };
-  if (app.dailyChart) {
-    app.dailyChart.data.labels = labels;
-    app.dailyChart.data.datasets[0].data = tokens;
-    app.dailyChart.update('none');
-  } else {
-    app.dailyChart = new Chart(document.getElementById('daily-chart'), {
-      type: 'line',
-      data: { labels, datasets: [{ data: tokens, borderColor: chartColors.line, backgroundColor: chartColors.fill, fill: true, tension: 0.3, borderWidth: 2, pointRadius: 1.5, pointHoverRadius: 4 }] },
-      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: chartColors.tick, font: { size: 9 } }, grid: { color: chartColors.grid } }, y: { ticks: { color: chartColors.tick, callback: v => fmtTok(v), font: { size: 9 } }, grid: { color: chartColors.grid } } } },
-    });
-  }
-  const mm = {};
-  daily.forEach(d => (d.modelBreakdowns || []).forEach(m => { const n = m.modelName || '?'; mm[n] = (mm[n] || 0) + (m.outputTokens || 0); }));
-  if (app.modelChart) {
-    app.modelChart.data.labels = Object.keys(mm);
-    app.modelChart.data.datasets[0].data = Object.values(mm);
-    app.modelChart.update('none');
-  } else {
-    app.modelChart = new Chart(document.getElementById('model-chart'), {
-      type: 'doughnut',
-      data: { labels: Object.keys(mm), datasets: [{ data: Object.values(mm), backgroundColor: ['#818cf8', '#34d399', '#fbbf24', '#f87171', '#60a5fa'], borderWidth: 0 }] },
-      options: { responsive: true, maintainAspectRatio: false, cutout: '65%', plugins: { legend: { position: 'bottom', labels: { color: '#9395a5', font: { size: 10 }, padding: 8 } } }, tooltip: { callbacks: { label: ctx => fmtTok(ctx.raw) + ' tok' } } },
-    });
-  }
-}
-
-// ─── Usage Dashboard ───
-export function fetchUsage() {
-  fetchJson('/api/usage').then(data => {
-    app.state.usage = data;
-    app._usageLastUpdated = Date.now();
-    app._usageRetryCount = 0;
-    renderUsage();
-    renderCosts();
-    updateUsageTimestamp();
-  }).catch(err => {
-    app._usageRetryCount++;
-    if (app._usageRetryCount <= 3) {
-      console.warn(`[Usage] Retry ${app._usageRetryCount}/3: ${err.message}`);
-      setTimeout(fetchUsage, 5000 * app._usageRetryCount);
-    }
-    updateUsageTimestamp();
-  });
-}
-
-export function renderUsage() {
-  const u = app.state.usage;
-  if (!u) return;
-  const t = u.today || {};
-  const w = u.week || {};
-  const $ = id => document.getElementById(id);
-  const set = (id, val) => { const e = $(id); if (e) e.textContent = val; };
-  const setHtml = (id, val) => { const e = $(id); if (e) e.innerHTML = val; };
-  set('today-output', fmtTok(t.outputTokens || 0));
-  set('today-msgs', t.messages || 0);
-  set('stat-today', fmtTok(t.outputTokens || 0));
-  set('uc-today-date', t.date || '');
-  set('uc-today-output', fmtTok(t.outputTokens || 0) + ' tok');
-  setHtml('uc-today-stats', [row('Messages', t.messages || 0), row('Sessions', t.sessions || 0), row('Tool Calls', t.toolCalls || 0)].join(''));
-  const todayModels = t.models || {};
-  const totalOut = t.outputTokens || 1;
-  const mEntries = Object.entries(todayModels).sort((a, b) => (b[1].outputTokens || 0) - (a[1].outputTokens || 0));
-  setHtml('uc-today-models', mEntries.length ? mEntries.map(([name, m]) => { const pct = ((m.outputTokens || 0) / totalOut * 100).toFixed(1); return `<div class="uc-model-row"><span class="name">${esc(name)}</span><span class="val">${fmtTok(m.outputTokens || 0)}<span class="pct">(${pct}%)</span></span></div>`; }).join('') : '');
-  set('uc-today-cost', `API Equiv. ~$${(t.apiEquivCost || 0).toFixed(2)}`);
-  set('uc-week-output', fmtTok(w.outputTokens || 0) + ' tok');
-  if (w.resetAt) set('uc-week-reset', `resets ${timeUntil(w.resetAt)}`);
-  setHtml('uc-week-stats', [row('Messages', w.messages || 0)].join(''));
-  const weekModels = w.models || {};
-  const wmEntries = Object.entries(weekModels).sort((a, b) => (b[1].outputTokens || 0) - (a[1].outputTokens || 0));
-  setHtml('uc-week-models', wmEntries.length ? wmEntries.map(([name, m]) => `<div class="uc-model-row"><span class="name">${esc(name)}</span><span class="val">${fmtTok(m.outputTokens || 0)}</span></div>`).join('') : '');
-  set('uc-week-cost', `API Equiv. ~$${(w.apiEquivCost || 0).toFixed(2)}`);
-  setHtml('uc-overview-stats', [row('Total Sessions', t.sessions || 0), row('Cache Read', fmtTok(t.cacheReadTokens || 0) + ' tok'), row('Cache Write', fmtTok(t.cacheCreationTokens || 0) + ' tok'), row('Input Tokens', fmtTok(t.inputTokens || 0))].join(''));
-  const daily = u.daily || [];
-  const allTimeCost = daily.reduce((s, d) => s + (d.totalCost || 0), 0);
-  set('uc-plan-info', `30-day API equiv: ~$${allTimeCost.toFixed(2)}`);
-}
-
-export function updateUsageTimestamp() {
-  let el = document.getElementById('usage-last-updated');
+function _showZoomIndicator(zoom) {
+  let el = document.getElementById('zoom-indicator');
   if (!el) {
-    const container = document.querySelector('.usage-section .section-header') || document.querySelector('.usage-grid');
-    if (container) {
-      el = document.createElement('span');
-      el.id = 'usage-last-updated';
-      el.style.cssText = 'font-size:.7rem;color:var(--text-3);margin-left:auto;cursor:pointer';
-      el.title = 'Click to refresh';
-      el.addEventListener('click', () => fetchUsage());
-      container.appendChild(el);
-    }
+    el = document.createElement('div');
+    el.id = 'zoom-indicator';
+    el.style.cssText = 'position:fixed;bottom:60px;right:20px;background:var(--bg-2);color:var(--text-1);border:1px solid var(--border);padding:4px 12px;border-radius:8px;font-size:13px;font-weight:600;z-index:9999;opacity:0;transition:opacity .2s;pointer-events:none';
+    document.body.appendChild(el);
   }
-  if (el) {
-    if (app._usageLastUpdated) {
-      const ago = Math.round((Date.now() - app._usageLastUpdated) / 1000);
-      el.textContent = ago < 60 ? `${ago}s ago` : `${Math.round(ago / 60)}m ago`;
-      el.style.color = ago > 300 ? 'var(--yellow)' : 'var(--text-3)';
-    } else if (app._usageRetryCount > 0) {
-      el.textContent = `error (retry ${app._usageRetryCount})`;
-      el.style.color = 'var(--red)';
-    }
-  }
+  el.textContent = `${zoom}%`;
+  el.style.opacity = '1';
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => el.style.opacity = '0', 1200);
 }
 
 // ─── Recent Conversations ───
@@ -820,7 +581,7 @@ export async function showConvList() {
     overlay.dataset.delegated = '1';
     overlay.addEventListener('click', e => {
       const el = e.target.closest('[data-action="open-conv"]');
-      if (el) { closeConvList(); openTermWith(el.dataset.pid, 'claude --continue'); }
+      if (el) { closeConvList(); window.openTermWith?.(el.dataset.pid, 'claude --continue'); }
     });
   }
   const body = document.getElementById('conv-body');
@@ -871,64 +632,8 @@ export function toggleTheme() {
   app._themeManual = true;
   applyTheme(app.currentTheme === 'dark' ? 'light' : 'dark');
   localStorage.setItem('dl-theme', app.currentTheme);
-  window.updateTermTheme?.();
+  notify('updateTermTheme');
   showToast(`${app.currentTheme === 'light' ? 'Light' : 'Dark'} theme`, 'info');
-}
-
-// ─── Project Pin ───
-export function savePins() {
-  localStorage.setItem('dl-pinned', JSON.stringify([...app.pinnedProjects]));
-}
-
-export function togglePin(id) {
-  if (app.pinnedProjects.has(id)) app.pinnedProjects.delete(id);
-  else app.pinnedProjects.add(id);
-  savePins();
-  sortAndRenderProjects();
-}
-
-export function setProjectSort(sortBy) {
-  app._cardSortBy = sortBy;
-  localStorage.setItem('dl-card-sort', sortBy);
-  const sel = document.getElementById('card-sort-select');
-  if (sel) sel.value = sortBy;
-  sortAndRenderProjects();
-}
-
-export function sortAndRenderProjects() {
-  const sorted = [...app.projectList].sort((a, b) => {
-    // Pinned first
-    const ap = app.pinnedProjects.has(a.id) ? 0 : 1;
-    const bp = app.pinnedProjects.has(b.id) ? 0 : 1;
-    if (ap !== bp) return ap - bp;
-    // Then by selected sort
-    const sort = app._cardSortBy || 'name';
-    if (sort === 'activity') {
-      const sa = app.state.projects.get(a.id)?.session;
-      const sb = app.state.projects.get(b.id)?.session;
-      const stateOrder = { busy: 0, waiting: 1, idle: 2, no_data: 3, no_sessions: 4 };
-      const oa = stateOrder[sa?.state] ?? 3;
-      const ob = stateOrder[sb?.state] ?? 3;
-      if (oa !== ob) return oa - ob;
-    }
-    if (sort === 'recent') {
-      const ta = app.state.projects.get(a.id)?.session?.lastActivity || '';
-      const tb = app.state.projects.get(b.id)?.session?.lastActivity || '';
-      if (ta !== tb) return ta > tb ? -1 : 1;
-    }
-    if (sort === 'uncommitted') {
-      const ua = app.state.projects.get(a.id)?.git?.uncommittedCount || 0;
-      const ub = app.state.projects.get(b.id)?.git?.uncommittedCount || 0;
-      if (ua !== ub) return ub - ua;
-    }
-    return (a.name || '').localeCompare(b.name || '');
-  });
-  app._renderedCardIds = [];
-  renderAllCards(sorted);
-  app.projectList.forEach(p => {
-    const s = app.state.projects.get(p.id);
-    if (s) renderCard(p.id);
-  });
 }
 
 // ─── Notification Toggle ───
@@ -956,128 +661,7 @@ export function saveNotifFilter() {
 export function toggleProjectNotif(projectId) {
   app._notifFilter[projectId] = !isNotifEnabledForProject(projectId);
   saveNotifFilter();
-  window.renderNotifFilterList?.();
-}
-
-// ─── Project Search & Scroll Indicators ───
-export function setProjectFilter(filter) {
-  app._projectStatusFilter = filter;
-  app._projectTagFilter = '';
-  document.querySelectorAll('.pf-btn').forEach(b => b.classList.toggle('active', b.dataset.filter === filter));
-  document.querySelectorAll('.pf-btn[data-tag]').forEach(b => b.classList.remove('active'));
-  filterProjects();
-}
-
-export function filterProjects() {
-  const query = document.getElementById('project-search').value.toLowerCase().trim();
-  const countEl = document.getElementById('project-search-count');
-  const tags = getProjectTags();
-  let visible = 0;
-  app.projectList.forEach(p => {
-    const card = document.getElementById(`card-${p.id}`);
-    if (!card) return;
-    const pState = app.state.projects.get(p.id);
-    const status = pState?.session?.state || 'no_data';
-    const textMatch = !query || (p.name || '').toLowerCase().includes(query) || (p.stack || '').toLowerCase().includes(query) || status.toLowerCase().includes(query) || (tags[p.id] || '').toLowerCase().includes(query);
-    let statusMatch = true;
-    if (app._projectStatusFilter === 'active') statusMatch = status === 'busy' || status === 'waiting';
-    else if (app._projectStatusFilter === 'idle') statusMatch = status === 'idle' || status === 'no_data' || status === 'no_sessions';
-    const tagMatch = !app._projectTagFilter || tags[p.id] === app._projectTagFilter;
-    card.style.display = textMatch && statusMatch && tagMatch ? '' : 'none';
-    if (textMatch && statusMatch && tagMatch) visible++;
-  });
-  countEl.textContent = query || app._projectStatusFilter !== 'all' || app._projectTagFilter ? `${visible}/${app.projectList.length}` : '';
-  updateScrollIndicators();
-}
-
-// ─── Project Tags ───
-const TAG_KEY = 'dl-project-tags';
-const TAG_COLORS = ['#818cf8', '#34d399', '#f87171', '#fbbf24', '#60a5fa', '#c084fc', '#fb923c', '#22d3ee'];
-
-export function getProjectTags() {
-  try { return JSON.parse(localStorage.getItem(TAG_KEY) || '{}'); } catch { return {}; }
-}
-
-export function setProjectTag(projectId, tag) {
-  const tags = getProjectTags();
-  if (tag) tags[projectId] = tag; else delete tags[projectId];
-  try { localStorage.setItem(TAG_KEY, JSON.stringify(tags)); } catch {}
-  renderTagFilters();
-  filterProjects();
-}
-
-export function getTagColor(tag) {
-  let hash = 0;
-  for (let i = 0; i < tag.length; i++) hash = ((hash << 5) - hash + tag.charCodeAt(i)) | 0;
-  return TAG_COLORS[Math.abs(hash) % TAG_COLORS.length];
-}
-
-export function renderTagFilters() {
-  const container = document.getElementById('project-filter-btns');
-  if (!container) return;
-  // Remove old tag buttons
-  container.querySelectorAll('.pf-btn[data-tag]').forEach(b => b.remove());
-  // Get unique tags
-  const tags = getProjectTags();
-  const uniqueTags = [...new Set(Object.values(tags))].sort();
-  for (const tag of uniqueTags) {
-    const btn = document.createElement('button');
-    btn.className = 'pf-btn' + (app._projectTagFilter === tag ? ' active' : '');
-    btn.dataset.tag = tag;
-    btn.style.borderLeft = `3px solid ${getTagColor(tag)}`;
-    btn.textContent = tag;
-    btn.onclick = () => {
-      app._projectTagFilter = app._projectTagFilter === tag ? '' : tag;
-      container.querySelectorAll('.pf-btn[data-tag]').forEach(b => b.classList.toggle('active', b.dataset.tag === app._projectTagFilter));
-      if (app._projectTagFilter) container.querySelectorAll('.pf-btn:not([data-tag])').forEach(b => b.classList.remove('active'));
-      else container.querySelector('.pf-btn[data-filter="all"]')?.classList.add('active');
-      filterProjects();
-    };
-    container.appendChild(btn);
-  }
-}
-
-export async function fetchAllProjects() {
-  const btn = event.target;
-  btn.disabled = true;
-  btn.textContent = 'Fetching...';
-  let ok = 0, fail = 0;
-  const total = app.projectList.length;
-  const update = () => { btn.textContent = `Fetching... ${ok + fail}/${total}`; };
-  const promises = app.projectList.map(p => postJson(`/api/projects/${p.id}/fetch`, {}).then(d => { if (d.error) fail++; else ok++; update(); }).catch(() => { fail++; update(); }));
-  await Promise.all(promises);
-  btn.disabled = false;
-  btn.textContent = 'Fetch All';
-  showToast(`Fetch All: ${ok} ok${fail ? `, ${fail} failed` : ''}`, fail ? 'error' : 'success');
-}
-
-export async function pullAllProjects() {
-  const btn = event.target;
-  btn.disabled = true;
-  btn.textContent = 'Pulling...';
-  let ok = 0, fail = 0;
-  const total = app.projectList.length;
-  const update = () => { btn.textContent = `Pulling... ${ok + fail}/${total}`; };
-  const promises = app.projectList.map(p => postJson(`/api/projects/${p.id}/pull`, {}).then(d => { if (d.error) fail++; else ok++; update(); }).catch(() => { fail++; update(); }));
-  await Promise.all(promises);
-  btn.disabled = false;
-  btn.textContent = 'Pull All';
-  showToast(`Pull All: ${ok} ok${fail ? `, ${fail} failed` : ''}`, fail ? 'error' : 'success');
-}
-
-export function updateScrollIndicators() {
-  const grid = document.getElementById('project-grid');
-  const left = document.getElementById('scroll-ind-left');
-  const right = document.getElementById('scroll-ind-right');
-  if (!grid || !left || !right) return;
-  left.classList.toggle('hidden', grid.scrollLeft <= 5);
-  right.classList.toggle('hidden', grid.scrollLeft + grid.clientWidth >= grid.scrollWidth - 5);
-}
-
-export function jumpToChanges(projectId) {
-  switchView('diff');
-  const sel = document.getElementById('diff-project');
-  if (sel) { sel.value = projectId; window.loadDiff?.(); }
+  notify('renderNotifFilterList');
 }
 
 // ─── Adaptive Polling ───
@@ -1092,29 +676,6 @@ export function onVisibilityChange() {
   }
   postJson('/api/polling-speed', { multiplier: document.hidden ? 5 : 1 }).catch(() => {});
 }
-
-// ─── Session Elapsed Timer ───
-function fmtElapsed(isoStr) {
-  const ms = Date.now() - new Date(isoStr).getTime();
-  if (ms < 0) return '0s';
-  const s = Math.floor(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ${s % 60}s`;
-  const h = Math.floor(m / 60);
-  return `${h}h ${m % 60}m`;
-}
-
-// Refresh elapsed timers on active cards every second
-setInterval(() => {
-  for (const [id, p] of app.state.projects) {
-    const s = p.session || {};
-    if ((s.state === 'busy' || s.state === 'waiting') && s.lastActivity) {
-      const timer = document.querySelector(`#card-${id} .status-timer`);
-      if (timer) timer.textContent = fmtElapsed(s.lastActivity);
-    }
-  }
-}, 1000);
 
 // ─── Tab Overflow "More" Dropdown ───
 const OVERFLOW_THRESHOLD = 5; // Show first N tabs, rest go into More
@@ -1185,17 +746,7 @@ function closeNavMore() {
   if (menu) menu.classList.remove('open');
 }
 
-// ─── Empty Project State ───
-export function updateEmptyProjectState() {
-  const grid = document.getElementById('project-grid');
-  const empty = document.getElementById('empty-projects');
-  if (!grid || !empty) return;
-  const hasCards = grid.children.length > 0;
-  grid.style.display = hasCards ? '' : 'none';
-  empty.style.display = hasCards ? 'none' : '';
-}
-
-// ──────────── Phase 1: Session Timeline ────────────
+// ──────────── Session Timeline ────────────
 
 export async function showSessionTimeline(projectId, sessionId) {
   const overlay = document.createElement('div');
@@ -1236,7 +787,7 @@ export async function showSessionTimeline(projectId, sessionId) {
 
 function formatK(n) { return n >= 1000 ? (n / 1000).toFixed(1) + 'K' : n; }
 
-// ──────────── Phase 3: Morning Briefing Banner ────────────
+// ──────────── Morning Briefing Banner ────────────
 
 export async function loadBriefing() {
   const banner = document.getElementById('briefing-banner');
@@ -1276,7 +827,7 @@ export async function loadBriefing() {
   }
 }
 
-// ──────────── Phase 2: Smart Alerts ────────────
+// ──────────── Smart Alerts ────────────
 
 export async function checkSmartAlerts() {
   try {
@@ -1296,10 +847,10 @@ export async function checkSmartAlerts() {
         showToast(alert.message, 4000);
       }
     }
-  } catch {}
+  } catch { /* request failed */ }
 }
 
-// ──────────── Phase 5: Batch Commands ────────────
+// ──────────── Batch Commands ────────────
 
 export async function showBatchModal() {
   const overlay = document.createElement('div');
@@ -1388,6 +939,105 @@ export async function executeBatchCmd() {
   }
 }
 
+// ─── Admin Report ───
+let _reportSSE = false;
+let _reportState = null;
+
+async function generateAdminReport() {
+  const btn = document.querySelector('[data-action="generate-admin-report"]');
+  if (btn) { btn.disabled = true; btn.textContent = '생성 중...'; }
+
+  try {
+    const conv = await postJson('/api/agent/conversations', {});
+    _reportState = { convId: conv.id };
+
+    const projects = app.projectList || [];
+    const projectSummary = projects.map(p => `- ${p.name} (${p.stack || '?'}): ${p.sessionState || 'idle'}`).join('\n');
+
+    const prompt = `주간 보고서를 작성해줘.
+
+등록된 프로젝트 (${projects.length}개):
+${projectSummary || '(없음)'}
+
+다음 내용을 포함해:
+1. **프로젝트 현황 요약**: 각 프로젝트 상태, 최근 활동
+2. **리소스 사용량**: COCKPIT:usage로 토큰/비용 현황 조회
+3. **시스템 상태**: COCKPIT:system으로 CPU/메모리 확인
+4. **주요 이슈 및 리스크**: 비용 급등, 시스템 부하 등
+5. **다음 주 권장 사항**
+
+작성 완료 후 COCKPIT:note-create 로 "주간 보고서 - [오늘 날짜]" 제목으로 저장해.
+한국어, 마크다운 형식으로 작성.`;
+
+    await postJson('/api/agent/chat', { convId: conv.id, message: prompt, agentId: 'admin_teamlead' });
+
+    if (!_reportSSE) {
+      _reportSSE = true;
+      for (const evt of ['agent:response', 'agent:done', 'agent:error', 'agent:tool-result']) {
+        document.addEventListener(evt, e => _onReportEvent(evt, e.detail));
+      }
+    }
+  } catch (err) {
+    showToast('보고서 생성 실패: ' + err.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '📊 주간 보고서'; }
+  }
+}
+
+async function _onReportEvent(evt, data) {
+  if (!_reportState || !data) return;
+  if (data.convId && data.convId !== _reportState.convId) return;
+
+  const btn = document.querySelector('[data-action="generate-admin-report"]');
+
+  if (evt === 'agent:tool-result' && data.result) {
+    // Capture note ID from COCKPIT:note-create result
+    const m = data.result.match(/\[([a-f0-9]+)\]/);
+    if (m) _reportState.noteId = m[1];
+  } else if (evt === 'agent:response' || evt === 'agent:done') {
+    if (btn) { btn.disabled = false; btn.textContent = '📊 주간 보고서'; }
+    if (!_reportState) return; // already handled
+    const captured = _reportState;
+    _reportState = null; // clear immediately to prevent double-fire
+    // Fetch actual note content if we captured an ID
+    if (captured.noteId) {
+      try {
+        const note = await fetchJson(`/api/notes/${captured.noteId}`);
+        if (note?.content) _showReportResult(note.content);
+        else if (data.content) _showReportResult(data.content);
+      } catch { if (data.content) _showReportResult(data.content); }
+    } else if (data.content) {
+      _showReportResult(data.content);
+    }
+  } else if (evt === 'agent:error') {
+    showToast('보고서 생성 실패: ' + (data.error || ''), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '📊 주간 보고서'; }
+    _reportState = null;
+  }
+}
+
+function _showReportResult(content) {
+  const section = document.getElementById('smart-actions');
+  if (!section) return;
+
+  section.querySelector('.admin-report-overlay')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'admin-report-overlay';
+  const rendered = simpleMarkdown(content);
+  overlay.innerHTML = `
+    <div class="adm-header">
+      <span class="adm-title">📊 주간 보고서</span>
+      <span style="background:#14b8a6;color:#fff;padding:2px 8px;border-radius:4px;font-size:.75rem">경영지원</span>
+      <button class="adm-close" onclick="this.closest('.admin-report-overlay').remove()">✕</button>
+    </div>
+    <div class="adm-body">${rendered}</div>
+    <div class="adm-actions">
+      <button class="btn primary" data-action="switch-view" data-view="notes" onclick="this.closest('.admin-report-overlay').remove()">Notes에서 보기</button>
+      <button class="btn" onclick="this.closest('.admin-report-overlay').remove()">닫기</button>
+    </div>`;
+  section.insertBefore(overlay, section.firstChild);
+}
+
 // ─── Action Registration ───
 registerClickActions({
   'switch-view': (el) => switchView(el.dataset.view),
@@ -1399,6 +1049,7 @@ registerClickActions({
   'toggle-activity-log': () => document.getElementById('activity-log-list')?.classList.toggle('collapsed'),
   'close-conv-overlay': (el, e) => { if (e.target === el) closeConvList(); },
   'close-conv-list': closeConvList,
+  'generate-admin-report': generateAdminReport,
 });
 registerChangeActions({
   'set-project-sort': (el) => setProjectSort(el.value),
@@ -1406,3 +1057,6 @@ registerChangeActions({
 registerInputActions({
   'filter-projects': filterProjects,
 });
+
+// ─── Initialize sub-modules ───
+initDashboardCards({ switchView });
