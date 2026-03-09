@@ -1,7 +1,8 @@
 import { startForge, stopForge, getForgeRun, listForgeRuns, getPresets as getForgePresets, applyForgeResult, getForgeHistory, getForgeHistoryDetail, forgeReview } from '../lib/forge-service.js';
+import { IS_WIN } from '../lib/platform.js';
 
 export function register(ctx) {
-  const { addRoute, json, withProject, readBody, getProjectById, getProjects, toWinPath, readFileSync, writeFile, mkdir, join, normalize, resolve, unlinkSync, LIMITS } = ctx;
+  const { addRoute, json, withProject, readBody, getProjectById, getProjects, toWinPath, readFileSync, writeFile, mkdir, join, normalize, resolve, unlinkSync, LIMITS, rateLimit } = ctx;
 
   // inline helpers
   function isInsideRoot(fullPath, rootPath) {
@@ -33,6 +34,7 @@ export function register(ctx) {
   });
 
   addRoute('POST', '/api/forge/start', async (req, res) => {
+    if (!rateLimit(`forge:start:${req.socket?.remoteAddress}`, 10)) return json(res, { error: 'Rate limit exceeded' }, 429);
     const body = await readBody(req);
     if (!body.projectId || !body.task) return json(res, { error: 'projectId and task required' }, 400);
     const project = getProjectById(body.projectId);
@@ -43,10 +45,10 @@ export function register(ctx) {
     if (Array.isArray(body.referenceFiles)) {
       for (const rf of body.referenceFiles.slice(0, 10)) {
         try {
-          const fullPath = join(toWinPath(project.path), rf);
+          const fullPath = join(IS_WIN ? toWinPath(project.path) : project.path, rf);
           const content = readFileSync(fullPath, 'utf8');
           referenceFiles.push({ path: rf, content: content.slice(0, 10000) });
-        } catch {}
+        } catch { /* file not readable */ }
       }
     }
 
@@ -88,6 +90,7 @@ export function register(ctx) {
   });
 
   addRoute('POST', '/api/forge/review', async (req, res) => {
+    if (!rateLimit(`forge:review:${req.socket?.remoteAddress}`, 10)) return json(res, { error: 'Rate limit exceeded' }, 429);
     const body = await readBody(req);
     if (!body.projectId || !body.diff) return json(res, { error: 'projectId and diff required' }, 400);
     const project = getProjectById(body.projectId);
@@ -104,7 +107,7 @@ export function register(ctx) {
     const body = await readBody(req);
     if (!body.path || typeof body.content !== 'string') return json(res, { error: 'path and content required' }, 400);
 
-    const root = toWinPath(project.path);
+    const root = IS_WIN ? toWinPath(project.path) : project.path;
     const fullPath = resolve(root, body.path);
     if (!isInsideRoot(fullPath, root)) return json(res, { error: 'Path outside project root' }, 403);
     if (isFileProtected(body.path)) return json(res, { error: 'Protected file' }, 403);
@@ -120,7 +123,7 @@ export function register(ctx) {
     const body = await readBody(req);
     if (!body.path) return json(res, { error: 'path required' }, 400);
 
-    const root = toWinPath(project.path);
+    const root = IS_WIN ? toWinPath(project.path) : project.path;
     const fullPath = resolve(root, body.path);
     if (!isInsideRoot(fullPath, root)) return json(res, { error: 'Path outside project root' }, 403);
 

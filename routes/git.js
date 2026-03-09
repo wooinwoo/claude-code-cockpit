@@ -1,8 +1,27 @@
 import { dirname } from 'node:path';
 import { getBranches } from '../lib/git-service.js';
 
+/**
+ * Register git operation routes (diff, stage, commit, push, pull, stash, branch).
+ * @param {object} ctx - Server context with shared utilities
+ * @param {Function} ctx.addRoute - Register an HTTP route: addRoute(method, pattern, handler)
+ * @param {Function} ctx.json - Send JSON response: json(res, data, statusCode?)
+ * @param {Function} ctx.withProject - Middleware that resolves :id to a project object
+ * @param {Function} ctx.readBody - Parse JSON request body: readBody(req) => Promise<object>
+ * @param {Function} ctx.rateLimit - Rate-limit check: rateLimit(key, maxPerMin) => boolean
+ * @param {Function} ctx.withGitLock - Serialize git operations per project to avoid conflicts
+ * @param {Function} ctx.gitExec - Execute a git command in a project directory
+ * @param {Function} ctx.toWinPath - Convert forward-slash paths to Windows backslash paths
+ * @param {Function} ctx.parseWslPath - Convert WSL paths to Windows paths
+ * @param {Function} ctx.spawnForProject - Spawn a child process scoped to a project directory
+ * @param {Function} ctx.isValidBranch - Validate a branch name string
+ * @param {Function} ctx.isValidStashRef - Validate a stash reference string
+ * @param {object} ctx.LIMITS - Shared limit constants (e.g. claudeTimeoutMs)
+ * @param {object} ctx.poller - SSE poller for broadcasting events to clients
+ * @returns {void}
+ */
 export function register(ctx) {
-  const { addRoute, json, withProject, readBody, rateLimit, withGitLock, gitExec, toWinPath, parseWslPath, spawnForProject, isValidBranch, isValidStashRef, LIMITS, __dirname, join, readFile, spawn, poller } = ctx;
+  const { addRoute, json, withProject, readBody, rateLimit, withGitLock, gitExec, isValidBranch, isValidStashRef, LIMITS, __dirname, join, spawn, poller } = ctx;
 
   // ──────────── callClaude — invoke Claude CLI ────────────
 
@@ -48,7 +67,7 @@ export function register(ctx) {
       const timer = setTimeout(() => {
         if (done) return;
         done = true;
-        try { child.kill('SIGKILL'); } catch {}
+        try { child.kill('SIGKILL'); } catch { /* process already exited */ }
         reject(new Error('Claude CLI timed out'));
       }, timeoutMs);
       child.stdout.on('data', chunk => { stdout += chunk; });
@@ -213,7 +232,7 @@ Example:
     if (!jsonMatch) return json(res, { error: 'Failed to parse AI response', raw: text }, 500);
 
     let plan;
-    try { plan = JSON.parse(jsonMatch[0]); } catch (parseErr) {
+    try { plan = JSON.parse(jsonMatch[0]); } catch {
       return json(res, { error: 'Failed to parse commit plan JSON', raw: jsonMatch[0].slice(0, 500) }, 500);
     }
     if (diffTruncated) plan.truncated = true;

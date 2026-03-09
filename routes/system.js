@@ -1,13 +1,12 @@
 import { computeUsage, getStatsCache } from '../lib/cost-service.js';
 import { getRecentActivity, discoverProjects } from '../lib/claude-data.js';
-import { showNotification } from '../lib/notify.js';
 import { generateQRSvg } from '../lib/qr.js';
 import { checkAlerts, generateBriefing, getAlertPrefs, saveAlertPrefs } from '../lib/briefing-service.js';
 import { getWhitelist, executeBatch, stopBatch, getBatchStatus } from '../lib/batch-service.js';
 import { IS_WIN, getIdeBin, getIdeSpawnOpts, getFirefoxDevBin, openUrl as platformOpenUrl, openFolder as platformOpenFolder } from '../lib/platform.js';
 
 export function register(ctx) {
-  const { addRoute, json, readBody, getProjects, getProjectById, addProject, poller, LAN_TOKEN, isInsideAnyProject, isLocalhost, authCookie, toWinPath, PORT, LIMITS, join, resolve, normalize, readFile, readdir, stat, writeFile, mkdir, existsSync, spawn, tmpdir, randomBytes, timingSafeEqual } = ctx;
+  const { addRoute, json, readBody, rateLimit, getProjects, getProjectById, addProject, poller, LAN_TOKEN, isInsideAnyProject, isLocalhost, authCookie, toWinPath, PORT, LIMITS, join, resolve, normalize, readFile, readdir, stat, writeFile, mkdir, spawn, tmpdir, randomBytes, timingSafeEqual } = ctx;
 
   // ──────────── Inline helpers ────────────
 
@@ -24,9 +23,9 @@ export function register(ctx) {
         if (!f.startsWith('paste-')) continue;
         const fp = join(PASTE_DIR, f);
         const s = await stat(fp);
-        if (now - s.mtimeMs > 60 * 60 * 1000) try { unlinkSync(fp); } catch {}
+        if (now - s.mtimeMs > 60 * 60 * 1000) try { unlinkSync(fp); } catch { /* file already removed */ }
       }
-    } catch {}
+    } catch { /* cleanup failed */ }
   }
   setInterval(cleanupPasteImages, 30 * 60 * 1000);
   setTimeout(cleanupPasteImages, 5000);
@@ -41,6 +40,13 @@ export function register(ctx) {
   // ──────────── Auth ────────────
 
   addRoute('POST', '/api/auth/login', async (req, res) => {
+    // Rate limit: 10 attempts per minute per IP
+    const clientIP = req.socket.remoteAddress || 'unknown';
+    if (!rateLimit(`auth:${clientIP}`, 10)) {
+      res.writeHead(429, { 'Content-Type': 'application/json', 'Retry-After': '60' });
+      res.end(JSON.stringify({ error: 'Too many login attempts. Try again in 1 minute.' }));
+      return;
+    }
     const body = await readBody(req);
     const token = body.token;
     if (!token || token.length !== LAN_TOKEN.length) return json(res, { error: 'Invalid token' }, 401);
@@ -84,6 +90,7 @@ export function register(ctx) {
   addRoute('GET', '/api/health', (_req, res) => {
     json(res, {
       status: 'ok',
+      version: ctx.PKG_VERSION,
       uptime: Math.round(process.uptime()),
       memory: Math.round(process.memoryUsage().rss / 1024 / 1024),
       projects: getProjects().length,

@@ -1,10 +1,30 @@
 import { networkInterfaces } from 'node:os';
 import { readFile, readdir, stat } from 'node:fs/promises';
 import { resolve, normalize, join } from 'node:path';
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { computeUsage } from '../lib/cost-service.js';
 import { getBranches } from '../lib/git-service.js';
+import { IS_WIN, killProcessTree, getIdeBin, getIdeSpawnOpts } from '../lib/platform.js';
 
+/**
+ * Register project CRUD, SSE events, and dev server management routes.
+ * @param {object} ctx - Server context with shared utilities
+ * @param {Function} ctx.addRoute - Register an HTTP route: addRoute(method, pattern, handler)
+ * @param {Function} ctx.json - Send JSON response: json(res, data, statusCode?)
+ * @param {Function} ctx.withProject - Middleware that resolves :id to a project object
+ * @param {Function} ctx.readBody - Parse JSON request body: readBody(req) => Promise<object>
+ * @param {Function} ctx.isLocalhost - Check if request originates from localhost
+ * @param {Function} ctx.getProjects - Get all registered projects
+ * @param {Function} ctx.getProjectById - Look up a single project by ID
+ * @param {Function} ctx.addProject - Persist a new project
+ * @param {Function} ctx.updateProject - Update an existing project by ID
+ * @param {Function} ctx.deleteProject - Remove a project by ID
+ * @param {object} ctx.poller - SSE poller for broadcasting events to clients
+ * @param {Map} ctx.devServers - Map of running dev server processes (projectId => info)
+ * @param {Function} ctx.toWinPath - Convert forward-slash paths to Windows backslash paths
+ * @param {Function} ctx.spawnForProject - Spawn a child process scoped to a project directory
+ * @returns {void}
+ */
 export function register(ctx) {
   const { addRoute, json, withProject, readBody, isLocalhost, getProjects, getProjectById, addProject, updateProject, deleteProject, poller, devServers, toWinPath, spawnForProject } = ctx;
 
@@ -24,7 +44,7 @@ export function register(ctx) {
           result.push({ ip: net.address, type });
         }
       }
-    } catch {}
+    } catch { /* network info unavailable */ }
     // Tailscale first (works remotely), then LAN
     result.sort((a, b) => (a.type === 'tailscale' ? -1 : 1) - (b.type === 'tailscale' ? -1 : 1));
     return result;
@@ -175,15 +195,13 @@ export function register(ctx) {
     const known = ['code', 'cursor', 'windsurf', 'antigravity', 'zed'];
     if (!known.includes(ide)) return json(res, { error: 'Unknown IDE' }, 400);
 
-    const idePath = toWinPath(project.path);
-    const isWin = process.platform === 'win32';
+    const idePath = IS_WIN ? toWinPath(project.path) : project.path;
     if (ide === 'zed') {
-      const zedBin = isWin ? join(process.env.LOCALAPPDATA || '', 'Programs', 'Zed', 'bin', 'zed.exe') : 'zed';
+      const zedBin = getIdeBin('zed');
       spawn(zedBin, [idePath], { detached: true, stdio: 'ignore', shell: false, windowsHide: true }).unref();
     } else {
-      // VS Code etc. handle \\wsl$\ UNC paths natively — M1: .cmd needs shell, IDE from whitelist
-      const ideBin = isWin ? `${ide}.cmd` : ide;
-      spawn(ideBin, [idePath], { detached: true, stdio: 'ignore', shell: isWin, windowsHide: true }).unref();
+      const ideBin = getIdeBin(ide);
+      spawn(ideBin, [idePath], getIdeSpawnOpts()).unref();
     }
     json(res, { opened: true, ide, projectId: project.id });
   }));
@@ -208,7 +226,7 @@ export function register(ctx) {
       return resolvedPath.startsWith(projRoot + '/') || resolvedPath === projRoot;
     });
     if (!pathAllowed) return json(res, { scripts: {} });
-    const pkgPath = join(toWinPath(projectPath), 'package.json');
+    const pkgPath = join(IS_WIN ? toWinPath(projectPath) : projectPath, 'package.json');
     try {
       const raw = await readFile(pkgPath, 'utf8');
       const pkg = JSON.parse(raw);
@@ -217,6 +235,19 @@ export function register(ctx) {
       json(res, { scripts: {} });
     }
   });
+
+  // --- Package scripts by project ID ---
+
+  addRoute('GET', '/api/projects/:id/scripts', withProject(async (req, res, project) => {
+    const pkgPath = join(IS_WIN ? toWinPath(project.path) : project.path, 'package.json');
+    try {
+      const raw = await readFile(pkgPath, 'utf8');
+      const pkg = JSON.parse(raw);
+      json(res, { scripts: pkg.scripts || {} });
+    } catch {
+      json(res, { scripts: {} });
+    }
+  }));
 
   // --- Dev servers ---
 
@@ -257,13 +288,7 @@ export function register(ctx) {
   addRoute('POST', '/api/projects/:id/dev-server/stop', withProject(async (req, res, project) => {
     const ds = devServers.get(project.id);
     if (!ds) return json(res, { error: 'Not running' }, 404);
-    try {
-      if (process.platform === 'win32') {
-        execFile('taskkill', ['/pid', String(ds.process.pid), '/T', '/F'], { timeout: 5000 }, () => {});
-      } else {
-        process.kill(-ds.process.pid, 'SIGTERM');
-      }
-    } catch {}
+    try { killProcessTree(ds.process.pid); } catch { /* process already exited */ }
     devServers.delete(project.id);
     broadcastDevStatus();
     json(res, { stopped: true, projectId: project.id });

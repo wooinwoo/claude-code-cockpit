@@ -1,5 +1,17 @@
-import { chat as agentChat, stopAgent, listConversations as agentListConvs, getConversation as agentGetConv, deleteConversation as agentDeleteConv, newConversation as agentNewConv, setModel as agentSetModel, getModel as agentGetModel } from '../lib/agent-service.js';
+import { chat as agentChat, stopAgent, listConversations as agentListConvs, getConversation as agentGetConv, deleteConversation as agentDeleteConv, newConversation as agentNewConv, setModel as agentSetModel, getModel as agentGetModel, getAgentProfiles, getTeams, setUserName as agentSetUserName, getUserName as agentGetUserName } from '../lib/agent-service.js';
+import { getActiveAlerts, getReports as getMonitorReports, dismissReport as dismissMonitorReport, dismissAlert, clearAllAlerts } from '../lib/monitor-agent.js';
 
+/**
+ * Register AI agent routes (config, conversations, chat, TTS, monitoring).
+ * @param {object} ctx - Server context with shared utilities
+ * @param {Function} ctx.addRoute - Register an HTTP route: addRoute(method, pattern, handler)
+ * @param {Function} ctx.json - Send JSON response: json(res, data, statusCode?)
+ * @param {Function} ctx.readBody - Parse JSON request body: readBody(req) => Promise<object>
+ * @param {Function} ctx.getAiConfig - Get current AI configuration object
+ * @param {Function} ctx.saveAiConfig - Persist AI configuration object
+ * @param {Function} ctx.rateLimit - Rate-limit check: rateLimit(key, maxPerMin) => boolean
+ * @returns {void}
+ */
 export function register(ctx) {
   const { addRoute, json, readBody, getAiConfig, saveAiConfig, rateLimit } = ctx;
 
@@ -31,7 +43,7 @@ export function register(ctx) {
     const body = await readBody(req);
     if (!body.geminiApiKey) return json(res, { error: 'geminiApiKey required' }, 400);
     try {
-      const testResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${body.geminiApiKey}`, {
+      const testResp = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${body.geminiApiKey}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: [{ parts: [{ text: 'Say "OK" in one word.' }] }], generationConfig: { maxOutputTokens: 10 } }),
@@ -66,10 +78,10 @@ export function register(ctx) {
   });
 
   addRoute('POST', '/api/agent/chat', async (req, res) => {
-    if (!rateLimit('agent:chat', 10)) return json(res, { error: 'Too many requests — please wait' }, 429);
+    if (!rateLimit(`agent:chat:${req.socket?.remoteAddress}`, 30)) return json(res, { error: 'Too many requests — please wait' }, 429);
     const body = await readBody(req);
     if (!body.convId || !body.message) return json(res, { error: 'convId and message required' }, 400);
-    try { json(res, agentChat(body.convId, body.message)); }
+    try { json(res, agentChat(body.convId, body.message, body.agentId || null)); }
     catch (err) { json(res, { error: err.message }, 500); }
   });
 
@@ -91,12 +103,36 @@ export function register(ctx) {
     json(res, agentSetModel(body.model));
   });
 
+  // ─── Agent Profiles (multi-agent) ───
+
+  addRoute('GET', '/api/agent/agents', (_req, res) => {
+    json(res, getAgentProfiles());
+  });
+
+  addRoute('GET', '/api/agent/teams', (_req, res) => {
+    json(res, getTeams());
+  });
+
+  addRoute('GET', '/api/agent/company', (_req, res) => {
+    json(res, { teams: getTeams(), agents: getAgentProfiles() });
+  });
+
+  // ─── User Name ───
+  addRoute('POST', '/api/agent/username', async (req, res) => {
+    const body = await readBody(req);
+    if (body.name) agentSetUserName(body.name);
+    json(res, { name: agentGetUserName() });
+  });
+  addRoute('GET', '/api/agent/username', (_req, res) => {
+    json(res, { name: agentGetUserName() });
+  });
+
   // ─── Edge TTS (Neural Korean voice) ───
   // Use fresh instance per request to avoid WebSocket state corruption crash
   // (msedge-tts internal: "Cannot read properties of undefined (reading 'audio')")
 
   addRoute('POST', '/api/agent/tts', async (req, res) => {
-    if (!rateLimit('tts', 15)) return json(res, { error: 'Too many TTS requests' }, 429);
+    if (!rateLimit(`tts:${req.socket?.remoteAddress}`, 15)) return json(res, { error: 'Too many TTS requests' }, 429);
     const body = await readBody(req);
     if (!body.text) return json(res, { error: 'text required' }, 400);
 
@@ -125,5 +161,42 @@ export function register(ctx) {
       console.warn('[TTS] Error:', err.message);
       if (!res.headersSent) json(res, { error: err.message }, 500);
     }
+  });
+
+  // ─── Proactive Alerts ───
+
+  addRoute('GET', '/api/agent/alerts', (_req, res) => {
+    json(res, getActiveAlerts());
+  });
+
+  addRoute('POST', '/api/agent/alerts/dismiss', async (req, res) => {
+    const body = await readBody(req);
+    if (!body.alertId) return json(res, { error: 'alertId required' }, 400);
+    json(res, dismissAlert(body.alertId));
+  });
+
+  addRoute('POST', '/api/agent/alerts/clear', (_req, res) => {
+    json(res, clearAllAlerts());
+  });
+
+  addRoute('POST', '/api/agent/alerts/act', async (req, res) => {
+    const body = await readBody(req);
+    if (!body.alertId || !body.convId || !body.prompt) return json(res, { error: 'alertId, convId, prompt required' }, 400);
+    // Dismiss the alert and start agent chat with the suggested prompt
+    dismissAlert(body.alertId);
+    try { json(res, agentChat(body.convId, body.prompt)); }
+    catch (err) { json(res, { error: err.message }, 500); }
+  });
+
+  // ─── Monitor Reports ───
+
+  addRoute('GET', '/api/agent/reports', (_req, res) => {
+    json(res, getMonitorReports());
+  });
+
+  addRoute('POST', '/api/agent/reports/dismiss', async (req, res) => {
+    const body = await readBody(req);
+    if (!body.reportId) return json(res, { error: 'reportId required' }, 400);
+    json(res, dismissMonitorReport(body.reportId));
   });
 }
