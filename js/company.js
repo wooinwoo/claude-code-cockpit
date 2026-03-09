@@ -309,10 +309,12 @@ function render() {
   // Render zones — clickable team areas open workspace panel
   for (const [zid, z] of Object.entries(ZONES)) {
     const cls = z.room ? 'co-room' : 'co-zone';
-    const clickable = !z.room; // meeting rooms not clickable
+    const clickable = !z.room;
+    const members = _data.agents.filter(a => a.team === zid).length;
     h += `<div class="${cls}" style="--tc:${z.color};left:${z.x}%;top:${z.y}%;width:${z.w}%;height:${z.h}%" ${clickable ? `data-action="co-open-workspace" data-zone="${zid}"` : ''}>
       <span class="co-zlabel">${esc(z.label)}</span>
       ${z.room ? '<div class="co-table"></div>' : ''}
+      ${clickable && members ? `<span class="co-zone-count">${members}</span>` : ''}
     </div>`;
   }
 
@@ -323,9 +325,12 @@ function render() {
     if (!desk) continue;
     const isCeo = a.rank === 'Director' || a.rank === 'CEO';
     const s = S(a.id);
-    h += `<div class="co-sprite ${isCeo ? 'co-sprite-me' : ''}" id="ag-${a.id}" data-state="${s.s}" style="--c:${a.color};left:${desk.x}%;top:${desk.y}%" ${isCeo ? 'data-action="co-change-name"' : `data-action="company-call-agent" data-agent="${esc(a.id)}"`}>
+    const action = isCeo ? 'data-action="co-change-name"' : `data-action="company-show-profile" data-agent="${esc(a.id)}"`;
+    const rank = RK[a.rank] || '';
+    h += `<div class="co-sprite ${isCeo ? 'co-sprite-me' : ''}" id="ag-${a.id}" data-state="${s.s}" style="--c:${a.color};left:${desk.x}%;top:${desk.y}%" ${action}>
       <div class="co-sprite-face" style="background:${isCeo ? 'linear-gradient(135deg,#ef4444,#b91c1c)' : a.color}">${isCeo ? '👤' : a.emoji}</div>
       <span class="co-sprite-name" style="color:${a.color}">${isCeo ? esc(userName) : esc(a.name)}</span>
+      ${!isCeo ? `<span class="co-sprite-rank">${esc(rank)}</span>` : ''}
       <span class="ag-tip">${s.s === 'working' ? esc(s.t || '작업 중...') : s.s === 'done' ? '✓ 완료' : ''}</span>
     </div>`;
   }
@@ -338,6 +343,19 @@ function render() {
     <span class="co-sprite-name" style="color:#94a3b8">모니터</span>
     <span class="ag-tip" id="monitor-tip"></span>
   </div>`;
+
+  // Office decorations
+  h += `
+    <div class="co-deco co-deco-plant" style="left:24%;top:26%">🌿</div>
+    <div class="co-deco co-deco-plant" style="left:50%;top:26%">🪴</div>
+    <div class="co-deco co-deco-plant" style="left:76%;top:26%">🌱</div>
+    <div class="co-deco co-deco-plant" style="left:0.5%;top:60%">🌵</div>
+    <div class="co-deco co-deco-plant" style="left:99%;top:60%">🌿</div>
+    <div class="co-deco co-deco-obj" style="left:49%;top:62%">🧊</div>
+    <div class="co-deco co-deco-obj" style="left:25%;top:94%">🖨️</div>
+    <div class="co-deco co-deco-obj" style="left:75%;top:94%">☕</div>
+    <div class="co-deco co-deco-clock" style="right:6px;top:4px">🕐</div>
+  `;
 
   // Org map button
   h += `<button class="co-orgmap-btn" data-action="co-show-orgmap" title="조직도 / 도구 관계">ORG</button>`;
@@ -434,6 +452,61 @@ function addFeed(ev, d) {
   feed.scrollLeft = feed.scrollWidth;
 }
 
+// ─── Agent Profile Popover ───
+function showAgentProfile(agentId) {
+  document.getElementById('co-profile-pop')?.remove();
+  const agent = _data?.agents?.find(a => a.id === agentId);
+  if (!agent) return;
+  const sprite = document.getElementById(`ag-${agentId}`);
+  if (!sprite) return;
+
+  const tm = TOOL_MAP[agentId] || { primary: [], secondary: [] };
+  const rank = RK[agent.rank] || agent.rank;
+  const teamName = agent.team ? (TEAMS[agent.team]?.name || agent.team) : '특수';
+  const provLabel = agent.provider === 'claude' ? 'Claude' : agent.provider === 'gemini' ? 'Gemini' : agent.provider;
+  const modelShort = agent.model.split('/').pop().split('-').slice(0, 3).join('-');
+  const s = S(agentId);
+  const statusText = s.s === 'working' ? `작업 중: ${s.t || ''}` : s.s === 'done' ? '완료' : '대기';
+
+  const toolTags = tm.primary.map(t => `<span class="co-prof-tool primary">${t}</span>`).join('')
+    + tm.secondary.map(t => `<span class="co-prof-tool secondary">${t}</span>`).join('');
+
+  const pop = document.createElement('div');
+  pop.id = 'co-profile-pop';
+  pop.className = 'co-profile-pop';
+  // Position near sprite
+  const rect = sprite.getBoundingClientRect();
+  const office = document.querySelector('.co-office')?.getBoundingClientRect() || { left: 0, top: 0 };
+  let px = rect.left - office.left + 30, py = rect.top - office.top - 10;
+  if (px + 220 > (office.width || 800)) px = rect.left - office.left - 230;
+  if (py < 0) py = 0;
+  pop.style.left = px + 'px';
+  pop.style.top = py + 'px';
+
+  pop.innerHTML = `
+    <div class="co-prof-header" style="border-color:${agent.color}">
+      <div class="co-prof-face" style="background:${agent.color}">${agent.emoji}</div>
+      <div class="co-prof-info">
+        <b class="co-prof-name">${esc(agent.name)}</b>
+        <span class="co-prof-rank">${esc(rank)} · ${esc(teamName)}</span>
+        <span class="co-prof-model">${esc(provLabel)} / ${esc(modelShort)}</span>
+      </div>
+    </div>
+    <div class="co-prof-status co-status-${s.s}">${statusText}</div>
+    <div class="co-prof-section">
+      <div class="co-prof-label">도구</div>
+      <div class="co-prof-tools">${toolTags}</div>
+    </div>
+    <div class="co-prof-actions">
+      <button class="co-prof-btn" data-action="company-call-agent" data-agent="${esc(agentId)}">지시하기</button>
+    </div>`;
+
+  document.querySelector('.co-office')?.appendChild(pop);
+  // Close on outside click
+  const close = (e) => { if (!pop.contains(e.target) && e.target !== sprite && !sprite.contains(e.target)) { pop.remove(); document.removeEventListener('click', close); } };
+  setTimeout(() => document.addEventListener('click', close), 10);
+}
+
 // ─── Agent Targeting ───
 function targetAgent(agentId) {
   if (!_data) return;
@@ -491,19 +564,59 @@ async function submitTask() {
 function renderTasks() {
   const el = document.getElementById('co-counter-log');
   if (!el) return;
-  if (!_tasks.length) { el.innerHTML = ''; return; }
+  if (!_tasks.length) {
+    el.innerHTML = `<div class="co-chat-empty">
+      <div class="co-chat-empty-icon">💬</div>
+      <div class="co-chat-empty-title">업무를 지시하세요</div>
+      <div class="co-chat-empty-desc">에이전트를 클릭해서 직접 지시하거나<br>아래 입력창에 업무를 입력하면 자동 배정됩니다</div>
+      <div class="co-chat-empty-examples">
+        <span data-action="co-quick-msg" data-msg="오늘 커밋 내용 요약해줘">📝 커밋 요약</span>
+        <span data-action="co-quick-msg" data-msg="프로젝트 전체 현황 브리핑해줘">📊 현황 브리핑</span>
+        <span data-action="co-quick-msg" data-msg="오늘 날씨 알려줘">🌤️ 날씨</span>
+      </div>
+    </div>`;
+    return;
+  }
   el.innerHTML = _tasks.slice(0, 20).map(t => {
-    const isMe = !t.agent;
     const time = new Date(t.ts).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+    const isMe = !t.agent;
     if (isMe || t.status === 'routing') {
-      return `<div class="co-msg co-msg-me"><div class="co-msg-text">${esc(t.message)}</div><small>${time}</small></div>`;
+      return `<div class="co-msg co-msg-me">
+        <div class="co-msg-bubble">${esc(t.message)}</div>
+        <small class="co-msg-time">${time}</small>
+      </div>`;
     }
-    const statusIcon = t.status === 'working' ? '⚡' : t.status === 'done' ? '✅' : t.status === 'error' ? '❌' : '👤';
-    const res = t.result ? `<div class="co-msg-result">${esc(t.result.slice(0, 200))}</div>` : '';
-    return `<div class="co-msg co-msg-agent">
-      <div class="co-msg-head"><span style="color:${t.color || '#888'}">${t.emoji || ''} ${esc(t.agent || '')}</span> ${statusIcon} <small>${time}</small></div>
-      <div class="co-msg-text">${esc(t.message)}</div>
-      ${res}
+    const statusCls = t.status === 'working' ? 'working' : t.status === 'done' ? 'done' : t.status === 'error' ? 'error' : '';
+    const statusLabel = t.status === 'working' ? '작업 중...' : t.status === 'done' ? '완료' : t.status === 'error' ? '오류' : '배정 중';
+    const teamInfo = t.team ? (TEAMS[t.team]?.name || '') : '';
+
+    // Render result with markdown
+    let resHtml = '';
+    if (t.result) {
+      const rendered = simpleMarkdown(t.result);
+      const isLong = t.result.length > 300;
+      resHtml = `<div class="co-msg-result${isLong ? ' collapsed' : ''}" data-task-id="${t.id}">
+        <div class="co-msg-result-content">${rendered}</div>
+        ${isLong ? `<button class="co-msg-expand" data-action="co-toggle-msg" data-task-id="${t.id}">펼치기</button>` : ''}
+      </div>`;
+    }
+
+    // Working spinner
+    const spinner = t.status === 'working' ? '<div class="co-msg-spinner"><span></span><span></span><span></span></div>' : '';
+
+    return `<div class="co-msg co-msg-agent co-msg-${statusCls}">
+      <div class="co-msg-avatar" style="background:${t.color || '#6366f1'}">${t.emoji || '?'}</div>
+      <div class="co-msg-body">
+        <div class="co-msg-head">
+          <span class="co-msg-name" style="color:${t.color || '#888'}">${esc(t.agent || '배정 중')}</span>
+          ${teamInfo ? `<span class="co-msg-team">${esc(teamInfo)}</span>` : ''}
+          <span class="co-msg-status co-status-${statusCls}">${statusLabel}</span>
+          <small class="co-msg-time">${time}</small>
+        </div>
+        <div class="co-msg-question">${esc(t.message)}</div>
+        ${spinner}
+        ${resHtml}
+      </div>
     </div>`;
   }).reverse().join('');
   el.scrollTop = el.scrollHeight;
@@ -1102,7 +1215,11 @@ async function dismissReport(reportId) {
 
 registerClickActions({
   'co-submit-task': submitTask,
-  'company-call-agent': (el) => targetAgent(el.dataset.agent),
+  'company-call-agent': (el) => {
+    document.getElementById('co-profile-pop')?.remove();
+    targetAgent(el.dataset.agent);
+  },
+  'company-show-profile': (el) => showAgentProfile(el.dataset.agent),
   'co-change-name': () => showNameDialog(),
   'co-show-orgmap': showOrgMap,
   'co-close-orgmap': () => document.getElementById('co-orgmap-overlay')?.remove(),
@@ -1117,6 +1234,15 @@ registerClickActions({
   },
   'co-handle-alert': (el) => handleAlert(el.dataset.alertId),
   'co-dismiss-alert': (el) => { el.stopPropagation?.(); dismissAlert(el.dataset.alertId); },
+  'co-quick-msg': (el) => {
+    const input = document.getElementById('co-counter-input');
+    if (input) { input.value = el.dataset.msg; submitTask(); }
+  },
+  'co-toggle-msg': (el) => {
+    const id = el.dataset.taskId;
+    const res = document.querySelector(`.co-msg-result[data-task-id="${id}"]`);
+    if (res) { res.classList.toggle('collapsed'); el.textContent = res.classList.contains('collapsed') ? '펼치기' : '접기'; }
+  },
   'co-toggle-report': (el) => toggleReport(el.dataset.reportId),
   'co-dismiss-report': (el) => { el.stopPropagation?.(); dismissReport(el.dataset.reportId); },
 });

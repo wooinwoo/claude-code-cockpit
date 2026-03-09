@@ -828,22 +828,25 @@
       <!-- Company View -->
       <div class="view" id="company-view" role="tabpanel">
         <div class="co-dashboard" id="company-container">
-          <!-- Org area (scrollable) -->
-          <div class="co-org" id="company-org"></div>
-          <!-- Team workspace panel -->
-          <div class="co-workspace" id="co-workspace"></div>
-          <!-- Reports from agent reviews -->
-          <div class="co-reports" id="co-reports"></div>
-          <!-- Proactive alerts from background monitor -->
-          <div class="co-alerts" id="co-alerts"></div>
-          <!-- Chat log -->
-          <div class="co-chat-log" id="co-counter-log"></div>
-          <!-- Bottom chat bar -->
-          <div class="co-chatbar">
-            <div class="co-chatbar-feed" id="co-activity-feed"></div>
-            <div class="co-chatbar-row">
-              <input id="co-counter-input" class="co-chat-input" placeholder="업무를 지시하세요..." />
-              <button class="co-chat-send" data-action="co-submit-task">전송</button>
+          <!-- Left: Office + workspace -->
+          <div class="co-left">
+            <div class="co-org" id="company-org"></div>
+            <div class="co-workspace" id="co-workspace"></div>
+          </div>
+          <!-- Right: Chat panel (always visible) -->
+          <div class="co-right">
+            <div class="co-right-header">
+              <span class="co-right-title">💬 업무 채팅</span>
+              <div class="co-chatbar-feed" id="co-activity-feed"></div>
+            </div>
+            <div class="co-reports" id="co-reports"></div>
+            <div class="co-alerts" id="co-alerts"></div>
+            <div class="co-chat-log" id="co-counter-log"></div>
+            <div class="co-chatbar">
+              <div class="co-chatbar-row">
+                <input id="co-counter-input" class="co-chat-input" placeholder="업무를 지시하세요... (자동 배정)" />
+                <button class="co-chat-send" data-action="co-submit-task">전송</button>
+              </div>
             </div>
           </div>
         </div>
