@@ -277,6 +277,9 @@ export async function initCompany() {
   const name = getUserName();
   if (name) postJson('/api/agent/username', { name }).catch(() => {});
   render();
+  renderTasks();
+  renderStatsBar();
+  startClock();
   if (!_sseBound) {
     _sseBound = true;
     for (const ev of ['agent:start','agent:thinking','agent:tool','agent:response','agent:done','orch:start','orch:plan','orch:sub-start','orch:sub-done','orch:response','orch:done'])
@@ -328,11 +331,13 @@ function render() {
     const action = isCeo ? 'data-action="co-change-name"' : `data-action="company-show-profile" data-agent="${esc(a.id)}"`;
     const rank = RK[a.rank] || '';
     h += `<div class="co-sprite ${isCeo ? 'co-sprite-me' : ''}" id="ag-${a.id}" data-state="${s.s}" style="--c:${a.color};left:${desk.x}%;top:${desk.y}%" ${action}>
-      <div class="co-sprite-face" style="background:${isCeo ? 'linear-gradient(135deg,#ef4444,#b91c1c)' : a.color}">${isCeo ? '👤' : a.emoji}</div>
+      <div class="co-sprite-face" style="background:${isCeo ? 'linear-gradient(135deg,#ef4444,#b91c1c)' : a.color}">${isCeo ? '👤' : a.emoji}<span class="co-sprite-dot"></span></div>
       <span class="co-sprite-name" style="color:${a.color}">${isCeo ? esc(userName) : esc(a.name)}</span>
       ${!isCeo ? `<span class="co-sprite-rank">${esc(rank)}</span>` : ''}
       <span class="ag-tip">${s.s === 'working' ? esc(s.t || '작업 중...') : s.s === 'done' ? '✓ 완료' : ''}</span>
     </div>`;
+    // Desk icon decoration
+    if (!isCeo) h += `<span class="co-desk-icon" style="left:${desk.x}%;top:${desk.y + 5}%">🖥</span>`;
   }
 
   // Monitor agent sprite
@@ -344,17 +349,22 @@ function render() {
     <span class="ag-tip" id="monitor-tip"></span>
   </div>`;
 
+  // Hallway strips between zone rows
+  h += `<div class="co-hallway" style="top:25%;height:5%"></div>`;
+  h += `<div class="co-hallway" style="top:58%;height:5%"></div>`;
+  h += `<div class="co-hallway" style="top:91%;height:5%"></div>`;
+
   // Office decorations
   h += `
-    <div class="co-deco co-deco-plant" style="left:24%;top:26%">🌿</div>
-    <div class="co-deco co-deco-plant" style="left:50%;top:26%">🪴</div>
-    <div class="co-deco co-deco-plant" style="left:76%;top:26%">🌱</div>
-    <div class="co-deco co-deco-plant" style="left:0.5%;top:60%">🌵</div>
-    <div class="co-deco co-deco-plant" style="left:99%;top:60%">🌿</div>
+    <div class="co-deco co-deco-plant" style="left:24%;top:27%">🌿</div>
+    <div class="co-deco co-deco-plant" style="left:50%;top:27%">🪴</div>
+    <div class="co-deco co-deco-plant" style="left:76%;top:27%">🌱</div>
+    <div class="co-deco co-deco-plant" style="left:0.5%;top:61%">🌵</div>
+    <div class="co-deco co-deco-plant" style="left:99%;top:61%">🌿</div>
     <div class="co-deco co-deco-obj" style="left:49%;top:62%">🧊</div>
     <div class="co-deco co-deco-obj" style="left:25%;top:94%">🖨️</div>
     <div class="co-deco co-deco-obj" style="left:75%;top:94%">☕</div>
-    <div class="co-deco co-deco-clock" style="right:6px;top:4px">🕐</div>
+    <div class="co-live-clock"></div>
   `;
 
   // Org map button
@@ -387,6 +397,54 @@ function startMonitorPulse() {
   }, 1000);
 }
 
+// ─── Stats Bar ───
+function renderStatsBar() {
+  const el = document.getElementById('co-stats-bar');
+  if (!el || !_data) return;
+  const agents = _data.agents || [];
+  const workingCount = agents.filter(a => S(a.id).s === 'working').length;
+  const doneCount = agents.filter(a => S(a.id).s === 'done').length;
+  const pendingTasks = _tasks.filter(t => t.status === 'routing' || t.status === 'assigned').length;
+  const activeTasks = _tasks.filter(t => t.status === 'working').length;
+  const alertCount = _alerts.length;
+
+  el.innerHTML = `
+    <span class="co-stat-item">👥 <span class="co-stat-val">${agents.length}</span> 에이전트</span>
+    <span class="co-stat-sep"></span>
+    <span class="co-stat-item">🔧 <span class="co-stat-val${workingCount ? ' active' : ''}">${workingCount}</span> 작업중</span>
+    ${doneCount ? `<span class="co-stat-item">✅ <span class="co-stat-val">${doneCount}</span> 완료</span>` : ''}
+    <span class="co-stat-sep"></span>
+    <span class="co-stat-item">📋 <span class="co-stat-val">${activeTasks + pendingTasks}</span> 태스크</span>
+    ${alertCount ? `<span class="co-stat-sep"></span><span class="co-stat-item">⚠ <span class="co-stat-val warn">${alertCount}</span> 알림</span>` : ''}
+  `;
+}
+
+// ─── Live Clock ───
+let _clockInterval = null;
+function startClock() {
+  if (_clockInterval) clearInterval(_clockInterval);
+  updateClock();
+  _clockInterval = setInterval(updateClock, 30000);
+}
+function updateClock() {
+  const el = document.querySelector('.co-live-clock');
+  if (!el) return;
+  el.textContent = new Date().toLocaleTimeString('ko-KR', { hour:'2-digit', minute:'2-digit' });
+}
+
+// ─── Zone Active Glow ───
+function updateZoneGlow() {
+  if (!_data) return;
+  const agents = _data.agents || [];
+  const activeTeams = new Set();
+  for (const a of agents) {
+    if (S(a.id).s === 'working' && a.team) activeTeams.add(a.team);
+  }
+  document.querySelectorAll('.co-zone').forEach(z => {
+    z.classList.toggle('has-active', activeTeams.has(z.dataset.zone));
+  });
+}
+
 // ─── Events ───
 function onEv(ev, d) {
   if (!d) return;
@@ -404,6 +462,14 @@ function onEv(ev, d) {
       if (d.tool === 'DELEGATE' && d.targetAgentId) showDelegation(id, d.targetAgentId);
     }
     else if (ev === 'agent:response' || ev === 'agent:done') done(id);
+  }
+  renderStatsBar();
+  updateZoneGlow();
+  // Update chat count
+  const chatCount = document.getElementById('co-chat-count');
+  if (chatCount) {
+    const active = _tasks.filter(t => t.status === 'working').length;
+    chatCount.textContent = active ? `${active} 진행중` : '';
   }
   // task
   const task = _tasks.find(t => t.convId === d.convId);
@@ -522,6 +588,10 @@ function targetAgent(agentId) {
   const input = document.getElementById('co-counter-input');
   if (input) input.placeholder = `${agent.emoji} ${agent.name}에게 지시...`;
 
+  // Update target indicator in chat header
+  const indicator = document.getElementById('co-target-indicator');
+  if (indicator) indicator.innerHTML = `<span class="co-target-emoji">${agent.emoji}</span><span class="co-target-name" style="color:${agent.color}">${esc(agent.name)}</span>`;
+
   // Highlight sprite
   document.querySelectorAll('.co-sprite.targeted').forEach(el => el.classList.remove('targeted'));
   const sprite = document.getElementById(`ag-${agentId}`);
@@ -541,6 +611,8 @@ function clearTarget() {
   document.querySelectorAll('.co-sprite.targeted').forEach(el => el.classList.remove('targeted'));
   const btn = document.querySelector('.co-chat-send');
   if (btn) btn.textContent = '전송';
+  const indicator = document.getElementById('co-target-indicator');
+  if (indicator) indicator.innerHTML = '';
 }
 
 // ─── Task Chat ───
@@ -1006,27 +1078,49 @@ async function wsPlan() {
   return h;
 }
 
-// ─── Design (디자인팀): 스타일 가이드 / 컴포넌트 현황 ───
+// ─── Design (디자인팀): 실시간 테마 변수 + 컴포넌트 현황 ───
 async function wsDesign() {
-  return `<div class="ws-grid">
-    <div class="ws-card"><div class="ws-card-title">디자인 시스템</div>
-      <div class="ws-design-palette">
-        <div class="ws-color-chip" style="background:#6366f1" title="Accent"></div>
-        <div class="ws-color-chip" style="background:#22c55e" title="Success"></div>
-        <div class="ws-color-chip" style="background:#ef4444" title="Error"></div>
-        <div class="ws-color-chip" style="background:#f59e0b" title="Warning"></div>
-        <div class="ws-color-chip" style="background:#0d1117" title="BG"></div>
-        <div class="ws-color-chip" style="background:#e6edf3" title="Text"></div>
-      </div>
-      <div class="ws-kv"><span>테마</span><span>Dark / Light</span></div>
-      <div class="ws-kv"><span>폰트</span><span>Inter, monospace</span></div>
-    </div>
-    <div class="ws-card"><div class="ws-card-title">컴포넌트</div>
-      <div class="ws-kv"><span>뷰</span><span>12개 탭</span></div>
-      <div class="ws-kv"><span>모달</span><span>설정, 커맨드 팔레트</span></div>
-      <div class="ws-kv"><span>반응형</span><span>600px 브레이크</span></div>
-    </div>
+  // Extract live CSS variables
+  const cs = getComputedStyle(document.documentElement);
+  const vars = ['--accent','--bg-0','--bg-1','--text-0','--text-1','--green','--red','--yellow','--blue'];
+  const colors = vars.map(v => ({ name: v.replace('--',''), val: cs.getPropertyValue(v).trim() })).filter(c => c.val);
+
+  // Count views and components
+  const viewCount = document.querySelectorAll('.view').length;
+  const tabCount = document.querySelectorAll('.nav-tab').length;
+
+  // Recently modified design files from diff
+  let recentFiles = [];
+  try {
+    const projects = await fetchJson('/api/projects').catch(() => []);
+    for (const p of projects.slice(0, 3)) {
+      const diff = await fetchJson(`/api/projects/${p.id}/diff`).catch(() => null);
+      if (!diff) continue;
+      const all = [...(diff.stagedFiles || []), ...(diff.unstagedFiles || [])];
+      recentFiles.push(...all.filter(f => /\.(css|scss|html|svg)$/i.test(f.path)).map(f => ({ name: f.path.split('/').pop(), proj: p.name })));
+    }
+  } catch { /* skip */ }
+
+  let h = '<div class="ws-grid">';
+  h += `<div class="ws-card"><div class="ws-card-title">라이브 테마</div>
+    <div class="ws-design-palette">${colors.slice(0, 8).map(c => `<div class="ws-color-chip" style="background:${c.val}" title="${c.name}: ${c.val}"></div>`).join('')}</div>
+    <div class="ws-kv"><span>폰트</span><span>${cs.getPropertyValue('--font').trim().split(',')[0] || 'Inter'}</span></div>
+    <div class="ws-kv"><span>radius</span><span>${cs.getPropertyValue('--radius').trim() || '10px'}</span></div>
   </div>`;
+  h += `<div class="ws-card"><div class="ws-card-title">컴포넌트</div>
+    <div class="ws-kv"><span>뷰</span><span>${viewCount}개</span></div>
+    <div class="ws-kv"><span>탭</span><span>${tabCount}개</span></div>
+    <div class="ws-kv"><span>모달</span><span>${document.querySelectorAll('dialog').length}개</span></div>
+  </div>`;
+  if (recentFiles.length) {
+    h += `<div class="ws-card ws-card-wide"><div class="ws-card-title">최근 수정된 디자인 파일</div><div class="ws-doc-list">`;
+    for (const f of recentFiles.slice(0, 6)) {
+      h += `<div class="ws-doc-item"><span class="ws-doc-icon">🎨</span><span class="ws-doc-name">${esc(f.name)}</span><span class="ws-doc-date">${esc(f.proj)}</span></div>`;
+    }
+    h += '</div></div>';
+  }
+  h += '</div>';
+  return h;
 }
 
 // ─── Admin (경영지원): Jira 미니 보드 ───
@@ -1069,24 +1163,51 @@ async function wsAdmin() {
   return h;
 }
 
-// ─── Marketing (마케팅팀): API 사용량 ───
+// ─── Marketing (마케팅팀): 노트/콘텐츠 + 퀵액션 ───
 async function wsMarketing() {
-  return `<div class="ws-grid">
-    <div class="ws-card"><div class="ws-card-title">콘텐츠 현황</div>
-      <div class="ws-empty">마케팅 데이터는 에이전트에게 요청하세요.<br>"오마장, 이번 달 콘텐츠 현황 정리해줘"</div>
+  const notes = await fetchJson('/api/notes').catch(() => []);
+  let h = '<div class="ws-grid">';
+  h += `<div class="ws-card"><div class="ws-card-title">콘텐츠 (${notes.length})</div>`;
+  if (notes.length) {
+    h += '<div class="ws-doc-list">';
+    for (const n of notes.slice(0, 5)) {
+      const date = n.modified ? new Date(n.modified).toLocaleDateString('ko') : '';
+      h += `<div class="ws-doc-item"><span class="ws-doc-icon">📝</span><span class="ws-doc-name">${esc(n.title || n.name || n.id)}</span><span class="ws-doc-date">${date}</span></div>`;
+    }
+    h += '</div>';
+  } else {
+    h += '<div class="ws-empty">작성된 문서 없음</div>';
+  }
+  h += '</div>';
+  h += `<div class="ws-card"><div class="ws-card-title">빠른 지시</div>
+    <div class="ws-doc-list">
+      <div class="ws-doc-item" style="cursor:pointer" data-action="co-quick-msg" data-msg="이번 주 주요 변경사항 요약 리포트 작성해줘"><span class="ws-doc-icon">📊</span><span class="ws-doc-name">주간 리포트 생성</span></div>
+      <div class="ws-doc-item" style="cursor:pointer" data-action="co-quick-msg" data-msg="프로젝트별 README 현황 체크해줘"><span class="ws-doc-icon">📋</span><span class="ws-doc-name">README 현황 체크</span></div>
+      <div class="ws-doc-item" style="cursor:pointer" data-action="co-quick-msg" data-msg="최근 커밋 기반으로 릴리스 노트 초안 만들어줘"><span class="ws-doc-icon">🚀</span><span class="ws-doc-name">릴리스 노트 초안</span></div>
     </div>
   </div>`;
+  h += '</div>';
+  return h;
 }
 
-// ─── Monitor (감시팀): 시스템 모니터링 ───
+// ─── Monitor (감시팀): 시스템 모니터링 + 포트/CI ───
 async function wsMonitor() {
-  const health = await fetchJson('/api/health').catch(() => ({}));
+  const [health, ports] = await Promise.all([
+    fetchJson('/api/health').catch(() => ({})),
+    fetchJson('/api/ports').catch(() => []),
+  ]);
+  const activePorts = Array.isArray(ports) ? ports.filter(p => p.pid).length : 0;
+  const uptimeH = Math.floor((health.uptime || 0) / 3600);
+  const uptimeM = Math.floor(((health.uptime || 0) % 3600) / 60);
+
   let h = '<div class="ws-grid">';
   h += `<div class="ws-card"><div class="ws-card-title">시스템 상태</div>
     <div class="ws-kv"><span>서버</span><span style="color:#22c55e">● 정상</span></div>
-    <div class="ws-kv"><span>Uptime</span><span>${Math.floor((health.uptime||0)/60)}분</span></div>
-    <div class="ws-kv"><span>메모리</span><span>${health.memory||0}MB</span></div>
-    <div class="ws-kv"><span>SSE</span><span>${health.sseClients||0} clients</span></div>
+    <div class="ws-kv"><span>Uptime</span><span>${uptimeH ? uptimeH + '시간 ' : ''}${uptimeM}분</span></div>
+    <div class="ws-kv"><span>메모리</span><span>${health.memory || 0}MB</span></div>
+    <div class="ws-kv"><span>SSE</span><span>${health.sseClients || 0} clients</span></div>
+    <div class="ws-kv"><span>터미널</span><span>${health.terminals || 0}개</span></div>
+    <div class="ws-kv"><span>활성 포트</span><span>${activePorts}개</span></div>
   </div>`;
 
   // Alerts
@@ -1097,17 +1218,43 @@ async function wsMonitor() {
     }
     h += '</div>';
   }
+
+  // Recent reports
+  const recentReports = _reportList.filter(r => !r.dismissed).slice(0, 3);
+  if (recentReports.length) {
+    h += `<div class="ws-card ws-card-wide"><div class="ws-card-title">최근 리뷰 (${recentReports.length})</div>`;
+    for (const r of recentReports) {
+      const time = new Date(r.timestamp).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+      h += `<div class="ws-doc-item"><span class="ws-doc-icon">${r.agentEmoji || '📄'}</span><span class="ws-doc-name">${esc(r.title || r.type)}</span><span class="ws-doc-date">${time}</span></div>`;
+    }
+    h += '</div>';
+  }
   h += '</div>';
   return h;
 }
 
 // ─── Intern (인턴석) ───
 async function wsIntern() {
-  return `<div class="ws-grid">
-    <div class="ws-card"><div class="ws-card-title">인턴석</div>
-      <div class="ws-empty">막내에게 잡무를 시키세요.<br>"막내야, 오늘 날씨 알려줘"</div>
+  // Show recent tasks assigned to intern
+  const internTasks = _tasks.filter(t => t.agent && (t.agent.includes('막내') || t.agent.includes('인턴'))).slice(0, 5);
+  let h = '<div class="ws-grid">';
+  if (internTasks.length) {
+    h += `<div class="ws-card"><div class="ws-card-title">최근 작업 (${internTasks.length})</div><div class="ws-doc-list">`;
+    for (const t of internTasks) {
+      const icon = t.status === 'done' ? '✅' : t.status === 'working' ? '🔄' : '⏳';
+      h += `<div class="ws-doc-item"><span class="ws-doc-icon">${icon}</span><span class="ws-doc-name">${esc(t.message.slice(0, 40))}</span></div>`;
+    }
+    h += '</div></div>';
+  }
+  h += `<div class="ws-card"><div class="ws-card-title">빠른 지시</div>
+    <div class="ws-doc-list">
+      <div class="ws-doc-item" style="cursor:pointer" data-action="co-quick-msg" data-msg="오늘 날씨 알려줘"><span class="ws-doc-icon">🌤️</span><span class="ws-doc-name">날씨 확인</span></div>
+      <div class="ws-doc-item" style="cursor:pointer" data-action="co-quick-msg" data-msg="현재 시스템 상태 체크해줘"><span class="ws-doc-icon">🔍</span><span class="ws-doc-name">시스템 체크</span></div>
+      <div class="ws-doc-item" style="cursor:pointer" data-action="co-quick-msg" data-msg="열려있는 포트 목록 확인해줘"><span class="ws-doc-icon">🔌</span><span class="ws-doc-name">포트 스캔</span></div>
     </div>
   </div>`;
+  h += '</div>';
+  return h;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -1245,5 +1392,6 @@ registerClickActions({
   },
   'co-toggle-report': (el) => toggleReport(el.dataset.reportId),
   'co-dismiss-report': (el) => { el.stopPropagation?.(); dismissReport(el.dataset.reportId); },
+  'co-clear-chat': () => { _tasks.length = 0; renderTasks(); renderStatsBar(); },
 });
 document.addEventListener('keydown', e => { if (e.target?.id === 'co-counter-input' && e.key === 'Enter') { e.preventDefault(); submitTask(); } });

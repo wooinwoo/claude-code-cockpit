@@ -7,6 +7,30 @@
 .co-org { flex:1; overflow-y:auto; padding:8px 10px; position:relative; }
 .co-org::before { display:none; }
 
+/* ═══ Stats Bar ═══ */
+.co-stats-bar {
+  display:flex; align-items:center; gap:12px;
+  padding:5px 12px; flex-shrink:0;
+  background:rgba(0,0,0,.2);
+  border-bottom:1px solid rgba(255,255,255,.06);
+  font-family:'Cascadia Mono','Consolas',monospace;
+  overflow-x:auto; scrollbar-width:none;
+}
+.co-stats-bar::-webkit-scrollbar { display:none; }
+.co-stats-bar:empty { display:none; }
+.co-stat-item {
+  display:flex; align-items:center; gap:4px;
+  font-size:.52rem; color:var(--text-3); white-space:nowrap;
+}
+.co-stat-item .co-stat-val {
+  font-weight:800; color:var(--text-1);
+}
+.co-stat-item .co-stat-val.active { color:#4ade80; }
+.co-stat-item .co-stat-val.warn { color:#fbbf24; }
+.co-stat-sep {
+  width:1px; height:12px; background:rgba(255,255,255,.08); flex-shrink:0;
+}
+
 /* ═══ Right Panel — Chat ═══ */
 .co-right {
   width:380px; flex-shrink:0;
@@ -123,6 +147,54 @@
   position:absolute; top:-12px; left:50%; transform:translateX(-50%);
   background:rgba(0,0,0,.8); padding:2px 6px; border-radius:3px;
   border:1px solid rgba(74,222,128,.15);
+}
+
+/* ─── Sprite Status Dot ─── */
+.co-sprite-dot {
+  position:absolute; bottom:-1px; right:-1px;
+  width:8px; height:8px; border-radius:50%;
+  border:1.5px solid #080a0f;
+  z-index:3; opacity:0; transition:opacity .2s;
+}
+.co-sprite[data-state="working"] .co-sprite-dot {
+  opacity:1; background:#22c55e;
+  animation:dot-pulse 1.5s ease-in-out infinite;
+}
+.co-sprite[data-state="done"] .co-sprite-dot {
+  opacity:1; background:#60a5fa;
+}
+@keyframes dot-pulse {
+  0%,100% { transform:scale(1); box-shadow:0 0 0 0 rgba(34,197,94,.4); }
+  50% { transform:scale(1.2); box-shadow:0 0 0 4px rgba(34,197,94,0); }
+}
+
+/* ─── Desk Icon (mini decoration near each agent) ─── */
+.co-desk-icon {
+  position:absolute; z-index:1;
+  font-size:8px; opacity:.25;
+  transform:translate(-50%,-50%);
+  pointer-events:none;
+}
+
+/* ─── Zone Active Glow ─── */
+.co-zone.has-active {
+  border-color:color-mix(in srgb, var(--tc) 35%, transparent);
+  box-shadow:inset 0 0 25px color-mix(in srgb, var(--tc) 8%, transparent);
+}
+
+/* ─── Live Clock ─── */
+.co-live-clock {
+  position:absolute; top:5px; right:6px; z-index:3;
+  font-size:.48rem; font-weight:700;
+  color:var(--text-3); opacity:.5;
+  font-family:'Cascadia Mono','Consolas',monospace;
+}
+
+/* ─── Hallway strips between zone rows ─── */
+.co-hallway {
+  position:absolute; left:0; right:0;
+  background:repeating-linear-gradient(90deg, rgba(255,255,255,.015) 0px, rgba(255,255,255,.015) 3px, transparent 3px, transparent 6px);
+  pointer-events:none; z-index:0;
 }
 
 /* Idle bob */
@@ -307,6 +379,32 @@
   transition:all .15s;
 }
 .co-chat-empty-examples span:hover { background:rgba(99,102,241,.2); border-color:rgba(99,102,241,.3); transform:translateY(-1px); }
+
+/* ═══ Chat Header Extras ═══ */
+.co-chat-count {
+  font-size:.48rem; font-weight:800;
+  color:#818cf8; background:rgba(99,102,241,.12);
+  padding:1px 6px; border-radius:8px;
+  font-family:'Cascadia Mono','Consolas',monospace;
+  flex-shrink:0;
+}
+.co-chat-count:empty { display:none; }
+.co-target-indicator {
+  display:flex; align-items:center; gap:4px;
+  font-size:.52rem; font-weight:700;
+  flex-shrink:0;
+}
+.co-target-indicator:empty { display:none; }
+.co-target-indicator .co-target-emoji { font-size:.62rem; }
+.co-target-indicator .co-target-name { color:var(--text-1); }
+.co-chat-clear {
+  background:none; border:none;
+  color:var(--text-3); opacity:.3;
+  font-size:.6rem; cursor:pointer;
+  padding:2px 4px; flex-shrink:0;
+  transition:opacity .15s, color .15s;
+}
+.co-chat-clear:hover { opacity:.8; color:#ef4444; }
 
 /* ═══ Chat Bar ═══ */
 .co-chatbar { flex-shrink:0; border-top:1px solid rgba(255,255,255,.08); background:rgba(0,0,0,.1); padding:10px 14px 12px; }

@@ -830,6 +830,7 @@
         <div class="co-dashboard" id="company-container">
           <!-- Left: Office + workspace -->
           <div class="co-left">
+            <div class="co-stats-bar" id="co-stats-bar"></div>
             <div class="co-org" id="company-org"></div>
             <div class="co-workspace" id="co-workspace"></div>
           </div>
@@ -837,7 +838,10 @@
           <div class="co-right">
             <div class="co-right-header">
               <span class="co-right-title">💬 업무 채팅</span>
+              <span class="co-chat-count" id="co-chat-count"></span>
+              <div class="co-target-indicator" id="co-target-indicator"></div>
               <div class="co-chatbar-feed" id="co-activity-feed"></div>
+              <button class="co-chat-clear" data-action="co-clear-chat" title="대화 지우기">✕</button>
             </div>
             <div class="co-reports" id="co-reports"></div>
             <div class="co-alerts" id="co-alerts"></div>
