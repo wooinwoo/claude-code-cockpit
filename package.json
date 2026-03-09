@@ -4,7 +4,10 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "build": "node scripts/build-installer.js",
+    "test": "node --test tests/lib/*.test.js tests/routes/*.test.js",
+    "test:watch": "node --watch-path=lib --watch-path=routes --watch-path=tests --test tests/lib/*.test.js tests/routes/*.test.js",
+    "bundle": "ncc build server.js -o dist --minify",
+    "build": "npm run bundle && node scripts/build-installer.js",
     "tauri": "tauri"
   },
   "dependencies": {
@@ -14,5 +17,9 @@
     "msedge-tts": "^2.0.4",
     "node-pty": "^1.1.0",
     "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "@vercel/ncc": "^0.38.4",
+    "eslint": "^10.0.3"
   }
 }

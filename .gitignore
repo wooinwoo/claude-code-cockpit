@@ -1,15 +1,21 @@
 # Dependencies
 node_modules/
 
+# ncc bundle output
+dist/
+
 # Tauri build artifacts
 src-tauri/target/
 
 # Built binary
 cockpit.exe
+*.app
 
 # Secrets & credentials
 .cockpit-token
 jira-config.json
+.env
+.env.*
 
 # Runtime state & cache
 session-state.json
@@ -20,9 +26,24 @@ workflow-runs.json
 # User-specific data
 projects.json
 notes/
+workflows/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
 
 # Test/debug files
 test-*
 
 # Tooling
 .playwright-mcp/
+
+# Editor
+*.swp
+*.swo
+*~
