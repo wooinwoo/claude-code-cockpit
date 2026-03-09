@@ -93,12 +93,99 @@ export function initAgent() {
   loadModelSetting();
 }
 
-// Boot wake word independently of panel — called from main.js on page load
+// Boot FAB drag + wake word independently of panel — called from main.js on page load
 export function initWakeWord() {
+  initFabDrag();
   console.log(`[WAKE] initWakeWord called, mode=${_wakeWordMode}`);
   if (_wakeWordMode) {
     setTimeout(() => { startWakeWordListening(); updateWakeWordUI(); }, 1000);
   }
+}
+
+// ─── FAB Drag ───
+function initFabDrag() {
+  const fab = document.getElementById('agent-fab');
+  if (!fab || fab._dragInited) return;
+  fab._dragInited = true;
+
+  let dragging = false, startX, startY, origX, origY, moved = false;
+
+  function onDown(e) {
+    if (e.button && e.button !== 0) return;
+    const t = e.touches ? e.touches[0] : e;
+    dragging = true; moved = false;
+    startX = t.clientX; startY = t.clientY;
+    const rect = fab.getBoundingClientRect();
+    origX = rect.left; origY = rect.top;
+    fab.style.transition = 'none';
+  }
+
+  function onMove(e) {
+    if (!dragging) return;
+    const t = e.touches ? e.touches[0] : e;
+    const dx = t.clientX - startX, dy = t.clientY - startY;
+    if (!moved && Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+    moved = true;
+    e.preventDefault();
+    let nx = origX + dx, ny = origY + dy;
+    nx = Math.max(0, Math.min(window.innerWidth - fab.offsetWidth, nx));
+    ny = Math.max(0, Math.min(window.innerHeight - fab.offsetHeight, ny));
+    fab.style.left = nx + 'px';
+    fab.style.top = ny + 'px';
+    fab.style.right = 'auto';
+    fab.style.bottom = 'auto';
+    updatePanelPosition(nx, ny);
+  }
+
+  function onUp() {
+    if (!dragging) return;
+    dragging = false;
+    fab.style.transition = '';
+    if (moved) {
+      const r = fab.getBoundingClientRect();
+      try { localStorage.setItem('fab-pos', JSON.stringify({ x: r.left, y: r.top })); } catch { /* ignore */ }
+    }
+  }
+
+  fab.addEventListener('mousedown', onDown);
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', onUp);
+  fab.addEventListener('touchstart', onDown, { passive: false });
+  window.addEventListener('touchmove', onMove, { passive: false });
+  window.addEventListener('touchend', onUp);
+
+  // suppress click after drag so toggle doesn't fire
+  fab.addEventListener('click', e => { if (moved) { e.stopImmediatePropagation(); e.preventDefault(); moved = false; } }, true);
+
+  // restore saved position
+  try {
+    const saved = JSON.parse(localStorage.getItem('fab-pos'));
+    if (saved) {
+      const x = Math.min(saved.x, window.innerWidth - fab.offsetWidth);
+      const y = Math.min(saved.y, window.innerHeight - fab.offsetHeight);
+      fab.style.left = x + 'px';
+      fab.style.top = y + 'px';
+      fab.style.right = 'auto';
+      fab.style.bottom = 'auto';
+      updatePanelPosition(x, y);
+    }
+  } catch { /* no saved position */ }
+}
+
+function updatePanelPosition(fabX, fabY) {
+  const panel = document.getElementById('agent-panel');
+  if (!panel) return;
+  const pw = panel.offsetWidth || 440, ph = panel.offsetHeight || 620;
+  const vw = window.innerWidth, vh = window.innerHeight;
+  // place panel above or below fab, left or right
+  let px = fabX, py = fabY - ph - 10;
+  if (py < 8) py = fabY + 66; // below fab if no room above
+  if (px + pw > vw - 8) px = vw - pw - 8;
+  if (px < 8) px = 8;
+  panel.style.left = px + 'px';
+  panel.style.top = py + 'px';
+  panel.style.right = 'auto';
+  panel.style.bottom = 'auto';
 }
 
 // ─── Floating Panel Toggle ───
@@ -112,6 +199,9 @@ export function toggleAgentPanel(_el, forceOpen = false) {
   fab?.classList.toggle('active', _panelOpen);
   if (_panelOpen) {
     initAgent();
+    // Position panel relative to FAB
+    const fabRect = fab?.getBoundingClientRect();
+    if (fabRect && fab.style.left) updatePanelPosition(fabRect.left, fabRect.top);
     // Check API key and show setup prompt if needed
     fetchJson('/api/ai/config').then(cfg => {
       if (!cfg.configured) _showAiSetupPrompt();

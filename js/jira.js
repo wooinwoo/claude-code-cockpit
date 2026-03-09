@@ -7,6 +7,12 @@ let _refreshTimer = null;
 let _sortCol = 'updated';
 let _sortAsc = false;
 
+// Proxy a single Jira image URL through our server (avoids CSP and auth issues)
+function proxyImg(url) {
+  if (!url) return '';
+  return '/api/jira/image-proxy?url=' + encodeURIComponent(url);
+}
+
 // Rewrite Jira-hosted image URLs to go through our proxy (they require auth)
 function proxyJiraImages(html) {
   if (!html || !app.jiraConfig?.url) return html;
@@ -15,7 +21,7 @@ function proxyJiraImages(html) {
   return html.replace(/(<img\s[^>]*src=")([^"]*)/gi, (full, prefix, src) => {
     try {
       const u = new URL(src, app.jiraConfig.url);
-      if (u.hostname === jiraHost) return prefix + '/api/jira/image-proxy?url=' + encodeURIComponent(u.href);
+      if (u.hostname === jiraHost) return prefix + proxyImg(u.href);
     } catch { /* invalid URL */ }
     return full;
   });
@@ -559,13 +565,13 @@ function renderJiraList(issues) {
     const parentInfo = i.parent ? `<div class="jt-parent"><a class="jt-parent-link" href="${esc(jiraUrl(i.parent.key))}" target="_blank" rel="noopener" data-action="noop" title="${esc(i.parent.summary)}">${esc(i.parent.key)}</a> <span class="jt-parent-sum">${esc(i.parent.summary)}</span></div>` : '';
     const typeBadge = i.type ? `<span class="jt-type-badge">${esc(i.type.name)}</span>` : '';
     return `<tr class="${overdue ? 'jt-overdue' : ''}" data-action="show-detail" data-key="${esc(i.key)}">
-    <td>${i.type?.iconUrl ? `<img class="jt-type-icon" src="${esc(i.type.iconUrl)}" title="${esc(i.type.name)}">` : ''}</td>
+    <td>${i.type?.iconUrl ? `<img class="jt-type-icon" src="${proxyImg(i.type.iconUrl)}" title="${esc(i.type.name)}">` : ''}</td>
     <td class="jt-key">${projectTag(i.key)}<a class="jt-key-link" href="${esc(jiraUrl(i.key))}" target="_blank" rel="noopener" title="Open in Jira">${esc(i.key)}</a></td>
     <td class="jt-summary-cell"><div class="jt-summary-row">${typeBadge}<span class="jt-summary">${esc(i.summary)}</span></div>${parentInfo}</td>
     <td>${statusBadge(i.status)}</td>
     <td>${dueBadge(i.dueDate, i.status?.category)}</td>
     <td>${priorityIcon(i.priority)}</td>
-    <td class="jt-assignee">${i.assignee ? `<img class="jt-avatar" src="${esc(i.assignee.avatarUrl)}" alt="">${esc(i.assignee.displayName)}` : '<span style="color:var(--text-3)">-</span>'}</td>
+    <td class="jt-assignee">${i.assignee ? `<img class="jt-avatar" src="${proxyImg(i.assignee.avatarUrl)}" alt="">${esc(i.assignee.displayName)}` : '<span style="color:var(--text-3)">-</span>'}</td>
     <td class="jt-updated">${i.updated ? timeAgo(i.updated) : '-'}</td>
   </tr>`;
   }).join('')}</tbody></table>`;
@@ -642,7 +648,7 @@ function boardCard(i) {
   return `<div class="jira-card${overdue ? ' jc-overdue' : ''}" draggable="true" data-key="${esc(i.key)}" data-action="show-detail">
     <div class="jc-head">
       <span class="jc-key">${esc(i.key)}</span>
-      ${i.type?.iconUrl ? `<img class="jc-type" src="${esc(i.type.iconUrl)}" alt="">` : ''}
+      ${i.type?.iconUrl ? `<img class="jc-type" src="${proxyImg(i.type.iconUrl)}" alt="">` : ''}
     </div>
     <div class="jc-summary">${esc(i.summary)}</div>
     ${i.parent ? `<div class="jc-parent">${esc(i.parent.key)} ${esc(i.parent.summary)}</div>` : ''}
@@ -653,7 +659,7 @@ function boardCard(i) {
       </span>
       <span class="jc-right">
         ${priorityIcon(i.priority)}
-        ${i.assignee?.avatarUrl ? `<img class="jc-avatar" src="${esc(i.assignee.avatarUrl)}" title="${esc(i.assignee.displayName)}">` : ''}
+        ${i.assignee?.avatarUrl ? `<img class="jc-avatar" src="${proxyImg(i.assignee.avatarUrl)}" title="${esc(i.assignee.displayName)}">` : ''}
       </span>
     </div>
   </div>`;
@@ -755,7 +761,7 @@ function renderJiraTimeline(issues) {
         const overdue = due && due < today && cat !== 'done' ? ' overdue' : '';
         return `<div class="jira-gantt-row" data-action="show-detail" data-key="${esc(i.key)}">
         <div class="gr-label" style="min-width:${labelW}px">
-          ${i.type?.iconUrl ? `<img class="jt-type-icon" src="${esc(i.type.iconUrl)}">` : ''}
+          ${i.type?.iconUrl ? `<img class="jt-type-icon" src="${proxyImg(i.type.iconUrl)}">` : ''}
           <span class="gr-key">${esc(i.key)}</span>
           <span class="gr-name">${esc(i.summary)}</span>
           ${due ? `<span class="gr-due">${dueBadge(i.dueDate, cat)}</span>` : ''}
@@ -808,7 +814,7 @@ export async function showIssueDetail(key) {
     const url = jiraUrl(key);
     panel.innerHTML = `<div class="jira-detail-head">
       <div class="jd-head-left">
-        ${issue.type?.iconUrl ? `<img src="${esc(issue.type.iconUrl)}" width="18" height="18" style="border-radius:3px">` : ''}
+        ${issue.type?.iconUrl ? `<img src="${proxyImg(issue.type.iconUrl)}" width="18" height="18" style="border-radius:3px">` : ''}
         <a class="jd-key" href="${esc(url)}" target="_blank" rel="noopener" title="Open in Jira">${esc(issue.key)}</a>
         ${statusBadge(issue.status)}
       </div>
@@ -821,7 +827,7 @@ export async function showIssueDetail(key) {
       <div class="jd-actions"><button class="btn jd-forge-btn" data-action="forge-jira" data-key="${esc(issue.key)}">🔥 Forge</button></div>
       <div class="jd-meta">
         <span class="jd-meta-label">Assignee</span>
-        <span class="jd-meta-value">${issue.assignee ? `<img class="jt-avatar" src="${esc(issue.assignee.avatarUrl)}" alt=""> ${esc(issue.assignee.displayName)}` : 'Unassigned'}</span>
+        <span class="jd-meta-value">${issue.assignee ? `<img class="jt-avatar" src="${proxyImg(issue.assignee.avatarUrl)}" alt=""> ${esc(issue.assignee.displayName)}` : 'Unassigned'}</span>
         <span class="jd-meta-label">Reporter</span>
         <span class="jd-meta-value">${esc(issue.reporter?.displayName || '-')}</span>
         <span class="jd-meta-label">Priority</span>
@@ -901,7 +907,7 @@ function statusBadge(status) {
 
 function priorityIcon(priority) {
   if (!priority) return '';
-  if (priority.iconUrl) return `<img class="jt-priority" src="${esc(priority.iconUrl)}" alt="${esc(priority.name)}" title="${esc(priority.name)}">`;
+  if (priority.iconUrl) return `<img class="jt-priority" src="${proxyImg(priority.iconUrl)}" alt="${esc(priority.name)}" title="${esc(priority.name)}">`;
   const cls = 'jp-' + (priority.name || '').toLowerCase();
   return `<span class="${cls}" title="${esc(priority.name)}">${esc(priority.name)}</span>`;
 }

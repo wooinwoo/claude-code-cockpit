@@ -39,6 +39,9 @@ Desktop.ini
 
 # Test/debug files
 test-*
+*.png
+*.jpg
+*.jpeg
 
 # Tooling
 .playwright-mcp/
