@@ -117,8 +117,8 @@ body::after {
 header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 20px;
+  gap: 10px;
+  padding: 0 12px;
   height: 48px;
   background: rgba(15, 17, 24, 0.82);
   backdrop-filter: blur(16px) saturate(1.4);
@@ -150,6 +150,7 @@ header::after {
   font-weight: 700;
   letter-spacing: -0.02em;
   color: var(--text-0);
+  flex-shrink: 0;
 }
 .logo svg {
   width: 22px;
@@ -164,11 +165,12 @@ header::after {
   padding: 3px;
   border-radius: var(--radius-sm);
   border: 1px solid rgba(255, 255, 255, 0.04);
+  min-width: 0;
 }
 .nav-tab {
-  padding: 5px 14px;
+  padding: 5px 12px;
   border-radius: 6px;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   cursor: pointer;
   color: var(--text-3);
   border: none;
@@ -178,7 +180,9 @@ header::after {
   font-family: var(--font);
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .nav-tab:hover {
   color: var(--text-1);
@@ -293,8 +297,10 @@ header::after {
 
 .header-right {
   display: flex;
-  gap: 10px;
+  gap: 6px;
   align-items: center;
+  flex-shrink: 0;
+  margin-left: auto;
 }
 .header-clock {
   font-family: var(--mono);
@@ -305,13 +311,14 @@ header::after {
 .stat-badge {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
+  gap: 4px;
+  padding: 4px 8px;
   border-radius: var(--radius-sm);
   background: var(--bg-surface);
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   color: var(--text-3);
   border: 1px solid var(--border);
+  white-space: nowrap;
 }
 .stat-badge[onclick] { cursor: pointer; transition: all var(--dur); }
 .stat-badge[onclick]:hover { border-color: var(--accent); background: var(--bg-surface-hover); }
@@ -321,8 +328,8 @@ header::after {
   font-family: var(--mono);
 }
 .header-btn {
-  width: 32px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -332,6 +339,7 @@ header::after {
   color: var(--text-3);
   cursor: pointer;
   transition: all var(--dur);
+  flex-shrink: 0;
 }
 .header-btn:hover {
   color: var(--text-1);

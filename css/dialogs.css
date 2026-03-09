@@ -1153,11 +1153,9 @@ dialog::backdrop {
   color: var(--text-0);
 }
 
-/* ─── Tab Overflow at Narrow Widths ─── */
-@media (max-width: 1200px) {
-  .nav-tabs .nav-tab.overflow-hidden { display: none; }
-  .nav-more-wrap { display: block; }
-}
+/* ─── Tab Overflow ─── */
+.nav-tabs .nav-tab.overflow-hidden { display: none; }
+.nav-more-wrap.visible { display: block; }
 
 /* ─── Responsive Layout ─── */
 @media (max-width: 768px) {

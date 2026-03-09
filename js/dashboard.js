@@ -678,31 +678,60 @@ export function onVisibilityChange() {
 }
 
 // ─── Tab Overflow "More" Dropdown ───
-const OVERFLOW_THRESHOLD = 5; // Show first N tabs, rest go into More
-
 export function setupNavOverflow() {
   const wrap = document.getElementById('nav-more-wrap');
   if (!wrap) return;
-  const tabs = document.querySelectorAll('.nav-tabs > .nav-tab');
+  const tabs = [...document.querySelectorAll('.nav-tabs > .nav-tab')];
   const menu = document.getElementById('nav-more-menu');
   if (!menu) return;
+  const header = document.querySelector('header');
+  const logo = document.querySelector('.logo');
+  const headerRight = document.querySelector('.header-right');
+  if (!header || !headerRight) return;
+
+  // 1. Show all tabs + More to measure
+  tabs.forEach(t => t.classList.remove('overflow-hidden'));
+  wrap.classList.add('visible');
+  wrap.style.display = 'block';
+
+  // 2. Calculate available space for tabs
+  const headerW = header.clientWidth;
+  const logoW = logo ? logo.offsetWidth : 0;
+  const rightW = headerRight.offsetWidth;
+  const moreBtn = document.getElementById('nav-more-btn');
+  const moreBtnW = moreBtn ? moreBtn.offsetWidth + 8 : 60;
+  const headerGap = 10; // gap between logo, tabs, right
+  const available = headerW - logoW - rightW - moreBtnW - headerGap * 3;
+
+  // 3. Find how many tabs fit
+  let usedW = 0;
+  let threshold = tabs.length;
+  for (let i = 0; i < tabs.length; i++) {
+    usedW += tabs[i].offsetWidth + 1; // +1 for gap
+    if (usedW > available) {
+      threshold = i;
+      break;
+    }
+  }
+
+  // 4. Apply
   menu.innerHTML = '';
+  let hasOverflow = false;
   tabs.forEach((tab, i) => {
-    if (i >= OVERFLOW_THRESHOLD) {
+    if (i >= threshold) {
+      hasOverflow = true;
       tab.classList.add('overflow-hidden');
       const item = document.createElement('button');
       item.className = 'nav-more-item' + (tab.classList.contains('active') ? ' active' : '');
       item.innerHTML = tab.querySelector('svg')?.outerHTML + '<span>' + (tab.querySelector('.tab-label')?.textContent || tab.textContent.trim()) + '</span>';
       item.onclick = () => { tab.click(); closeNavMore(); };
       menu.appendChild(item);
-    } else {
-      tab.classList.remove('overflow-hidden');
     }
   });
+  wrap.classList.toggle('visible', hasOverflow);
+  if (!hasOverflow) wrap.style.display = '';
   // Show More btn highlight if any overflow tab is active
-  const moreBtn = document.getElementById('nav-more-btn');
-  const anyActive = [...tabs].slice(OVERFLOW_THRESHOLD).some(t => t.classList.contains('active'));
-  if (moreBtn) moreBtn.classList.toggle('active', anyActive);
+  if (moreBtn) moreBtn.classList.toggle('active', tabs.slice(threshold).some(t => t.classList.contains('active')));
 
   // Add Settings item (visible on mobile where header-right is hidden)
   if (window.matchMedia('(max-width: 600px)').matches) {
@@ -728,7 +757,7 @@ export function toggleNavMore() {
     const items = menu.querySelectorAll('.nav-more-item');
     let idx = 0;
     tabs.forEach((tab, i) => {
-      if (i >= OVERFLOW_THRESHOLD && items[idx]) {
+      if (tab.classList.contains('overflow-hidden') && items[idx]) {
         items[idx].classList.toggle('active', tab.classList.contains('active'));
         idx++;
       }
