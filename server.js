@@ -19,12 +19,14 @@ import { IS_WIN, getShell, killProcessTree, openUrl as platformOpenUrl } from '.
 import { gitExec, spawnForProject, parseWslPath, toWinPath } from './lib/wsl-utils.js';
 import { init as initWorkflows, listWorkflowDefs, getWorkflowDef, startRun as startWorkflowRun, listRuns as listWorkflowRuns, getRunDetail as getWorkflowRunDetail } from './lib/workflows-service.js';
 import { init as initScheduler } from './lib/workflow-scheduler.js';
-import { init as initAgent } from './lib/agent-service.js';
+import { init as initAgent, chat as agentChat, newConversation as agentNewConv } from './lib/agent-service.js';
+import { init as initMonitorAgent } from './lib/monitor-agent.js';
 import { checkAlerts, saveDailySnapshot, generateBriefing } from './lib/briefing-service.js';
 import { getAllStats as getMonitorStats } from './lib/monitor-service.js';
 import { initBatch } from './lib/batch-service.js';
+import { logger } from './lib/logger.js';
 import { initForge } from './lib/forge-service.js';
-import { listNotes, getNote } from './lib/notes-service.js';
+import { listNotes, getNote, createNote, updateNote } from './lib/notes-service.js';
 
 // Route modules
 import { register as regNotes } from './routes/notes.js';
@@ -43,25 +45,38 @@ import { register as regApiTester } from './routes/api-tester.js';
 
 // node-pty and ws are CJS modules
 const require = createRequire(import.meta.url);
-const pty = require('node-pty');
-const { WebSocketServer } = require('ws');
+let pty, WebSocketServer;
+try {
+  pty = require('node-pty');
+  ({ WebSocketServer } = require('ws'));
+} catch (err) {
+  logger.error('server', `Missing native dependency: ${err.message}`);
+  logger.error('server', 'Run: npm install');
+  process.exit(1);
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const poller = new Poller();
+const PKG_VERSION = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'utf8')).version;
 
 // Detect default shell (cross-platform)
 const _defaultShell = getShell();
 
 // Prevent server crash from unhandled promise rejections (e.g., msedge-tts WebSocket errors)
 process.on('unhandledRejection', (reason) => {
-  console.warn('[UnhandledRejection]', reason?.message || reason);
+  logger.warn('server', 'UnhandledRejection', reason?.message || reason);
+});
+
+process.on('uncaughtException', (err) => {
+  logger.error('server', `Uncaught exception: ${err.message}`, err.stack);
+  process.exit(1);
 });
 
 // State file lives in %LOCALAPPDATA%/cockpit (survives reinstall)
 const STATE_FILE = join(DATA_DIR, 'session-state.json');
 
 // ──────────── Perf helpers ────────────
-const execFileAsync = promisify(execFile);
+const _execFileAsync = promisify(execFile);
 // Cache index.html in memory (reload on file change in dev)
 let _cachedHTML = null;
 async function getCachedHTML() {
@@ -69,7 +84,7 @@ async function getCachedHTML() {
   return _cachedHTML;
 }
 // Invalidate cache when file changes (dev convenience)
-try { watch(join(__dirname, 'index.html'), () => { _cachedHTML = null; }); } catch {}
+try { watch(join(__dirname, 'index.html'), () => { _cachedHTML = null; }); } catch { /* watch not supported in this env */ }
 
 // Git concurrency: serialize git ops per project to prevent lock conflicts
 const _gitLocks = new Map();
@@ -103,9 +118,9 @@ function loadOrCreateToken() {
       const saved = readFileSync(TOKEN_FILE, 'utf8').trim();
       if (saved.length >= 16) return saved;
     }
-  } catch {}
+  } catch { /* corrupt token file — regenerate */ }
   const token = randomBytes(16).toString('hex');
-  try { writeFileSync(TOKEN_FILE, token, { mode: 0o600 }); } catch {}
+  try { writeFileSync(TOKEN_FILE, token, { mode: 0o600 }); } catch { /* non-critical — token lives in memory */ }
   return token;
 }
 const LAN_TOKEN = loadOrCreateToken();
@@ -135,7 +150,7 @@ function authCookie(req) {
 // m11: Timing-safe token comparison
 function safeTokenCompare(a, b) {
   if (!a || !b || a.length !== b.length) return false;
-  try { return timingSafeEqual(Buffer.from(a), Buffer.from(b)); } catch { return false; }
+  try { return timingSafeEqual(Buffer.from(a), Buffer.from(b)); } catch { return false; /* encoding error — treat as mismatch */ }
 }
 
 function isAuthenticated(req) {
@@ -156,10 +171,10 @@ function csrfCheck(req) {
   const referer = req.headers['referer'] || '';
   const host = req.headers['host'] || '';
   if (origin) {
-    try { return new URL(origin).host === host; } catch { return false; }
+    try { return new URL(origin).host === host; } catch { return false; /* malformed origin URL */ }
   }
   if (referer) {
-    try { return new URL(referer).host === host; } catch { return false; }
+    try { return new URL(referer).host === host; } catch { return false; /* malformed referer URL */ }
   }
   // No origin/referer: allow localhost (non-browser tools like curl), block LAN
   if (isLocalhost(req)) return true;
@@ -309,16 +324,16 @@ addRoute('GET', '/', async (_req, res) => {
   res.end(await getCachedHTML());
 });
 
-// Serve static assets (style.css, app.js, js/*.js modules)
+// Serve static assets (style.css, js/*.js modules)
 const STATIC_TYPES = { '.css': 'text/css', '.js': 'text/javascript', '.map': 'application/json' };
-for (const file of ['style.css', 'app.js']) {
+for (const file of ['style.css']) {
   const ext = file.slice(file.lastIndexOf('.'));
   addRoute('GET', `/${file}`, async (_req, res) => {
     try {
       const content = await readFile(join(__dirname, file), 'utf8');
       res.writeHead(200, { 'Content-Type': `${STATIC_TYPES[ext]}; charset=utf-8`, 'Cache-Control': 'no-store' });
       res.end(content);
-    } catch { res.writeHead(404); res.end('Not found'); }
+    } catch { /* file not found */ res.writeHead(404); res.end('Not found'); }
   });
 }
 // Serve PWA files
@@ -327,14 +342,14 @@ addRoute('GET', '/manifest.json', async (_req, res) => {
     const content = await readFile(join(__dirname, 'manifest.json'), 'utf8');
     res.writeHead(200, { 'Content-Type': 'application/manifest+json; charset=utf-8' });
     res.end(content);
-  } catch { res.writeHead(404); res.end('Not found'); }
+  } catch { /* file not found */ res.writeHead(404); res.end('Not found'); }
 });
 addRoute('GET', '/sw.js', async (_req, res) => {
   try {
     const content = await readFile(join(__dirname, 'sw.js'), 'utf8');
     res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Service-Worker-Allowed': '/' });
     res.end(content);
-  } catch { res.writeHead(404); res.end('Not found'); }
+  } catch { /* file not found */ res.writeHead(404); res.end('Not found'); }
 });
 // Serve JS modules from js/ directory
 addRoute('GET', '/js/:filename', async (req, res) => {
@@ -344,7 +359,7 @@ addRoute('GET', '/js/:filename', async (req, res) => {
     const content = await readFile(join(__dirname, 'js', filename), 'utf8');
     res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(content);
-  } catch { res.writeHead(404); res.end('Not found'); }
+  } catch { /* file not found */ res.writeHead(404); res.end('Not found'); }
 });
 
 // Serve CSS module files
@@ -355,7 +370,7 @@ addRoute('GET', '/css/:filename', async (req, res) => {
     const content = await readFile(join(__dirname, 'css', filename), 'utf8');
     res.writeHead(200, { 'Content-Type': 'text/css; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(content);
-  } catch { res.writeHead(404); res.end('Not found'); }
+  } catch { /* file not found */ res.writeHead(404); res.end('Not found'); }
 });
 
 // Serve vendor files (xterm.js etc.)
@@ -367,7 +382,7 @@ addRoute('GET', '/vendor/:filename', async (req, res) => {
     const content = await readFile(join(__dirname, 'vendor', filename));
     res.writeHead(200, { 'Content-Type': `${ext}; charset=utf-8`, 'Cache-Control': 'no-store' });
     res.end(content);
-  } catch { res.writeHead(404); res.end('Not found'); }
+  } catch { /* file not found */ res.writeHead(404); res.end('Not found'); }
 });
 
 // ──────────── Dev Server State ────────────
@@ -417,7 +432,7 @@ function callClaude(prompt, { timeoutMs = LIMITS.claudeTimeoutMs, model = 'haiku
     const timer = setTimeout(() => {
       if (done) return;
       done = true;
-      try { child.kill('SIGKILL'); } catch {}
+      try { child.kill('SIGKILL'); } catch { /* process already exited */ }
       reject(new Error('Claude CLI timed out'));
     }, timeoutMs);
     child.stdout.on('data', chunk => { stdout += chunk; });
@@ -434,14 +449,93 @@ function callClaude(prompt, { timeoutMs = LIMITS.claudeTimeoutMs, model = 'haiku
   });
 }
 
+/**
+ * callClaudeStream — invoke Claude CLI with streaming output.
+ * Calls onChunk(text) for each text delta.
+ * Returns full accumulated text.
+ */
+function callClaudeStream(prompt, { timeoutMs = LIMITS.claudeTimeoutMs, model = 'haiku', systemPrompt, onChunk, continue: useContinue = false } = {}) {
+  return new Promise((resolve, reject) => {
+    const isWin = process.platform === 'win32';
+    const env = { ...process.env };
+    delete env.CLAUDECODE;
+
+    let bin, args;
+    if (isWin) {
+      const nodeExe = process.execPath;
+      const cliJs = join(dirname(nodeExe), 'node_modules', '@anthropic-ai', 'claude-code', 'cli.js');
+      bin = nodeExe;
+      args = [cliJs, '-p', '--verbose', '--model', model, '--output-format', 'stream-json'];
+    } else {
+      bin = 'claude';
+      args = ['-p', '--verbose', '--model', model, '--output-format', 'stream-json'];
+    }
+    if (useContinue) args.push('--continue');
+    if (systemPrompt) args.push('--system-prompt', systemPrompt);
+
+    const child = spawn(bin, args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true,
+      shell: false,
+      env,
+    });
+
+    let fullText = '', stderr = '', done = false;
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      try { child.kill('SIGKILL'); } catch { /* process already exited */ }
+      reject(new Error('Claude CLI timed out'));
+    }, timeoutMs);
+
+    let buffer = '';
+    child.stdout.on('data', chunk => {
+      buffer += chunk.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        try {
+          const obj = JSON.parse(line);
+          if (obj.type === 'content_block_delta' && obj.delta?.type === 'text_delta') {
+            fullText += obj.delta.text;
+            if (onChunk) onChunk(obj.delta.text);
+          } else if (obj.type === 'message' && obj.message?.content) {
+            // Final message fallback
+            for (const block of obj.message.content) {
+              if (block.type === 'text' && block.text && !fullText) {
+                fullText = block.text;
+                if (onChunk) onChunk(block.text);
+              }
+            }
+          } else if (obj.type === 'result' && typeof obj.result === 'string' && !fullText) {
+            fullText = obj.result;
+            if (onChunk) onChunk(obj.result);
+          }
+        } catch { /* incomplete JSON line — skip */ }
+      }
+    });
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    child.on('error', err => { if (!done) { done = true; clearTimeout(timer); reject(new Error(`Failed to run claude CLI: ${err.message}`)); } });
+    child.on('close', code => {
+      if (done) return;
+      done = true; clearTimeout(timer);
+      if (code !== 0) reject(new Error(stderr.trim() || `claude exited with code ${code}`));
+      else resolve(fullText);
+    });
+    child.stdin.write(prompt);
+    child.stdin.end();
+  });
+}
+
 // ─── Route Context & Registration ───
 const routeCtx = {
   addRoute, json, withProject, readBody, rateLimit,
   getProjects, getProjectById, addProject, updateProject, deleteProject,
-  getJiraConfig, saveJiraConfig, getAiConfig, saveAiConfig,
+  getJiraConfig, saveJiraConfig, getAiConfig, saveAiConfig, callClaudeStream,
   withGitLock, gitExec, toWinPath, parseWslPath, spawnForProject,
   isInsideAnyProject, isValidBranch, isValidStashRef, isLocalhost, authCookie,
-  PORT, LIMITS, DATA_DIR, __dirname,
+  PORT, LIMITS, DATA_DIR, __dirname, PKG_VERSION,
   readFile, readdir, stat, writeFile, mkdir, existsSync, readFileSync, unlinkSync,
   join, resolve, normalize, spawn, execFile, randomBytes, timingSafeEqual, tmpdir,
   poller, devServers, LAN_TOKEN,
@@ -468,7 +562,7 @@ regApiTester(routeCtx);
 // ──────────── Polling ────────────
 
 const _prevSessionStates = new Map();
-let _notifyEnabled = true;
+const _notifyEnabled = true;
 
 function registerProjectPollers(project) {
   poller.register(`session:${project.id}`, () => {
@@ -495,8 +589,8 @@ poller.register('cost:daily', computeUsage, POLL_INTERVALS.costData, 'cost:updat
 poller.register('activity', () => getRecentActivity(), POLL_INTERVALS.activity, 'activity:new');
 
 // Initialize Workflows engine — m13: handle init errors
-try { initWorkflows(poller, callClaude); } catch (err) { console.error('[Workflows] Init failed:', err.message); }
-try { initScheduler(poller, startWorkflowRun); } catch (err) { console.error('[Scheduler] Init failed:', err.message); }
+try { initWorkflows(poller, callClaude); } catch (err) { logger.error('workflows', 'Init failed', err.message); }
+try { initScheduler(poller, startWorkflowRun); } catch (err) { logger.error('scheduler', 'Init failed', err.message); }
 
 // Initialize Agent engine
 try {
@@ -506,12 +600,15 @@ try {
     {
       getJiraConfig,
       geminiApiKey: getAiConfig()?.geminiApiKey || null,
+      callClaudeStream,
       cockpit: {
         computeUsage,
         getProjects,
         getProjectById,
         listNotes,
         getNote,
+        createNote,
+        updateNote,
         getAllStats: getMonitorStats,
         generateBriefing,
         checkAlerts,
@@ -520,17 +617,75 @@ try {
         getWorkflowDef,
         listWorkflowRuns,
         getWorkflowRunDetail,
+        startWorkflowRun,
         poller,
+        // Terminal access for agent
+        listTerminals: () => {
+          const result = [];
+          for (const [id, t] of terminals) {
+            result.push({ termId: id, projectId: t.projectId, command: t.command || '' });
+          }
+          return result;
+        },
+        readTerminalBuffer: (termId) => {
+          const t = terminals.get(termId);
+          if (!t) return null;
+          return bufRead(t);
+        },
+        writeTerminalInput: (termId, data) => {
+          const t = terminals.get(termId);
+          if (!t) return false;
+          t.pty.write(data);
+          return true;
+        },
+        createTerminal: (projectId, command) => {
+          const project = getProjectById(projectId);
+          if (!project) return null;
+          const termId = 'agent-' + Date.now();
+          const shell = getShell();
+          const shellArgs = IS_WIN ? [] : ['-l'];
+          let cwd;
+          try { cwd = IS_WIN ? toWinPath(project.path) : project.path; } catch { cwd = project.path; }
+          const term = pty.spawn(shell, shellArgs, {
+            name: 'xterm-256color', cols: 120, rows: 30, cwd, env: cleanEnv,
+          });
+          term.onData((data) => {
+            const e = terminals.get(termId);
+            if (e) bufAppend(e, data);
+            const msg = JSON.stringify({ type: 'output', termId, data });
+            for (const client of wss.clients) { try { client.send(msg); } catch { /* client disconnected */ } }
+          });
+          term.onExit(({ exitCode }) => {
+            terminals.delete(termId);
+            const msg = JSON.stringify({ type: 'exit', termId, exitCode });
+            for (const client of wss.clients) { try { client.send(msg); } catch { /* client disconnected */ } }
+            saveTerminalState();
+          });
+          let safeCommand = '';
+          if (command && typeof command === 'string' && command.length < 500
+              && /^(claude|npm|npx|node|git|python|pip|docker|yarn|pnpm|bun|cargo|make|cmake|go|rustc|ruby|java|javac|mvn|gradle|dotnet|terraform|kubectl|helm|ansible|packer|deno|tsx|ts-node|jest|vitest|pytest|eslint|prettier|tsc)\b/.test(command)
+              && !/[&|<>^;`$]/.test(command)) {
+            safeCommand = command;
+          }
+          terminals.set(termId, { pty: term, projectId, _bufArr: [], _bufLen: 0, command: safeCommand });
+          const createdMsg = JSON.stringify({ type: 'created', termId, projectId });
+          for (const client of wss.clients) { try { client.send(createdMsg); } catch { /* client disconnected */ } }
+          if (safeCommand) term.write(safeCommand + '\r');
+          saveTerminalState();
+          return termId;
+        },
       },
     }
   );
-} catch (err) { console.error('[Agent] Init failed:', err.message); }
+} catch (err) { logger.error('agent', 'Init failed', err.message); }
+
+// Agent Monitor init — deferred to after terminals Map declaration (see below)
 
 // ──────────── Init new services ────────────
 
 initBatch(poller);
 try { initForge(poller, callClaude, (path) => getProjects().find(p => p.path === path)); }
-catch (err) { console.error('[Forge] Init failed:', err.message); }
+catch (err) { logger.error('forge', 'Init failed', err.message); }
 
 // Morning briefing: save daily snapshot on startup
 try {
@@ -539,16 +694,17 @@ try {
     projectStates[p.id] = { session: null, git: null, prs: null };
   }
   saveDailySnapshot(projectStates, null);
-} catch {}
+} catch { /* non-critical — briefing snapshot can fail silently */ }
 
 // ──────────── Server ────────────
 
 const server = createServer(async (req, res) => {
   // m10: Security headers on all responses
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
-  res.setHeader('Referrer-Policy', 'same-origin');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' https://cdn.jsdelivr.net 'unsafe-inline'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src 'self' https://fonts.gstatic.com; connect-src 'self' ws: wss:; img-src 'self' data: blob:; worker-src 'self'");
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('X-XSS-Protection', '0');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws://localhost:* http://localhost:*; font-src 'self'");
 
   const url = new URL(req.url, `http://localhost:${PORT}`);
 
@@ -585,7 +741,7 @@ const server = createServer(async (req, res) => {
         const status = err.message?.startsWith('Invalid JSON') ? 400 : 500;
         json(res, { error: err.message || 'Internal error' }, status);
       }
-      if (!err.message?.startsWith('Invalid JSON')) console.error('[Server]', err);
+      if (!err.message?.startsWith('Invalid JSON')) logger.error('server', 'Request handler error', err);
     }
   } else {
     res.writeHead(404);
@@ -606,7 +762,7 @@ const wss = new WebSocketServer({
         const o = new URL(origin);
         const host = req.headers['host'] || '';
         if (o.host !== host) return false;
-      } catch { return false; }
+      } catch { return false; /* malformed origin URL */ }
     }
     return true;
   }
@@ -632,6 +788,31 @@ function bufRead(entry) { return entry._bufArr.join(''); }
 // ── Session State Persistence (tmux-resurrect style) ──
 
 let _saveQueued = false;
+// Initialize Agent Monitor (proactive background scanning) — after terminals Map
+try {
+  const monitorCockpit = {
+    listTerminals: () => { const r = []; for (const [id, t] of terminals) r.push({ termId: id, projectId: t.projectId, command: t.command || '' }); return r; },
+    readTerminalBuffer: (id) => { const t = terminals.get(id); return t ? bufRead(t) : null; },
+    getProjects,
+  };
+  initMonitorAgent(poller, monitorCockpit, getProjects, {
+    getJiraConfig,
+    triggerReview: async (agentId, prompt, metadata) => {
+      try {
+        const conv = agentNewConv();
+        // Fire-and-forget: chat sends SSE events, frontend captures as reports
+        // Tag the conversation so frontend knows it's a monitor-triggered review
+        poller.broadcast('monitor:review-start', { convId: conv.id, agentId, ...metadata });
+        agentChat(conv.id, prompt, agentId);
+        return conv.id;
+      } catch (err) {
+        logger.warn('monitor', 'triggerReview failed', err.message);
+        return '';
+      }
+    },
+  });
+} catch (err) { logger.error('monitor', 'Init failed', err.message); }
+
 function saveTerminalState() {
   if (_saveQueued) return; // debounce
   _saveQueued = true;
@@ -644,9 +825,9 @@ function saveTerminalState() {
     if (st.length === 0 && !existsSync(STATE_FILE)) return;
     try {
       await writeFile(STATE_FILE, JSON.stringify({ terminals: st, timestamp: Date.now() }));
-      if (st.length > 0) console.log(`[State] Saved ${st.length} terminal(s)`);
+      if (st.length > 0) logger.debug('state', `Saved ${st.length} terminal(s)`);
     } catch (err) {
-      console.error('[State] Save error:', err.message);
+      logger.error('state', 'Save error', err.message);
     }
   });
 }
@@ -657,11 +838,11 @@ function loadTerminalState() {
     const data = JSON.parse(readFileSync(STATE_FILE, 'utf8'));
     // Only restore if less than 24 hours old
     if (Date.now() - data.timestamp > 24 * 60 * 60 * 1000) {
-      try { unlinkSync(STATE_FILE); } catch {}
+      try { unlinkSync(STATE_FILE); } catch { /* cleanup — file may not exist */ }
       return null;
     }
     return data;
-  } catch { return null; }
+  } catch { return null; /* corrupt state file — skip restore */ }
 }
 
 function restoreTerminals() {
@@ -699,7 +880,7 @@ function restoreTerminals() {
       if (e) bufAppend(e, data);
       const msg = JSON.stringify({ type: 'output', termId: newTermId, data });
       for (const client of wss.clients) {
-        try { client.send(msg); } catch {}
+        try { client.send(msg); } catch { /* client disconnected */ }
       }
     });
 
@@ -707,7 +888,7 @@ function restoreTerminals() {
       terminals.delete(newTermId);
       const msg = JSON.stringify({ type: 'exit', termId: newTermId, exitCode });
       for (const client of wss.clients) {
-        try { client.send(msg); } catch {}
+        try { client.send(msg); } catch { /* client disconnected */ }
       }
     });
 
@@ -725,9 +906,9 @@ function restoreTerminals() {
   }
 
   // Clean up state file after successful restore
-  try { unlinkSync(STATE_FILE); } catch {}
+  try { unlinkSync(STATE_FILE); } catch { /* cleanup — file may not exist */ }
 
-  console.log(`[State] Restored ${restored.length} terminal(s) from saved state`);
+  logger.info('state', `Restored ${restored.length} terminal(s) from saved state`);
   return { idMap, restored };
 }
 
@@ -735,25 +916,35 @@ function restoreTerminals() {
 setInterval(saveTerminalState, 30000);
 
 // Save on shutdown
-function onShutdown() {
+function onShutdown(signal) {
+  logger.info('server', `${signal} received, shutting down...`);
   saveTerminalState();
-  for (const [, t] of terminals) { try { t.pty.kill(); } catch {} }
+  // Kill all terminal processes
+  for (const [, t] of terminals) { try { t.pty.kill(); } catch { /* process already exited */ } }
   // Kill dev server processes
   for (const [, ds] of devServers) {
-    try { killProcessTree(ds.process.pid); } catch {}
+    try { killProcessTree(ds.process.pid); } catch { /* process already exited */ }
   }
   devServers.clear();
+  // Close all WebSocket connections
+  for (const client of wss.clients) { try { client.close(1001, 'Server shutting down'); } catch { /* ignore */ } }
+  // Stop accepting new connections
+  server.close(() => { logger.info('server', 'HTTP server closed'); });
+  wss.close(() => { logger.info('ws', 'WebSocket server closed'); });
+  // Force exit after 5s if cleanup hangs
+  setTimeout(() => { logger.error('server', 'Force exit after timeout'); process.exit(1); }, 5000).unref();
+  setTimeout(() => process.exit(0), 500);
 }
-process.on('SIGINT', () => { onShutdown(); process.exit(0); });
-process.on('SIGTERM', () => { onShutdown(); process.exit(0); });
+process.on('SIGINT', () => onShutdown('SIGINT'));
+process.on('SIGTERM', () => onShutdown('SIGTERM'));
 
 let _terminalsRestored = false;
 wss.on('connection', (ws) => {
-  let currentTermId = null;
+  let _currentTermId = null;
 
   ws.on('message', (raw) => {
     let msg;
-    try { msg = JSON.parse(raw); } catch { return; }
+    try { msg = JSON.parse(raw); } catch { return; /* malformed JSON, ignore message */ }
 
     switch (msg.type) {
       case 'create': {
@@ -764,8 +955,8 @@ wss.on('connection', (ws) => {
         // C5: Validate cwd against project path — must be inside project or omitted
         let termPath = project.path;
         if (msg.cwd && typeof msg.cwd === 'string') {
-          const resolvedCwd = resolve(normalize(toWinPath(msg.cwd))).replace(/\\/g, '/').toLowerCase();
-          const projResolved = resolve(normalize(toWinPath(project.path))).replace(/\\/g, '/').toLowerCase();
+          const resolvedCwd = resolve(normalize(IS_WIN ? toWinPath(msg.cwd) : msg.cwd)).replace(/\\/g, '/').toLowerCase();
+          const projResolved = resolve(normalize(IS_WIN ? toWinPath(project.path) : project.path)).replace(/\\/g, '/').toLowerCase();
           if (resolvedCwd.startsWith(projResolved + '/') || resolvedCwd === projResolved) {
             termPath = msg.cwd;
           } else {
@@ -800,7 +991,7 @@ wss.on('connection', (ws) => {
           if (entry) bufAppend(entry, data);
           const msg = JSON.stringify({ type: 'output', termId, data });
           for (const client of wss.clients) {
-            try { client.send(msg); } catch {}
+            try { client.send(msg); } catch { /* client disconnected */ }
           }
         });
 
@@ -808,7 +999,7 @@ wss.on('connection', (ws) => {
           terminals.delete(termId);
           const msg = JSON.stringify({ type: 'exit', termId, exitCode });
           for (const client of wss.clients) {
-            try { client.send(msg); } catch {}
+            try { client.send(msg); } catch { /* client disconnected */ }
           }
         });
 
@@ -821,11 +1012,11 @@ wss.on('connection', (ws) => {
         }
 
         terminals.set(termId, { pty: term, projectId: msg.projectId, _bufArr: [], _bufLen: 0, command: safeCommand });
-        currentTermId = termId;
+        _currentTermId = termId;
 
         const createdMsg = JSON.stringify({ type: 'created', termId, projectId: msg.projectId });
         for (const client of wss.clients) {
-          try { client.send(createdMsg); } catch {}
+          try { client.send(createdMsg); } catch { /* client disconnected */ }
         }
 
         // Auto-run only validated commands
@@ -869,7 +1060,7 @@ wss.on('connection', (ws) => {
       const result = restoreTerminals();
       if (result) idMap = result.idMap;
     } catch (err) {
-      console.error('[State] Restore failed:', err.message);
+      logger.error('state', 'Restore failed', err.message);
     }
   }
 
@@ -886,29 +1077,27 @@ wss.on('connection', (ws) => {
 // ──────────── Start ────────────
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n  Claude Code Dashboard`);
-  console.log(`  http://localhost:${PORT}`);
-  console.log(`  Shell: ${_defaultShell}`);
+  logger.info('server', `Claude Code Dashboard v${PKG_VERSION}`);
+  logger.info('server', `http://localhost:${PORT}`);
+  logger.info('server', `Shell: ${_defaultShell}, PID: ${process.pid}`);
   // Show network IPs — M6: mask token in console, show only last 4 chars
   const getNetworkIPs = routeCtx.getNetworkIPs;
   const netIPs = getNetworkIPs ? getNetworkIPs() : [];
   const masked = LAN_TOKEN.slice(0, 4) + '...' + LAN_TOKEN.slice(-4);
   for (const { ip, type } of netIPs) {
     const label = type === 'tailscale' ? 'Tailscale' : 'LAN';
-    console.log(`  http://${ip}:${PORT} (${label})`);
+    logger.info('server', `http://${ip}:${PORT} (${label})`);
   }
   if (netIPs.length) {
-    console.log(`\n  Token: ${masked} (full token in ${TOKEN_FILE})`);
-    console.log(`  Use ?token=<TOKEN> or scan QR from localhost`);
+    logger.info('server', `Token: ${masked} (full token in ${TOKEN_FILE})`);
+    logger.info('server', 'Use ?token=<TOKEN> or scan QR from localhost');
   }
-  console.log('');
   if (!process.argv.includes('--no-open')) {
     platformOpenUrl(`http://localhost:${PORT}`);
   }
 }).on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    console.error(`\n  Port ${PORT} is already in use.`);
-    console.error(`  Kill the existing process or change PORT in lib/config.js\n`);
+    logger.error('server', `Port ${PORT} is already in use. Kill the existing process or change PORT in lib/config.js`);
     process.exit(1);
   }
   throw err;
