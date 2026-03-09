@@ -1,5 +1,5 @@
-// ─── Main Entry Point: imports, init, keyboard shortcuts, window.xxx wiring ───
-import { app } from './state.js';
+// ─── Main Entry Point: imports, init, keyboard shortcuts, pub/sub wiring ───
+import { app, subscribe } from './state.js';
 import { esc, showToast, simpleMarkdown, fetchJson, fetchText, postJson } from './utils.js';
 import { getClickAction, getChangeAction, getInputAction, registerClickActions, registerChangeActions, registerInputActions } from './actions.js';
 
@@ -13,6 +13,7 @@ import {
   onVisibilityChange,
   setProjectTag, renderTagFilters,
   setupNavOverflow, updateEmptyProjectState,
+  changeViewZoom, resetViewZoom,
 } from './dashboard.js';
 
 // ─── Terminal module ───
@@ -27,6 +28,7 @@ import {
   updateTermTheme,
   toggleCmdPalette,
   toggleBroadcastMode,
+  toggleQuickBar,
 } from './terminal.js';
 
 // ─── Diff module ───
@@ -68,6 +70,9 @@ import {
 
 // ─── Notes module ───
 import { initNotes } from './notes.js';
+
+// ─── Company module ───
+import { initCompany } from './company.js';
 
 // ─── Workflows module ───
 import {
@@ -825,86 +830,85 @@ function _rmSectionIcon(title) {
   return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
 }
 
-// ─── Cross-module globals (called via window.xxx from other JS files) ───
+// ─── Cross-module pub/sub wiring (replaces window.xxx globals) ───
 async function hardRefresh() {
   try {
     const regs = await navigator.serviceWorker?.getRegistrations();
     if (regs) for (const r of regs) await r.unregister();
     const keys = await caches?.keys();
     if (keys) for (const k of keys) await caches.delete(k);
-  } catch {}
+  } catch { /* cache API unavailable */ }
   location.reload(true);
 }
 
-// Dashboard — modals.js, state.js
-window.switchView = switchView;
-window.renderCard = renderCard;
-window.renderAllCards = renderAllCards;
-window.showConvList = showConvList;
-window.toggleTheme = toggleTheme;
-window.setProjectFilter = setProjectFilter;
-window.setProjectTag = setProjectTag;
-window.fetchAllProjects = fetchAllProjects;
-window.pullAllProjects = pullAllProjects;
-window.updateSummaryStats = updateSummaryStats;
+// Dashboard
+subscribe('switchView', (name) => switchView(name));
+subscribe('renderCard', (id) => renderCard(id));
+subscribe('renderAllCards', (list) => renderAllCards(list));
+subscribe('showConvList', () => showConvList());
+subscribe('toggleTheme', () => toggleTheme());
+subscribe('setProjectFilter', (filter) => setProjectFilter(filter));
+subscribe('setProjectTag', ({ id, tag }) => setProjectTag(id, tag));
+subscribe('fetchAllProjects', () => fetchAllProjects());
+subscribe('pullAllProjects', () => pullAllProjects());
+subscribe('updateSummaryStats', () => updateSummaryStats());
 
-// Terminal — modals.js, state.js, terminal.js, dashboard.js
-window.renderLayout = renderLayout;
-window.fitAllTerminals = fitAllTerminals;
-window.updateTermHeaders = updateTermHeaders;
-window.debouncedUpdateTermHeaders = debouncedUpdateTermHeaders;
-window.openNewTermModal = openNewTermModal;
-window.openTermWith = openTermWith;
-window.exportTerminal = exportTerminal;
-window.loadBranchesForTerm = loadBranchesForTerm;
-window.updateTermTheme = updateTermTheme;
+// Terminal
+subscribe('renderLayout', () => renderLayout());
+subscribe('fitAllTerminals', () => fitAllTerminals());
+subscribe('updateTermHeaders', () => updateTermHeaders());
+subscribe('debouncedUpdateTermHeaders', () => debouncedUpdateTermHeaders());
+subscribe('openNewTermModal', () => openNewTermModal());
+subscribe('openTermWith', (opts) => openTermWith(opts));
+subscribe('exportTerminal', () => exportTerminal());
+subscribe('loadBranchesForTerm', () => loadBranchesForTerm());
+subscribe('updateTermTheme', () => updateTermTheme());
 
-// Diff — modals.js, state.js
-window.loadDiff = loadDiff;
-window.debouncedLoadDiff = debouncedLoadDiff;
-window.renderProjectChips = renderProjectChips;
+// Diff
+subscribe('loadDiff', () => loadDiff());
+subscribe('debouncedLoadDiff', () => debouncedLoadDiff());
+subscribe('renderProjectChips', () => renderProjectChips());
 
-// Modals — state.js, dashboard.js
-window.populateProjectSelects = populateProjectSelects;
-window.updateDevBadge = updateDevBadge;
-window.renderNotifFilterList = renderNotifFilterList;
-window.editProject = editProject;
-window.resumeLastSession = resumeLastSession;
-window.toggleDevServer = toggleDevServer;
-window.promptDevCmd = promptDevCmd;
-window.openIDE = openIDE;
-window.openGitHub = openGitHub;
-window.showSessionHistory = showSessionHistory;
-window.showGitLog = showGitLog;
+// Modals
+subscribe('populateProjectSelects', () => populateProjectSelects());
+subscribe('updateDevBadge', () => updateDevBadge());
+subscribe('renderNotifFilterList', () => renderNotifFilterList());
+subscribe('editProject', (id) => editProject(id));
+subscribe('resumeLastSession', (id) => resumeLastSession(id));
+subscribe('toggleDevServer', (id) => toggleDevServer(id));
+subscribe('promptDevCmd', (id) => promptDevCmd(id));
+subscribe('openIDE', ({ id, ide }) => openIDE(id, ide));
+subscribe('openGitHub', (id) => openGitHub(id));
+subscribe('showSessionHistory', (id) => showSessionHistory(id));
+subscribe('showGitLog', (id) => showGitLog(id));
 
-// Forge — state.js, diff.js, jira.js, cicd.js
-window.handleForgeEvent = handleForgeEvent;
-window.openForgeWithPrefill = openForgeWithPrefill;
+// Forge
+subscribe('handleForgeEvent', ({ event, data }) => handleForgeEvent(event, data));
+subscribe('openForgeWithPrefill', (data) => openForgeWithPrefill(data));
 
-// File preview — terminal.js
-window.openFilePreview = openFilePreview;
-window.openFilePreviewFromFile = openFilePreviewFromFile;
+// File preview
+subscribe('openFilePreview', (pathOrTerm) => openFilePreview(pathOrTerm));
+subscribe('openFilePreviewFromFile', (file) => openFilePreviewFromFile(file));
 
-// Agent — modals.js, state.js
-window.toggleAgentPanel = toggleAgentPanel;
-window.handleAgentEvent = handleAgentEvent;
+// Agent
+subscribe('toggleAgentPanel', () => toggleAgentPanel());
+subscribe('toggleCommandPalette', () => toggleCommandPalette());
+subscribe('handleAgentEvent', ({ event, data }) => handleAgentEvent(event, data));
 
-// Forge — state.js
-window.handleForgeEvent = handleForgeEvent;
+// Workflows
+subscribe('handleWorkflowEvent', ({ event, data }) => handleWorkflowEvent(event, data));
 
-// Workflows — state.js
-window.handleWorkflowEvent = handleWorkflowEvent;
-
-// Lazy init — state.js
-window.initJira = initJira;
-window.initCicd = initCicd;
-window.initNotes = initNotes;
-window.initPR = initPR;
-window.initWorkflows = initWorkflows;
-window.initForge = initForge;
-window.initPorts = initPorts;
-window.destroyPorts = destroyPorts;
-window.initApiTester = initApiTester;
+// Lazy init
+subscribe('initJira', () => initJira());
+subscribe('initCicd', () => initCicd());
+subscribe('initNotes', () => initNotes());
+subscribe('initCompany', () => initCompany());
+subscribe('initPR', () => initPR());
+subscribe('initWorkflows', () => initWorkflows());
+subscribe('initForge', () => initForge());
+subscribe('initPorts', () => initPorts());
+subscribe('destroyPorts', () => destroyPorts());
+subscribe('initApiTester', () => initApiTester());
 
 async function showMobileConnect() {
   const dlg = document.getElementById('mobile-connect-dialog');
@@ -949,7 +953,7 @@ async function showMobileConnect() {
       if (svgEl) { svgEl.style.width = '100%'; svgEl.style.height = '100%'; }
     } catch { qrContainer.textContent = 'QR generation failed'; }
     dlg.showModal();
-  } catch (e) {
+  } catch {
     showToast('Failed to get LAN info');
   }
 }
@@ -1023,13 +1027,13 @@ document.addEventListener('keydown', e => {
   if (e.key === 'F5' || (mod && e.key === 'r')) { e.preventDefault(); location.reload(); return; }
   if (mod && e.key === '1') { e.preventDefault(); switchView('dashboard'); return; }
   if (mod && e.key === '2') { e.preventDefault(); switchView('terminal'); return; }
-  if (mod && e.key === '3') { e.preventDefault(); switchView('diff'); return; }
-  if (mod && e.key === '4') { e.preventDefault(); switchView('pr'); return; }
-  if (mod && e.key === '5') { e.preventDefault(); switchView('jira'); return; }
-  if (mod && e.key === '6') { e.preventDefault(); switchView('cicd'); return; }
-  if (mod && e.key === '7') { e.preventDefault(); switchView('notes'); return; }
-  if (mod && e.key === '8') { e.preventDefault(); switchView('workflows'); return; }
-  if (mod && e.key === '9') { e.preventDefault(); switchView('forge'); return; }
+  if (mod && e.key === '3') { e.preventDefault(); switchView('company'); return; }
+  if (mod && e.key === '4') { e.preventDefault(); switchView('diff'); return; }
+  if (mod && e.key === '5') { e.preventDefault(); switchView('pr'); return; }
+  if (mod && e.key === '6') { e.preventDefault(); switchView('jira'); return; }
+  if (mod && e.key === '7') { e.preventDefault(); switchView('cicd'); return; }
+  if (mod && e.key === '8') { e.preventDefault(); switchView('notes'); return; }
+  if (mod && e.key === '9') { e.preventDefault(); switchView('workflows'); return; }
   if (mod && e.key === '`') { e.preventDefault(); toggleAgentPanel(); return; }
   if (mod && e.key === 'Tab') {
     if (document.getElementById('terminal-view').classList.contains('active') && app.termMap.size > 1) {
@@ -1069,6 +1073,9 @@ document.addEventListener('keydown', e => {
   if (mod && e.key === 'b' && !e.shiftKey) {
     if (document.getElementById('terminal-view').classList.contains('active')) { e.preventDefault(); toggleBroadcastMode(); return; }
   }
+  if (mod && e.key === 'j' && !e.shiftKey) {
+    if (document.getElementById('terminal-view').classList.contains('active')) { e.preventDefault(); toggleQuickBar(); return; }
+  }
   if (mod && e.key === 'k') { e.preventDefault(); toggleCommandPalette(); return; }
   if (mod && e.shiftKey && e.key === 'P') { e.preventDefault(); toggleCommandPalette(); return; }
   if (mod && e.key === 'f') {
@@ -1081,13 +1088,22 @@ document.addEventListener('keydown', e => {
     if (document.getElementById('terminal-view').classList.contains('active') && app.activeTermId) { e.preventDefault(); openNewTermModalWithSplit(app.activeTermId, 'bottom'); return; }
   }
   if (mod && !e.shiftKey && (e.key === '=' || e.key === '+')) {
-    if (document.getElementById('terminal-view').classList.contains('active')) { e.preventDefault(); changeTermFontSize(1); return; }
+    e.preventDefault();
+    if (document.getElementById('terminal-view').classList.contains('active')) changeTermFontSize(1);
+    else changeViewZoom(10);
+    return;
   }
   if (mod && !e.shiftKey && e.key === '-') {
-    if (document.getElementById('terminal-view').classList.contains('active')) { e.preventDefault(); changeTermFontSize(-1); return; }
+    e.preventDefault();
+    if (document.getElementById('terminal-view').classList.contains('active')) changeTermFontSize(-1);
+    else changeViewZoom(-10);
+    return;
   }
   if (mod && !e.shiftKey && e.key === '0') {
-    if (document.getElementById('terminal-view').classList.contains('active')) { e.preventDefault(); resetTermFontSize(); return; }
+    e.preventDefault();
+    if (document.getElementById('terminal-view').classList.contains('active')) resetTermFontSize();
+    else resetViewZoom();
+    return;
   }
   if (mod && e.key === 'Enter') {
     if (document.getElementById('diff-view').classList.contains('active')) {
@@ -1218,7 +1234,7 @@ async function init() {
   renderProjectChips();
   renderTagFilters();
   updateSummaryStats();
-  try { await fetchJson('/api/stats'); } catch {}
+  try { await fetchJson('/api/stats'); } catch { /* request failed */ }
   // (SSE/WS moved to top-level — must connect even if project fetch fails)
   startClock();
   renderReadme();
@@ -1256,11 +1272,14 @@ async function init() {
   // (moved to top-level module scope — no server data dependency)
   // Usage polling
   app.usageTimer = setInterval(fetchUsage, 60000);
-  // Forge init
-  initForge();
-  // Morning briefing & smart alerts
-  loadBriefing();
-  checkSmartAlerts();
+  // Defer non-critical init tasks to idle time
+  const _idle = (fn) => (typeof requestIdleCallback === 'function')
+    ? requestIdleCallback(() => fn(), { timeout: 5000 })
+    : setTimeout(fn, 300);
+  // Forge: defer to idle (will also init on first visit via switchView)
+  _idle(() => initForge());
+  // Morning briefing & smart alerts: non-critical, defer to idle
+  _idle(() => { loadBriefing(); checkSmartAlerts(); });
   setInterval(checkSmartAlerts, 120000); // check every 2 min
 }
 
@@ -1274,7 +1293,8 @@ setupMobileSwipe();
 
 init();
 
-// ─── Service Worker Registration ───
+// ─── Service Worker Registration (deferred to idle) ───
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').catch(() => {});
+  const _swReg = () => navigator.serviceWorker.register('/sw.js').catch(() => {});
+  (typeof requestIdleCallback === 'function') ? requestIdleCallback(_swReg) : setTimeout(_swReg, 1000);
 }

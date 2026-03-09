@@ -7,7 +7,61 @@ const TOOL_ICONS = {
   BASH: '⚡', READ: '📄', SEARCH: '🔍',
   EDIT: '✏️', WRITE: '📝', GLOB: '📂', GIT_DIFF: '📊',
   GIT_LOG: '📜', JIRA: '🎫', CICD: '🔄', OPEN: '🌐',
+  COCKPIT: '🎛️', WEATHER: '🌤️', DELEGATE: '📨',
 };
+
+const AGENT_PROFILES = {
+  // 이사 (전사 오케스트레이터)
+  daepyo:         { name: '콕핏이사', rank: 'Director',  team: null,        emoji: '👔', color: '#ef4444', gradient: 'linear-gradient(135deg, #ef4444, #dc2626)' },
+  // 개발팀
+  dev_bujang:     { name: '김부장', rank: 'VP',        team: 'dev',       emoji: '🦊', color: '#a855f7', gradient: 'linear-gradient(135deg, #a855f7, #9333ea)' },
+  dev_gwajang:    { name: '원과장', rank: 'Manager',   team: 'dev',       emoji: '😎', color: '#eab308', gradient: 'linear-gradient(135deg, #eab308, #ca8a04)' },
+  dev_daeri:      { name: '핏대리', rank: 'Asst.Mgr',  team: 'dev',       emoji: '🧐', color: '#3b82f6', gradient: 'linear-gradient(135deg, #3b82f6, #2563eb)' },
+  dev_sawon:      { name: '콕사원', rank: 'Staff',     team: 'dev',       emoji: '🐣', color: '#22c55e', gradient: 'linear-gradient(135deg, #22c55e, #16a34a)' },
+  // 기획팀
+  plan_teamlead:  { name: '한기장', rank: 'Team Lead', team: 'plan',      emoji: '📝', color: '#f59e0b', gradient: 'linear-gradient(135deg, #f59e0b, #d97706)' },
+  plan_daeri:     { name: '박기리', rank: 'Asst.Mgr',  team: 'plan',      emoji: '📊', color: '#fbbf24', gradient: 'linear-gradient(135deg, #fbbf24, #f59e0b)' },
+  plan_sawon:     { name: '이기원', rank: 'Staff',     team: 'plan',      emoji: '📌', color: '#fcd34d', gradient: 'linear-gradient(135deg, #fcd34d, #fbbf24)' },
+  // 디자인팀
+  design_teamlead:{ name: '최디장', rank: 'Team Lead', team: 'design',    emoji: '🎭', color: '#ec4899', gradient: 'linear-gradient(135deg, #ec4899, #db2777)' },
+  design_daeri:   { name: '정디리', rank: 'Asst.Mgr',  team: 'design',    emoji: '✨', color: '#f472b6', gradient: 'linear-gradient(135deg, #f472b6, #ec4899)' },
+  // 경영지원
+  admin_teamlead: { name: '강경장', rank: 'Team Lead', team: 'admin',     emoji: '📈', color: '#14b8a6', gradient: 'linear-gradient(135deg, #14b8a6, #0d9488)' },
+  admin_sawon:    { name: '윤경원', rank: 'Staff',     team: 'admin',     emoji: '🧮', color: '#5eead4', gradient: 'linear-gradient(135deg, #5eead4, #14b8a6)' },
+  // 마케팅팀
+  mkt_teamlead:   { name: '오마장', rank: 'Team Lead', team: 'marketing', emoji: '🔥', color: '#f97316', gradient: 'linear-gradient(135deg, #f97316, #ea580c)' },
+  mkt_sawon:      { name: '신마원', rank: 'Staff',     team: 'marketing', emoji: '📣', color: '#fdba74', gradient: 'linear-gradient(135deg, #fdba74, #f97316)' },
+  // 인턴
+  intern:         { name: '막내',   rank: 'Intern',    team: null,        emoji: '🧹', color: '#94a3b8', gradient: 'linear-gradient(135deg, #94a3b8, #64748b)' },
+};
+// Legacy aliases
+AGENT_PROFILES.sawon = AGENT_PROFILES.dev_sawon;
+AGENT_PROFILES.daeri = AGENT_PROFILES.dev_daeri;
+AGENT_PROFILES.gwajang = AGENT_PROFILES.dev_gwajang;
+AGENT_PROFILES.bujang = AGENT_PROFILES.dev_bujang;
+
+const TEAM_INFO = {
+  dev:       { name: '개발팀',   icon: '💻', color: '#6366f1' },
+  plan:      { name: '기획팀',   icon: '📋', color: '#f59e0b' },
+  design:    { name: '디자인팀', icon: '🎨', color: '#ec4899' },
+  admin:     { name: '경영지원', icon: '💰', color: '#14b8a6' },
+  marketing: { name: '마케팅팀', icon: '📢', color: '#f97316' },
+};
+
+function renderAgentBadge(agentId) {
+  const p = AGENT_PROFILES[agentId];
+  if (!p) return '';
+  const team = p.team ? TEAM_INFO[p.team] : null;
+  const teamTag = team ? `<span class="ag-agent-team" style="color:${team.color}">${team.icon} ${esc(team.name)}</span>` : '';
+  return `<div class="ag-agent-profile" data-agent-badge="${esc(agentId)}">
+    <div class="ag-agent-avatar" style="background:${p.gradient}">${p.emoji}</div>
+    <div class="ag-agent-info">
+      <span class="ag-agent-name" style="color:${p.color}">${esc(p.name)}</span>
+      <span class="ag-agent-rank">${esc(p.rank)}</span>
+      ${teamTag}
+    </div>
+  </div>`;
+}
 
 let _convId = null;
 let _recognition = null;
@@ -49,15 +103,20 @@ export function initWakeWord() {
 
 // ─── Floating Panel Toggle ───
 let _panelOpen = false;
-export function toggleAgentPanel() {
+export function toggleAgentPanel(_el, forceOpen = false) {
   const panel = document.getElementById('agent-panel');
   const fab = document.getElementById('agent-fab');
   if (!panel) return;
-  _panelOpen = !_panelOpen;
+  _panelOpen = forceOpen ? true : !_panelOpen;
   panel.classList.toggle('open', _panelOpen);
   fab?.classList.toggle('active', _panelOpen);
   if (_panelOpen) {
     initAgent();
+    // Check API key and show setup prompt if needed
+    fetchJson('/api/ai/config').then(cfg => {
+      if (!cfg.configured) _showAiSetupPrompt();
+      else _hideAiSetupPrompt();
+    }).catch(() => {});
     // Hide badge when opened
     const badge = document.getElementById('agent-fab-badge');
     if (badge) badge.style.display = 'none';
@@ -81,13 +140,15 @@ async function loadModelSetting() {
     const data = await fetchJson('/api/agent/model');
     const sel = document.getElementById('agent-model-select');
     if (sel && data.model) sel.value = data.model;
-  } catch {}
+  } catch { /* request failed */ }
 }
 
 export async function changeAgentModel(model) {
   try {
     await postJson('/api/agent/model', { model });
-    showToast(`모델 변경: ${model}`, 'success');
+    const p = AGENT_PROFILES[model];
+    const label = model === 'auto' ? '🏢 자동 배정' : p ? `${p.emoji} ${p.name}` : model;
+    showToast(`에이전트 변경: ${label}`, 'success');
   } catch (err) {
     showToast('모델 변경 실패: ' + err.message, 'error');
   }
@@ -105,7 +166,7 @@ async function loadConversationList() {
   try {
     _convList = await fetchJson('/api/agent/conversations');
     renderConversationList();
-  } catch {}
+  } catch { /* request failed */ }
 }
 
 function renderConversationList() {
@@ -156,7 +217,7 @@ export async function deleteAgentConversation(id) {
       await loadOrCreateConversation();
     }
     loadConversationList();
-  } catch {}
+  } catch { /* request failed */ }
 }
 
 async function loadOrCreateConversation() {
@@ -234,6 +295,12 @@ function renderChat() {
           <button class="ag-tpl-btn" data-prompt="CI/CD 파이프라인 상태 확인해줘.">CI/CD</button>
         </div>
         <div class="ag-cap-group">
+          <div class="ag-cap-label">터미널</div>
+          <button class="ag-tpl-btn" data-prompt="현재 터미널 몇 개 열려있는지 확인하고, 각 터미널에서 뭐 하고 있는지 알려줘.">터미널 현황</button>
+          <button class="ag-tpl-btn" data-prompt="터미널 출력 확인해서 에러 있으면 알려줘.">에러 체크</button>
+          <button class="ag-tpl-btn" data-prompt="이 프로젝트에서 npm test 돌려줘.">테스트 실행</button>
+        </div>
+        <div class="ag-cap-group">
           <div class="ag-cap-label">기타</div>
           <button class="ag-tpl-btn" data-prompt="유튜브에서 로파이 음악 틀어줘">유튜브</button>
           <button class="ag-tpl-btn" data-prompt="서울 날씨 어때?">날씨</button>
@@ -247,8 +314,11 @@ function renderChat() {
   chatArea.innerHTML = msgs.map(m => {
     const isUser = m.role === 'user';
     const time = m.ts ? new Date(m.ts).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }) : '';
+    const copyBtn = !isUser ? `<button class="ag-msg-copy" data-action="copy-msg" title="복사"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg></button>` : '';
+    const profileHeader = !isUser && m.agentId ? renderAgentBadge(m.agentId) : '';
     return `<div class="ag-msg ${isUser ? 'ag-msg-user' : 'ag-msg-ai'}">
-      <div class="ag-msg-bubble">${formatMessage(m.content)}</div>
+      ${profileHeader}
+      <div class="ag-msg-bubble">${formatMessage(m.content)}${copyBtn}</div>
       <div class="ag-msg-time">${time}</div>
     </div>`;
   }).join('');
@@ -366,9 +436,35 @@ document.addEventListener('click', e => {
   });
 });
 
-function scrollToBottom() {
+// ─── Auto-scroll management ───
+let _autoScroll = true;
+
+function initAutoScroll() {
   const chatArea = document.getElementById('agent-chat');
-  if (chatArea) requestAnimationFrame(() => chatArea.scrollTop = chatArea.scrollHeight);
+  if (!chatArea || chatArea._scrollInit) return;
+  chatArea._scrollInit = true;
+  chatArea.addEventListener('scroll', () => {
+    const gap = chatArea.scrollHeight - chatArea.scrollTop - chatArea.clientHeight;
+    _autoScroll = gap < 60;
+    const jumpBtn = document.getElementById('ag-scroll-bottom');
+    if (jumpBtn) jumpBtn.style.display = _autoScroll ? 'none' : '';
+  });
+}
+
+function scrollToBottom(force) {
+  const chatArea = document.getElementById('agent-chat');
+  if (!chatArea) return;
+  initAutoScroll();
+  if (force || _autoScroll) {
+    requestAnimationFrame(() => chatArea.scrollTop = chatArea.scrollHeight);
+  }
+}
+
+function jumpToBottom() {
+  _autoScroll = true;
+  scrollToBottom(true);
+  const jumpBtn = document.getElementById('ag-scroll-bottom');
+  if (jumpBtn) jumpBtn.style.display = 'none';
 }
 
 // ─── Send Message (fire-and-forget, results via SSE) ───
@@ -378,6 +474,15 @@ export async function sendAgentMessage() {
   if (!input) return;
   const text = input.value.trim();
   if (!text) return;
+
+  // Check API key before sending
+  try {
+    const cfg = await fetchJson('/api/ai/config');
+    if (!cfg.configured) {
+      _showAiSetupPrompt();
+      return;
+    }
+  } catch { /* request failed */ }
 
   input.value = '';
 
@@ -397,9 +502,109 @@ export async function sendAgentMessage() {
     if (data.error) throw new Error(data.error);
     // status: 'started' — loop is running, SSE will deliver updates
   } catch (err) {
-    app._agentMessages.push({ role: 'assistant', content: `앗 에러가 났어영.. ${err.message}`, ts: Date.now() });
+    const msg = err.message || '';
+    if (msg.includes('API key') || msg.includes('API_KEY_INVALID') || msg.includes('INVALID_ARGUMENT') || msg.includes('401') || msg.includes('403')) {
+      _showAiKeyError(msg);
+      return;
+    }
+    if (msg.includes('429') || msg.includes('quota') || msg.includes('RATE_LIMIT') || msg.includes('RESOURCE_EXHAUSTED')) {
+      _showQuotaError(msg);
+      return;
+    }
+    app._agentMessages.push({ role: 'assistant', content: `앗 에러가 났어영.. ${msg}`, ts: Date.now() });
     renderChat();
   }
+}
+
+function _showAiSetupPrompt() {
+  // Clear chat and show setup prompt
+  const chatArea = document.getElementById('agent-chat');
+  if (!chatArea) return;
+  chatArea.innerHTML = '';
+  const el = document.getElementById('agent-setup-prompt');
+  if (el) {
+    // Re-attach if removed
+    chatArea.appendChild(el);
+    el.style.display = '';
+  } else {
+    chatArea.innerHTML = `
+      <div class="agent-setup-prompt">
+        <div class="agent-setup-icon">
+          <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="var(--accent)" stroke-width="1.5">
+            <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="M12 16v-4"/><circle cx="12" cy="8" r=".5" fill="var(--accent)"/>
+          </svg>
+        </div>
+        <div class="agent-setup-title">Gemini API Key 필요</div>
+        <div class="agent-setup-desc">AI 에이전트를 사용하려면 Gemini API Key를 설정하세요.<br>Google AI Studio에서 무료로 발급받을 수 있습니다.</div>
+        <div class="agent-setup-actions">
+          <button class="btn" data-action="open-ai-studio">API Key 발급</button>
+          <button class="btn primary" data-action="open-settings">설정 열기</button>
+        </div>
+      </div>`;
+  }
+}
+
+function _hideAiSetupPrompt() {
+  const el = document.getElementById('agent-setup-prompt');
+  if (el) el.style.display = 'none';
+}
+
+function _showAiKeyError(_errMsg) {
+  const chatArea = document.getElementById('agent-chat');
+  if (!chatArea) return;
+  // Keep existing messages, append error card
+  const card = document.createElement('div');
+  card.className = 'agent-key-error';
+  card.innerHTML = `
+    <div class="agent-key-error-icon">
+      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="var(--red)" stroke-width="1.5">
+        <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+        <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+      </svg>
+    </div>
+    <div class="agent-key-error-title">API Key가 유효하지 않습니다</div>
+    <div class="agent-key-error-desc">Gemini API Key가 만료되었거나 잘못되었습니다. 새 키를 발급받아 설정에서 업데이트하세요.</div>
+    <div class="agent-key-error-actions">
+      <button class="btn" data-action="open-ai-studio">Google AI Studio에서 발급</button>
+      <button class="btn primary" data-action="open-settings">설정에서 키 변경</button>
+    </div>`;
+  chatArea.appendChild(card);
+  chatArea.scrollTop = chatArea.scrollHeight;
+}
+
+function _showQuotaError(_errMsg) {
+  const chatArea = document.getElementById('agent-chat');
+  if (!chatArea) return;
+  const card = document.createElement('div');
+  card.className = 'agent-quota-error';
+  card.innerHTML = `
+    <div class="agent-quota-error-icon">
+      <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="var(--orange, #f59e0b)" stroke-width="1.5">
+        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+      </svg>
+    </div>
+    <div class="agent-quota-error-title">API 요청이 제한되었습니다 (429)</div>
+    <div class="agent-quota-error-desc">Gemini API가 요청을 거부했습니다. 무료 플랜은 분당 호출 수가 제한되어 있으며, Billing 미연결 시 할당량이 매우 낮을 수 있습니다. Google AI Studio에서 사용량과 결제 상태를 확인하세요.</div>
+    <div class="agent-quota-error-actions">
+      <button class="btn" data-action="open-ai-studio">Google AI Studio</button>
+      <button class="btn primary" onclick="this.closest('.agent-quota-error').remove()">닫기</button>
+    </div>`;
+  chatArea.appendChild(card);
+  chatArea.scrollTop = chatArea.scrollHeight;
+}
+
+// ─── Clear Chat ───
+export async function clearAgentChat() {
+  if (_running) return;
+  if (!_convId) return;
+  // Delete current conversation and create a new one
+  try {
+    await fetchJson(`/api/agent/conversations/${_convId}`, { method: 'DELETE' });
+  } catch { /* request failed */ }
+  _convId = null;
+  app._agentMessages = [];
+  await loadOrCreateConversation();
+  showToast('채팅이 삭제되었어영', 'info');
 }
 
 // ─── Stop Agent ───
@@ -423,9 +628,10 @@ export function handleAgentEvent(eventName, data) {
       resetStreamTTS();
       _ttsQueue.length = 0;
       _ttsPlaying = false;
-      // Create live bubble container
-      ensureLiveBubble(chatArea);
-      updateLiveStatus('생각 중이에여...', 0, data.maxIterations || 10);
+      // Create live bubble container with agent badge
+      ensureLiveBubble(chatArea, data.agentId);
+      const agentLabel = data.agentName ? `${data.agentName} 생각 중...` : '배정 중...';
+      updateLiveStatus(agentLabel, 0, data.maxIterations || 10);
       break;
     }
 
@@ -546,8 +752,9 @@ export function handleAgentEvent(eventName, data) {
     }
 
     case 'agent:response': {
-      // Final response — finalize live bubble
-      finalizeLiveBubble(data.content);
+      console.log('[Agent UI] response event agentId=', data.agentId, 'agentName=', data.agentName);
+      // Final response — finalize live bubble and inject badge
+      finalizeLiveBubble(data.content, data.agentId);
       // Flush remaining streaming TTS buffer, then skip full speak if already streamed
       flushStreamTTS();
       if (_ttsEnabled && data.content && !_streamTTSUsed) speak(data.content);
@@ -583,30 +790,257 @@ export function handleAgentEvent(eventName, data) {
     case 'agent:error': {
       _running = false;
       updateActionButton();
-      // Add red error styling to live bubble before removing status
       const liveBubbleErr = document.querySelector('.ag-msg-live');
       if (liveBubbleErr) liveBubbleErr.classList.add('ag-error');
       removeLiveStatus();
       ensureWakeWordRunning();
-      // Add error to local messages so it persists through renderChat()
+      const errMsg = data.error || '';
+      // Detect API key errors → show key renewal prompt
+      if (errMsg.includes('API_KEY_INVALID') || errMsg.includes('API key not valid') || errMsg.includes('INVALID_ARGUMENT') || (errMsg.includes('Gemini API') && errMsg.includes('400'))) {
+        _showAiKeyError(errMsg);
+        break;
+      }
+      if (errMsg.includes('429') || errMsg.includes('quota') || errMsg.includes('RATE_LIMIT') || errMsg.includes('RESOURCE_EXHAUSTED')) {
+        _showQuotaError(errMsg);
+        break;
+      }
       if (!app._agentMessages) app._agentMessages = [];
-      app._agentMessages.push({ role: 'assistant', content: `앗 에러가 났어영.. ${data.error || ''}`, ts: Date.now() });
+      app._agentMessages.push({ role: 'assistant', content: `앗 에러가 났어영.. ${errMsg}`, ts: Date.now() });
       renderChat();
       scrollToBottom();
+      break;
+    }
+
+    case 'agent:proactive': {
+      // Proactive alert from background monitor
+      renderProactiveAlert(data);
+      showAgentFabBadge();
+      // Play a subtle notification sound via TTS
+      if (_ttsEnabled && !_panelOpen) speakQuick('알림이 있어영');
+      break;
+    }
+
+    // ─── Orchestration Events ───
+
+    case 'orch:start': {
+      _running = true;
+      updateActionButton();
+      resetStreamTTS();
+      _ttsQueue.length = 0;
+      _ttsPlaying = false;
+      ensureLiveBubble(chatArea, data.agentId);
+      updateLiveStatus(`${data.agentName || '오케스트레이터'} 작업 분배 중...`, 0, 0);
+      break;
+    }
+
+    case 'orch:plan': {
+      const liveContent = document.querySelector('.ag-msg-live .ag-live-content');
+      if (!liveContent) break;
+      // Show delegation message
+      const delegDiv = document.createElement('div');
+      delegDiv.className = 'ag-live-step ag-orch-delegation';
+      delegDiv.innerHTML = `<strong>${esc(data.agentName || '오케스트레이터')}:</strong> ${esc(data.delegationMessage || '')}`;
+      liveContent.appendChild(delegDiv);
+      // Show task plan as collapsible threads
+      if (data.plan && data.plan.length) {
+        const planDiv = document.createElement('div');
+        planDiv.className = 'ag-orch-plan';
+        planDiv.innerHTML = data.plan.map(t => {
+          const aInfo = AGENT_PROFILES[t.assignee] || { name: t.assignee, color: '#888', emoji: '🤖' };
+          return `<div class="ag-orch-task" data-task-id="${esc(t.id)}">
+            <div class="ag-orch-task-header">
+              <span class="ag-orch-avatar" style="background:${aInfo.gradient || aInfo.color}">${aInfo.emoji}</span>
+              <span class="ag-orch-task-assignee" style="color:${aInfo.color}">${esc(aInfo.name)}</span>
+              <span class="ag-orch-task-desc">${esc(t.description)}</span>
+              <span class="ag-orch-task-status">대기</span>
+            </div>
+            <div class="ag-orch-task-content"></div>
+          </div>`;
+        }).join('');
+        liveContent.appendChild(planDiv);
+      }
+      updateLiveStatus('서브 에이전트 실행 중...', 0, 0);
+      scrollToBottom();
+      break;
+    }
+
+    case 'orch:sub-start': {
+      const taskEl = document.querySelector(`.ag-orch-task[data-task-id="${data.taskId}"]`);
+      if (taskEl) {
+        const statusEl = taskEl.querySelector('.ag-orch-task-status');
+        if (statusEl) { statusEl.textContent = '실행 중'; statusEl.className = 'ag-orch-task-status ag-orch-running'; }
+      }
+      break;
+    }
+
+    case 'orch:sub-thinking': {
+      // Update task status with iteration count
+      const taskEl2 = document.querySelector(`.ag-orch-task[data-task-id="${data.taskId}"]`);
+      if (taskEl2) {
+        const statusEl = taskEl2.querySelector('.ag-orch-task-status');
+        if (statusEl) statusEl.textContent = `실행 중 (${data.iteration}/${data.maxIterations})`;
+      }
+      break;
+    }
+
+    case 'orch:sub-tool': {
+      const taskEl3 = document.querySelector(`.ag-orch-task[data-task-id="${data.taskId}"]`);
+      if (taskEl3) {
+        const contentEl = taskEl3.querySelector('.ag-orch-task-content');
+        if (contentEl) {
+          const toolDiv = document.createElement('div');
+          toolDiv.className = 'ag-orch-sub-tool';
+          const icon = TOOL_ICONS[data.tool] || '🔧';
+          toolDiv.textContent = `${icon} ${data.tool}: ${(data.arg || '').slice(0, 80)}`;
+          contentEl.appendChild(toolDiv);
+        }
+      }
+      break;
+    }
+
+    case 'orch:sub-tool-result': {
+      // Subtle feedback — no extra rendering needed
+      break;
+    }
+
+    case 'orch:sub-streaming': {
+      const taskEl4 = document.querySelector(`.ag-orch-task[data-task-id="${data.taskId}"]`);
+      if (taskEl4) {
+        let streamEl = taskEl4.querySelector('.ag-orch-sub-stream');
+        if (!streamEl) {
+          streamEl = document.createElement('div');
+          streamEl.className = 'ag-orch-sub-stream';
+          streamEl._raw = '';
+          taskEl4.querySelector('.ag-orch-task-content')?.appendChild(streamEl);
+        }
+        streamEl._raw += data.delta;
+        // Try extract message from JSON
+        let display = streamEl._raw;
+        const m = display.match(/"message"\s*:\s*"((?:[^"\\]|\\[\s\S])*)(?:"|$)/);
+        if (m) { try { display = JSON.parse('"' + m[1] + '"'); } catch { display = m[1]; } }
+        streamEl.innerHTML = formatMessage(display.slice(-500));
+      }
+      scrollToBottom();
+      break;
+    }
+
+    case 'orch:sub-done': {
+      const taskEl5 = document.querySelector(`.ag-orch-task[data-task-id="${data.taskId}"]`);
+      if (taskEl5) {
+        const statusEl = taskEl5.querySelector('.ag-orch-task-status');
+        if (statusEl) { statusEl.textContent = '완료'; statusEl.className = 'ag-orch-task-status ag-orch-done'; }
+        // Show result summary
+        if (data.result) {
+          const contentEl = taskEl5.querySelector('.ag-orch-task-content');
+          if (contentEl) {
+            // Clear streaming element
+            const streamEl = contentEl.querySelector('.ag-orch-sub-stream');
+            if (streamEl) streamEl.remove();
+            const resultDiv = document.createElement('div');
+            resultDiv.className = 'ag-orch-sub-result';
+            resultDiv.innerHTML = formatMessage(data.result);
+            contentEl.appendChild(resultDiv);
+          }
+        }
+      }
+      scrollToBottom();
+      break;
+    }
+
+    case 'orch:sub-error': {
+      const taskEl6 = document.querySelector(`.ag-orch-task[data-task-id="${data.taskId}"]`);
+      if (taskEl6) {
+        const statusEl = taskEl6.querySelector('.ag-orch-task-status');
+        if (statusEl) {
+          statusEl.textContent = data.retrying ? `재시도 (${data.escalatedTo || ''})` : '실패';
+          statusEl.className = `ag-orch-task-status ${data.retrying ? 'ag-orch-running' : 'ag-orch-failed'}`;
+        }
+      }
+      break;
+    }
+
+    case 'orch:synthesizing': {
+      updateLiveStatus(`${data.agentName || '오케스트레이터'} 종합 중...`, 0, 0);
+      break;
+    }
+
+    case 'orch:streaming': {
+      // Streaming from synthesizer
+      const liveContent2 = document.querySelector('.ag-msg-live .ag-live-content');
+      if (!liveContent2) break;
+      let synthEl = liveContent2.querySelector('.ag-orch-synthesis');
+      if (!synthEl) {
+        synthEl = document.createElement('div');
+        synthEl.className = 'ag-live-step ag-orch-synthesis';
+        synthEl._raw = '';
+        liveContent2.appendChild(synthEl);
+      }
+      synthEl._raw += data.delta;
+      synthEl.innerHTML = formatMessage(synthEl._raw);
+      scrollToBottom();
+      break;
+    }
+
+    case 'orch:response': {
+      finalizeLiveBubble(data.content, data.agentId);
+      flushStreamTTS();
+      if (_ttsEnabled && data.content && !_streamTTSUsed) speak(data.content);
+      showAgentFabBadge();
+      break;
+    }
+
+    case 'orch:done': {
+      _running = false;
+      updateActionButton();
+      removeLiveStatus();
+      loadMessages().then(() => renderChat());
+      ensureWakeWordRunning();
       break;
     }
   }
 }
 
+// ─── Proactive Alert Rendering ───
+function renderProactiveAlert(alert) {
+  const container = document.getElementById('agent-alerts');
+  if (!container) return;
+
+  const sourceIcons = { terminal: '⚡', cicd: '🔄', jira: '🎫', devserver: '🌐' };
+  const _levelColors = { error: '#ef4444', warning: '#f59e0b', info: '#60a5fa' };
+
+  const card = document.createElement('div');
+  card.className = `ag-alert-card ag-alert-${alert.level}`;
+  card.dataset.alertId = alert.id;
+  card.innerHTML = `
+    <div class="ag-alert-head">
+      <span class="ag-alert-icon">${sourceIcons[alert.source] || '🔔'}</span>
+      <span class="ag-alert-title">${esc(alert.title)}</span>
+      <button class="ag-alert-dismiss" data-action="dismiss-alert" data-alert-id="${esc(alert.id)}" title="닫기">&times;</button>
+    </div>
+    <div class="ag-alert-detail">${esc(alert.detail).slice(0, 200)}</div>
+    <div class="ag-alert-actions">
+      <button class="ag-alert-act" data-action="act-on-alert" data-alert-id="${esc(alert.id)}" data-prompt="${esc(alert.suggestedPrompt || '')}">
+        ${esc(alert.suggestedAction || '분석하기')}
+      </button>
+    </div>
+  `;
+  container.prepend(card);
+
+  // Auto-remove after 5 minutes
+  setTimeout(() => card.remove(), 5 * 60 * 1000);
+}
+
 // ─── Live Bubble Management ───
-function ensureLiveBubble(chatArea) {
+function ensureLiveBubble(chatArea, agentId = null) {
   // Remove existing live bubble if any
   const existing = chatArea.querySelector('.ag-msg-live');
   if (existing) existing.remove();
 
+  const profileHeader = agentId ? renderAgentBadge(agentId) : '';
   const liveBubble = document.createElement('div');
   liveBubble.className = 'ag-msg ag-msg-ai ag-msg-live';
   liveBubble.innerHTML = `
+    ${profileHeader}
     <div class="ag-live-status">
       <div class="ag-live-dots"><span></span><span></span><span></span></div>
       <span class="ag-live-label">생각 중이에여...</span>
@@ -662,11 +1096,13 @@ function appendToolCard(chatArea, iteration, tool, arg, result, toolIndex) {
   card.dataset.iteration = iteration;
   card.dataset.tool = tool;
   if (toolIndex != null) card.dataset.toolIndex = toolIndex;
+  card._startTime = Date.now();
   card.innerHTML = `
     <div class="ag-tool-card-head" data-action="toggle-tool-card">
       <span class="ag-tool-card-icon">${TOOL_ICONS[tool] || '🔧'}</span>
       <span class="ag-tool-card-name">${esc(tool)}</span>
       <code class="ag-tool-card-arg">${esc((arg || '').slice(0, 80))}</code>
+      <span class="ag-tool-card-timer">0.0s</span>
       <span class="ag-tool-card-status ag-tool-running">⟳</span>
       <span class="ag-tool-card-expand">▸</span>
     </div>
@@ -675,6 +1111,12 @@ function appendToolCard(chatArea, iteration, tool, arg, result, toolIndex) {
     </div>
   `;
   container.appendChild(card);
+  // Start elapsed timer
+  const timerEl = card.querySelector('.ag-tool-card-timer');
+  card._timerInterval = setInterval(() => {
+    const elapsed = ((Date.now() - card._startTime) / 1000).toFixed(1);
+    if (timerEl) timerEl.textContent = `${elapsed}s`;
+  }, 100);
 }
 
 function fillToolCardResult(iteration, tool, result, toolIndex) {
@@ -688,6 +1130,12 @@ function fillToolCardResult(iteration, tool, result, toolIndex) {
   }
   if (!card) return;
 
+  // Stop timer
+  if (card._timerInterval) { clearInterval(card._timerInterval); card._timerInterval = null; }
+  const elapsed = card._startTime ? ((Date.now() - card._startTime) / 1000).toFixed(1) : '?';
+  const timerEl = card.querySelector('.ag-tool-card-timer');
+  if (timerEl) timerEl.textContent = `${elapsed}s`;
+
   const statusEl = card.querySelector('.ag-tool-card-status');
   if (statusEl) {
     statusEl.textContent = '✓';
@@ -700,7 +1148,7 @@ function fillToolCardResult(iteration, tool, result, toolIndex) {
   }
 }
 
-function finalizeLiveBubble(content) {
+function finalizeLiveBubble(content, agentId = null) {
   const live = document.querySelector('.ag-msg-live');
   if (!live) return;
   live.classList.remove('ag-msg-live');
@@ -709,7 +1157,24 @@ function finalizeLiveBubble(content) {
   const status = live.querySelector('.ag-live-status');
   if (status) status.remove();
 
-  // The content and tool cards stay as-is (they show the journey)
+  // Ensure agent profile header is present
+  if (agentId && !live.querySelector('[data-agent-badge]')) {
+    const badgeHtml = renderAgentBadge(agentId);
+    if (badgeHtml) {
+      live.insertAdjacentHTML('afterbegin', badgeHtml);
+    }
+  }
+
+  // If content has embed markers (e.g. @@EMBED:youtube:...@@), render them into the live content area
+  if (content && /@@EMBED:/.test(content)) {
+    const contentEl = live.querySelector('.ag-live-content');
+    if (contentEl) {
+      const embedDiv = document.createElement('div');
+      embedDiv.className = 'ag-live-step';
+      embedDiv.innerHTML = formatMessage(content);
+      contentEl.appendChild(embedDiv);
+    }
+  }
 }
 
 // ─── Action Button: Send ↔ Stop toggle ───
@@ -741,7 +1206,7 @@ function startListening() {
 
   // Pause wake word while push-to-talk is active (can't run two recognitions)
   if (_wakeRecognition) {
-    try { _wakeRecognition.stop(); } catch {}
+    try { _wakeRecognition.stop(); } catch { /* speech API unavailable */ }
     _wakeRecognition = null;
   }
 
@@ -781,7 +1246,7 @@ function startListening() {
 function stopListening() {
   _listening = false;
   if (_recognition) {
-    try { _recognition.stop(); } catch {}
+    try { _recognition.stop(); } catch { /* speech API unavailable */ }
     _recognition = null;
   }
   const micBtn = document.getElementById('agent-mic-btn');
@@ -825,7 +1290,7 @@ function startWakeWordListening() {
 
   // Clean up any existing instance first
   if (_wakeRecognition) {
-    try { _wakeRecognition.stop(); } catch {}
+    try { _wakeRecognition.stop(); } catch { /* speech API unavailable */ }
     _wakeRecognition = null;
   }
 
@@ -905,7 +1370,7 @@ function stopWakeWordListening() {
   _awaitingCommand = false;
   if (_wakeTimeout) { clearTimeout(_wakeTimeout); _wakeTimeout = null; }
   if (_wakeRecognition) {
-    try { _wakeRecognition.stop(); } catch {}
+    try { _wakeRecognition.stop(); } catch { /* speech API unavailable */ }
     _wakeRecognition = null;
   }
   updateWakeWordUI();
@@ -1181,7 +1646,7 @@ function speak(text) {
 function pauseWakeForTTS() {
   if (_wakeRecognition) {
     console.log('[WAKE] pausing for TTS');
-    try { _wakeRecognition.stop(); } catch {}
+    try { _wakeRecognition.stop(); } catch { /* speech API unavailable */ }
     _wakeRecognition = null;
   }
 }
@@ -1258,7 +1723,7 @@ export async function openAiSettings() {
     const data = await fetchJson('/api/ai/config');
     const inp = document.getElementById('ai-gemini-key');
     if (inp && data.configured) inp.placeholder = data.geminiApiKey || 'AIzaSy...';
-  } catch {}
+  } catch { /* request failed */ }
   document.getElementById('ai-test-result').textContent = '';
   dialog.showModal();
 }
@@ -1304,7 +1769,48 @@ registerClickActions({
   'toggle-tts': toggleTTS,
   'send-agent-msg': sendAgentMessage,
   'stop-agent': stopAgentLoop,
+  'clear-agent-chat': clearAgentChat,
+  'dismiss-alert': (el) => {
+    const alertId = el.dataset.alertId;
+    const card = el.closest('.ag-alert-card');
+    if (card) card.remove();
+    postJson('/api/agent/alerts/dismiss', { alertId }).catch(() => {});
+  },
+  'act-on-alert': async (el) => {
+    const alertId = el.dataset.alertId;
+    const prompt = el.dataset.prompt;
+    const card = el.closest('.ag-alert-card');
+    if (card) card.remove();
+    if (!prompt) return;
+    // Open panel and ensure agent is initialized
+    if (!_panelOpen) toggleAgentPanel();
+    initAgent();
+    // Wait for convId to be ready (loadOrCreateConversation is async)
+    if (!_convId) { await new Promise(r => setTimeout(r, 500)); }
+    if (!_convId) return;
+    // Send the suggested prompt as a user message
+    if (!app._agentMessages) app._agentMessages = [];
+    app._agentMessages.push({ role: 'user', content: prompt, ts: Date.now() });
+    renderChat();
+    try {
+      await postJson('/api/agent/alerts/act', { alertId, convId: _convId, prompt });
+    } catch (err) {
+      app._agentMessages.push({ role: 'assistant', content: `앗 에러가 났어영.. ${err.message}`, ts: Date.now() });
+      renderChat();
+    }
+  },
   'new-agent-conv': newAgentConversation,
+  'open-ai-studio': () => { fetch('/api/open-url', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url: 'https://aistudio.google.com/apikey' }) }).catch(() => window.open('https://aistudio.google.com/apikey', '_blank')); },
+  'copy-msg': (el) => {
+    const bubble = el.closest('.ag-msg-bubble');
+    if (!bubble) return;
+    const text = bubble.textContent.replace(/복사$/, '').trim();
+    navigator.clipboard.writeText(text).then(() => {
+      el.classList.add('ag-copied');
+      setTimeout(() => el.classList.remove('ag-copied'), 1200);
+    });
+  },
+  'scroll-to-bottom': jumpToBottom,
 });
 registerChangeActions({
   'change-agent-model': (el) => changeAgentModel(el.value),

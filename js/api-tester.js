@@ -1,10 +1,10 @@
 // ─── API Tester Module ───
 import { app } from './state.js';
-import { esc, showToast, fetchJson, postJson } from './utils.js';
-import { registerClickActions } from './actions.js';
+import { esc, showToast, fetchJson, postJson, simpleMarkdown } from './utils.js';
+import { registerClickActions, registerInputActions, registerChangeActions } from './actions.js';
 
 const MAX_HISTORY = 30;
-let _requestHistory = [];
+const _requestHistory = [];
 let _resBodyMode = 'pretty'; // 'pretty' | 'raw'
 
 function _timeAgo(ts) {
@@ -13,6 +13,26 @@ function _timeAgo(ts) {
   if (d < 3600000) return Math.floor(d / 60000) + 'm ago';
   if (d < 86400000) return Math.floor(d / 3600000) + 'h ago';
   return Math.floor(d / 86400000) + 'd ago';
+}
+
+async function* _readSSE(response) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += decoder.decode(value, { stream: true });
+    const parts = buf.split('\n\n');
+    buf = parts.pop();
+    for (const part of parts) {
+      for (const line of part.split('\n')) {
+        if (line.startsWith('data: ')) {
+          try { yield JSON.parse(line.slice(6)); } catch { /* malformed JSON */ }
+        }
+      }
+    }
+  }
 }
 
 // ─── Init ───
@@ -95,7 +115,7 @@ async function selectRequest(id) {
     renderConfigPanel();
     app.apiTester.response = null;
     renderResponse();
-  } catch (err) {
+  } catch {
     showToast('Failed to load request', 'error');
   }
 }
@@ -209,7 +229,7 @@ async function deleteReq(id) {
     }
     showToast('Deleted', 'success');
     loadSavedRequests();
-  } catch (err) {
+  } catch {
     showToast('Failed to delete', 'error');
   }
 }
@@ -425,6 +445,968 @@ function renderResponse() {
   }
 }
 
+// ═══════════════════════════════════════════════════════
+// Swagger Import & Auto Test
+// ═══════════════════════════════════════════════════════
+
+// ─── Swagger Import Dialog ───
+let _importMode = 'url'; // 'url' | 'json'
+
+function openSwaggerImportDialog() {
+  const dlg = document.getElementById('at-swagger-dialog');
+  if (!dlg) return;
+  const jsonEl = document.getElementById('at-swagger-json');
+  const urlEl = document.getElementById('at-swagger-url');
+  const baseEl = document.getElementById('at-swagger-base-url');
+  if (jsonEl) jsonEl.value = '';
+  if (urlEl) urlEl.value = '';
+  if (baseEl) baseEl.value = app.apiTester.swaggerBaseUrl || '';
+  const errEl = document.getElementById('at-swagger-error');
+  if (errEl) errEl.style.display = 'none';
+  _switchImportMode('url');
+  dlg.showModal();
+}
+
+function _switchImportMode(mode) {
+  _importMode = mode;
+  document.querySelectorAll('.at-import-tab').forEach(t => t.classList.toggle('active', t.dataset.mode === mode));
+  const urlPanel = document.getElementById('at-import-url-panel');
+  const jsonPanel = document.getElementById('at-import-json-panel');
+  if (urlPanel) urlPanel.style.display = mode === 'url' ? '' : 'none';
+  if (jsonPanel) jsonPanel.style.display = mode === 'json' ? '' : 'none';
+  // Update Import button text
+  const btn = document.getElementById('at-import-btn');
+  if (btn) btn.textContent = mode === 'url' ? 'Fetch & Import' : 'Import';
+}
+
+async function fetchSwaggerUrl() {
+  const url = document.getElementById('at-swagger-url')?.value?.trim();
+  const errEl = document.getElementById('at-swagger-error');
+  if (!url) { _showSwaggerError(errEl, 'URL을 입력하세요'); return; }
+
+  const fetchBtn = document.getElementById('at-fetch-swagger-btn');
+  if (fetchBtn) { fetchBtn.disabled = true; fetchBtn.textContent = 'Fetching...'; }
+
+  try {
+    const result = await postJson('/api/api-tester/swagger/fetch', { url });
+    if (result.error) { _showSwaggerError(errEl, result.error); return; }
+    _applySwaggerResult(result, url);
+  } catch (err) {
+    _showSwaggerError(errEl, err.message);
+  } finally {
+    if (fetchBtn) { fetchBtn.disabled = false; fetchBtn.textContent = 'Fetch'; }
+  }
+}
+
+async function parseSwagger() {
+  if (_importMode === 'url') { await fetchSwaggerUrl(); return; }
+
+  const jsonStr = document.getElementById('at-swagger-json')?.value?.trim();
+  const errEl = document.getElementById('at-swagger-error');
+
+  if (!jsonStr) { _showSwaggerError(errEl, 'JSON 스펙을 붙여넣으세요'); return; }
+
+  let spec;
+  try { spec = JSON.parse(jsonStr); }
+  catch { _showSwaggerError(errEl, 'Invalid JSON - JSON 형식이 올바르지 않습니다'); return; }
+
+  try {
+    const result = await postJson('/api/api-tester/swagger/parse', { spec });
+    if (result.error) { _showSwaggerError(errEl, result.error); return; }
+    _applySwaggerResult(result);
+  } catch (err) {
+    _showSwaggerError(errEl, err.message);
+  }
+}
+
+function _applySwaggerResult(result, fetchedUrl) {
+  const baseUrlOverride = document.getElementById('at-swagger-base-url')?.value?.trim();
+
+  app.apiTester.swagger = result;
+  // Base URL priority: user override > spec servers > extract from fetched URL
+  let autoBase = result.servers?.[0]?.url || '';
+  if (!autoBase && fetchedUrl) {
+    try { const u = new URL(fetchedUrl); autoBase = u.origin; } catch { /* invalid URL */ }
+  }
+  app.apiTester.swaggerBaseUrl = baseUrlOverride || autoBase;
+  app.apiTester.swaggerExcluded = new Set();
+
+  // Update base URL field to show resolved value
+  const baseEl = document.getElementById('at-swagger-base-url');
+  if (baseEl && !baseEl.value) baseEl.value = app.apiTester.swaggerBaseUrl;
+
+  // Auto-detect auth type from security schemes
+  if (result.securitySchemes?.length) {
+    const scheme = result.securitySchemes[0];
+    app.apiTester.detectedAuth = scheme;
+  }
+
+  document.getElementById('at-swagger-dialog')?.close();
+  switchSidebarMode('swagger');
+  const btn = document.getElementById('at-autotest-btn');
+  if (btn) btn.style.display = '';
+
+  const authHint = result.securitySchemes?.length
+    ? ` — Auth: ${result.securitySchemes.map(s => s.type).join(', ')}`
+    : '';
+  showToast(`Imported ${result.endpoints.length} endpoints (${result.info?.title || 'API'})${authHint}`, 'success');
+}
+
+function _showSwaggerError(el, msg) {
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = '';
+}
+
+// ─── Sidebar Mode ───
+function switchSidebarMode(mode) {
+  app.apiTester.sidebarMode = mode;
+
+  // Show tabs
+  const tabs = document.getElementById('at-sidebar-tabs');
+  if (tabs) tabs.style.display = app.apiTester.swagger ? '' : 'none';
+
+  // Toggle active tab
+  tabs?.querySelectorAll('.at-sidebar-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.mode === mode);
+  });
+
+  // Toggle panels
+  const reqList = document.getElementById('at-request-list');
+  const swgPanel = document.getElementById('at-swagger-panel');
+  if (reqList) reqList.style.display = mode === 'requests' ? '' : 'none';
+  if (swgPanel) swgPanel.style.display = mode === 'swagger' ? '' : 'none';
+
+  if (mode === 'swagger') renderSwaggerList();
+  else renderSidebar();
+}
+
+// ─── Swagger List ───
+function renderSwaggerList() {
+  const el = document.getElementById('at-swagger-list');
+  if (!el) return;
+  const swg = app.apiTester.swagger;
+  if (!swg) { el.innerHTML = '<div class="at-sidebar-empty">No spec loaded</div>'; return; }
+
+  const filter = app.apiTester.swaggerFilter.toLowerCase();
+  const excluded = app.apiTester.swaggerExcluded;
+
+  // Group by tag
+  const tagMap = new Map();
+  for (const ep of swg.endpoints) {
+    if (filter && !ep.path.toLowerCase().includes(filter) && !ep.method.toLowerCase().includes(filter) && !(ep.summary || '').toLowerCase().includes(filter)) continue;
+    for (const tag of ep.tags) {
+      if (!tagMap.has(tag)) tagMap.set(tag, []);
+      tagMap.get(tag).push(ep);
+    }
+  }
+
+  let html = '';
+
+  // CRUD Resources section
+  if (swg.resources.length) {
+    html += '<div class="at-swagger-section-title">CRUD Resources</div>';
+    for (const res of swg.resources) {
+      html += `<div class="at-swagger-resource">
+        <span class="at-swagger-resource-name">${esc(res.name)}</span>
+        <span class="at-swagger-resource-path">${esc(res.basePath)}</span>
+        <span class="at-swagger-resource-steps">${res.steps.length} steps</span>
+      </div>`;
+    }
+  }
+
+  // Endpoints by tag
+  for (const [tag, eps] of tagMap) {
+    html += `<div class="at-swagger-tag">${esc(tag)}</div>`;
+    for (const ep of eps) {
+      const key = `${ep.method}:${ep.path}`;
+      const isExcluded = excluded.has(key);
+      const methodCls = `at-method-${ep.method.toLowerCase()}`;
+      html += `<div class="at-swagger-ep${isExcluded ? ' at-ep-excluded' : ''}">
+        <input type="checkbox" class="at-ep-check" ${isExcluded ? '' : 'checked'} data-action="at-toggle-ep-check" data-key="${esc(key)}">
+        <span class="at-req-method ${methodCls}" style="font-size:.6rem">${ep.method}</span>
+        <span class="at-swagger-ep-path" data-action="at-load-swagger-ep" data-method="${ep.method}" data-path="${esc(ep.path)}" title="${esc(ep.summary || ep.path)}">${esc(ep.path)}</span>
+      </div>`;
+    }
+  }
+
+  if (!html) html = '<div class="at-sidebar-empty">No matching endpoints</div>';
+  el.innerHTML = html;
+}
+
+// ─── Endpoint Exclude Toggle ───
+function toggleEndpoint(key, checked) {
+  if (checked === undefined) {
+    // toggle
+    if (app.apiTester.swaggerExcluded.has(key)) app.apiTester.swaggerExcluded.delete(key);
+    else app.apiTester.swaggerExcluded.add(key);
+  } else {
+    if (checked) app.apiTester.swaggerExcluded.delete(key);
+    else app.apiTester.swaggerExcluded.add(key);
+  }
+  renderSwaggerList();
+}
+
+function toggleAllEndpoints() {
+  const swg = app.apiTester.swagger;
+  if (!swg) return;
+  const allKeys = swg.endpoints.map(ep => `${ep.method}:${ep.path}`);
+  const allExcluded = allKeys.every(k => app.apiTester.swaggerExcluded.has(k));
+  if (allExcluded) {
+    app.apiTester.swaggerExcluded.clear();
+  } else {
+    allKeys.forEach(k => app.apiTester.swaggerExcluded.add(k));
+  }
+  renderSwaggerList();
+}
+
+// ─── Load Swagger Endpoint into Builder ───
+function loadSwaggerEndpoint(method, path) {
+  const swg = app.apiTester.swagger;
+  if (!swg) return;
+
+  const ep = swg.endpoints.find(e => e.method === method && e.path === path);
+  if (!ep) return;
+
+  const base = app.apiTester.swaggerBaseUrl || '';
+  app.apiTester.method = method;
+  app.apiTester.url = base + path;
+  app.apiTester.response = null;
+
+  // Build params from path/query parameters
+  app.apiTester.params = (ep.parameters || [])
+    .filter(p => p.in === 'query')
+    .map(p => ({ key: p.name, value: '', enabled: true }));
+
+  // Build headers
+  app.apiTester.headers = (ep.parameters || [])
+    .filter(p => p.in === 'header')
+    .map(p => ({ key: p.name, value: '', enabled: true }));
+
+  // Build body from requestBody
+  if (ep.requestBody?.content?.['application/json']?.schema) {
+    app.apiTester.bodyType = 'json';
+    // Generate sample body from schema (client-side simple version)
+    const schema = ep.requestBody.content['application/json'].schema;
+    const sample = _clientSampleFromSchema(schema, swg.defs || {});
+    app.apiTester.body = sample ? JSON.stringify(sample, null, 2) : '{}';
+  } else {
+    app.apiTester.bodyType = ['GET', 'HEAD', 'DELETE'].includes(method) ? 'none' : 'json';
+    app.apiTester.body = '';
+  }
+
+  // Update form elements
+  const methodEl = document.getElementById('at-method');
+  const urlEl = document.getElementById('at-url');
+  if (methodEl) methodEl.value = method;
+  if (urlEl) urlEl.value = app.apiTester.url;
+
+  renderConfigPanel();
+  renderResponse();
+}
+
+// Simple client-side sample generator (mirrors server logic but lighter)
+function _clientSampleFromSchema(schema, defs, depth = 0) {
+  if (!schema || depth > 4) return null;
+  if (schema.$ref) {
+    const refName = schema.$ref.split('/').pop();
+    const refSchema = defs[refName];
+    if (refSchema) return _clientSampleFromSchema(refSchema, defs, depth + 1);
+    return null;
+  }
+  if (schema.example !== undefined) return schema.example;
+  if (schema.default !== undefined) return schema.default;
+  if (schema.enum?.length) return schema.enum[0];
+  if (schema.type === 'string') return 'sample';
+  if (schema.type === 'integer' || schema.type === 'number') return 1;
+  if (schema.type === 'boolean') return true;
+  if (schema.type === 'array') {
+    const item = _clientSampleFromSchema(schema.items, defs, depth + 1);
+    return item != null ? [item] : [];
+  }
+  if (schema.type === 'object' || schema.properties) {
+    const obj = {};
+    for (const [k, v] of Object.entries(schema.properties || {})) {
+      const val = _clientSampleFromSchema(v, defs, depth + 1);
+      if (val != null) obj[k] = val;
+    }
+    return obj;
+  }
+  return null;
+}
+
+// ═══════════════════════════════════════════════════════
+// Auto Test Runner
+// ═══════════════════════════════════════════════════════
+
+function openAutoTestDialog() {
+  const swg = app.apiTester.swagger;
+  if (!swg) { showToast('Import a Swagger spec first', 'error'); return; }
+
+  const dlg = document.getElementById('at-auto-test-dialog');
+  if (!dlg) return;
+
+  app.apiTester.autoTest = { running: false, results: [], progress: { current: 0, total: 0, passed: 0, failed: 0 } };
+  app.apiTester.aiAnalysis = null;
+  app.apiTester.aiAnalyzing = false;
+  app.apiTester.reviewedPlan = null;
+
+  // Auto-set auth type from detected scheme
+  const authSelect = document.getElementById('at-auth-type');
+  if (authSelect && app.apiTester.detectedAuth) {
+    const d = app.apiTester.detectedAuth;
+    authSelect.value = d.type || 'none';
+  }
+
+  const sectionsEl = document.getElementById('at-autotest-sections');
+  if (sectionsEl) sectionsEl.style.display = '';
+  _renderAuthFields();
+  renderAutoTestSections();
+  document.getElementById('at-autotest-results').style.display = 'none';
+  document.getElementById('at-ai-analysis').style.display = 'none';
+  dlg.showModal();
+}
+
+function _buildAllAutoSteps() {
+  const swg = app.apiTester.swagger;
+  if (!swg) return [];
+  const base = app.apiTester.swaggerBaseUrl;
+  const excluded = app.apiTester.swaggerExcluded;
+  const steps = [];
+
+  // GET endpoints
+  for (const ep of swg.endpoints) {
+    if (ep.method !== 'GET' || excluded.has(`GET:${ep.path}`) || ep.path.match(/\{[^}]+\}/)) continue;
+    steps.push({ method: 'GET', url: `${base}${ep.path}`, path: ep.path, headers: { Accept: 'application/json' }, label: `GET ${ep.path}`, group: 'GET' });
+  }
+
+  // CRUD cycles
+  for (const res of swg.resources) {
+    const itemPath = res.basePath + '/{id}';
+    if (res.create && !excluded.has(`POST:${res.basePath}`)) {
+      const schema = res.create.requestBody?.content?.['application/json']?.schema;
+      const sample = schema ? _clientSampleFromSchema(schema, swg.defs || {}) : {};
+      steps.push({ method: 'POST', url: `${base}${res.basePath}`, path: res.basePath, headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(sample || {}), extractId: true, label: `Create ${res.name}`, group: `CRUD:${res.name}` });
+    }
+    if (res.readOne && !excluded.has(`GET:${itemPath}`)) {
+      steps.push({ method: 'GET', url: `${base}${itemPath}`, path: itemPath, headers: { Accept: 'application/json' }, label: `Read ${res.name}`, group: `CRUD:${res.name}` });
+    }
+    if (res.update) {
+      const m = res.update.method;
+      if (!excluded.has(`${m}:${itemPath}`)) {
+        const schema = res.update.requestBody?.content?.['application/json']?.schema;
+        const sample = schema ? _clientSampleFromSchema(schema, swg.defs || {}) : {};
+        steps.push({ method: m, url: `${base}${itemPath}`, path: itemPath, headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: JSON.stringify(sample || {}), label: `Update ${res.name}`, group: `CRUD:${res.name}` });
+      }
+    }
+    if (res.delete && !excluded.has(`DELETE:${itemPath}`)) {
+      steps.push({ method: 'DELETE', url: `${base}${itemPath}`, path: itemPath, headers: { Accept: 'application/json' }, label: `Delete ${res.name}`, group: `CRUD:${res.name}` });
+      if (res.readOne && !excluded.has(`GET:${itemPath}`)) {
+        steps.push({ method: 'GET', url: `${base}${itemPath}`, path: itemPath, headers: { Accept: 'application/json' }, label: `Verify ${res.name} deleted`, expect: { status: 404 }, group: `CRUD:${res.name}` });
+      }
+    }
+  }
+  return steps;
+}
+
+function renderAutoTestSections() {
+  const el = document.getElementById('at-autotest-sections');
+  if (!el) return;
+  const swg = app.apiTester.swagger;
+  const excluded = app.apiTester.swaggerExcluded;
+
+  const getEndpoints = swg.endpoints
+    .filter(ep => ep.method === 'GET' && !excluded.has(`GET:${ep.path}`) && !ep.path.match(/\{[^}]+\}/));
+  const getCount = getEndpoints.length;
+  const crudCount = swg.resources.reduce((n, r) => n + r.steps.length, 0);
+
+  // AI Plan section at the top
+  let html = `<div class="at-autotest-section at-plan-section">
+    <div class="at-autotest-section-head">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--accent)" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+      <span>AI Test Planner</span>
+      <span class="at-autotest-count">${getCount + crudCount} steps</span>
+    </div>
+    <p class="at-ai-scenario-desc">자동 생성된 GET + CRUD 테스트를 Claude가 검토합니다. 위험한 엔드포인트 제거, 순서 최적화, 누락 테스트 추가, 의존성 체이닝을 자동으로 처리합니다.</p>
+    <div class="at-plan-actions">
+      <button class="btn primary btn-sm" data-action="at-review-plan" id="at-review-plan-btn">AI Review & Plan</button>
+      <button class="btn btn-sm" data-action="at-run-raw" title="AI 검토 없이 바로 실행">Skip AI, Run Raw</button>
+    </div>
+    <div id="at-plan-review"></div>
+  </div>`;
+
+  // Manual sections (collapsed)
+  html += `<details class="at-manual-sections">
+    <summary class="at-manual-summary">Manual Test Sections</summary>
+    <div class="at-autotest-section">
+      <div class="at-autotest-section-head">
+        <span>GET Endpoints</span>
+        <span class="at-autotest-count">${getCount} endpoints</span>
+      </div>
+      <button class="btn primary btn-sm" data-action="at-run-get-tests" ${getCount === 0 ? 'disabled' : ''}>Run GET Tests (${getCount})</button>
+    </div>`;
+
+  if (swg.resources.length) {
+    html += `<div class="at-autotest-section">
+      <div class="at-autotest-section-head">
+        <span>CRUD Cycles</span>
+        <button class="btn primary btn-sm" data-action="at-run-all-crud" style="margin-left:auto">Run All CRUD</button>
+      </div>`;
+    for (const res of swg.resources) {
+      const stepLabels = res.steps.map(s => {
+        const key = `${s.method}:${s.path}`;
+        return excluded.has(key) ? `<s>${s.method}</s>` : s.method;
+      }).join(' → ');
+      html += `<div class="at-autotest-crud-item">
+        <span class="at-autotest-crud-name">${esc(res.name)}</span>
+        <span class="at-autotest-crud-steps">${stepLabels}</span>
+        <button class="btn btn-sm" data-action="at-run-crud" data-path="${esc(res.basePath)}">Run</button>
+      </div>`;
+    }
+    html += '</div>';
+  }
+
+  // AI scenario generation
+  html += `<div class="at-autotest-section">
+      <div class="at-autotest-section-head">
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--accent)" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span>AI Scenarios</span>
+      </div>
+      <p class="at-ai-scenario-desc">Claude가 엣지케이스, 인증 실패, 경계값 등 추가 시나리오를 생성합니다.</p>
+      <button class="btn primary btn-sm" data-action="at-gen-ai-scenarios" id="at-gen-scenarios-btn">Generate AI Scenarios</button>
+      <div id="at-ai-scenarios"></div>
+    </div>
+  </details>`;
+
+  el.innerHTML = html;
+}
+
+async function reviewTestPlan() {
+  const swg = app.apiTester.swagger;
+  if (!swg) return;
+
+  const btn = document.getElementById('at-review-plan-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Reviewing...'; }
+
+  const reviewEl = document.getElementById('at-plan-review');
+  if (reviewEl) reviewEl.innerHTML = '<div class="at-loading"><div class="at-spinner"></div> Claude가 테스트 플랜을 검토 중...</div>';
+
+  const autoSteps = _buildAllAutoSteps();
+  if (!autoSteps.length) {
+    if (reviewEl) reviewEl.innerHTML = '<div class="at-response-error"><div class="at-error-msg">자동 생성된 테스트 스텝이 없습니다.</div></div>';
+    if (btn) { btn.disabled = false; btn.textContent = 'AI Review & Plan'; }
+    return;
+  }
+
+  const specSummary = {
+    info: swg.info,
+    endpoints: swg.endpoints.map(ep => ({ method: ep.method, path: ep.path, summary: ep.summary, parameters: ep.parameters, hasBody: !!ep.requestBody })),
+    resources: swg.resources.map(r => ({ basePath: r.basePath, name: r.name, steps: r.steps.map(s => s.method) })),
+    securitySchemes: swg.securitySchemes || [],
+  };
+
+  try {
+    const response = await fetch('/api/api-tester/review-plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ spec: specSummary, steps: autoSteps, baseUrl: app.apiTester.swaggerBaseUrl, securitySchemes: swg.securitySchemes || [] }),
+    });
+
+    if (!response.ok) {
+      let msg = `HTTP ${response.status}`;
+      try { msg = (await response.json()).error || msg; } catch { /* malformed JSON */ }
+      throw new Error(msg);
+    }
+
+    let fullText = '';
+    for await (const event of _readSSE(response)) {
+      if (event.type === 'text') {
+        fullText += event.delta;
+        if (reviewEl) reviewEl.innerHTML = `<div class="at-ai-analysis-content">${simpleMarkdown(fullText)}</div>`;
+      } else if (event.type === 'plan') {
+        app.apiTester.reviewedPlan = event.steps;
+        _renderReviewedPlan(event.steps);
+      } else if (event.type === 'error') {
+        throw new Error(event.message);
+      }
+    }
+
+    // Fallback: try parsing from markdown if no structured plan came through
+    if (!app.apiTester.reviewedPlan && fullText) {
+      const jsonMatch = fullText.match(/```json\s*\n([\s\S]*?)\n```/);
+      if (jsonMatch) {
+        try {
+          const plan = JSON.parse(jsonMatch[1]);
+          if (Array.isArray(plan) && plan.length) {
+            app.apiTester.reviewedPlan = plan;
+            _renderReviewedPlan(plan);
+          }
+        } catch { /* malformed JSON */ }
+      }
+    }
+  } catch (err) {
+    if (reviewEl) reviewEl.innerHTML = `<div class="at-response-error"><div class="at-error-msg">${esc(err.message)}</div></div>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'AI Review & Plan'; }
+  }
+}
+
+function _renderReviewedPlan(steps) {
+  const el = document.getElementById('at-plan-review');
+  if (!el || !steps?.length) return;
+
+  // Group steps for display
+  const groups = new Map();
+  for (const s of steps) {
+    const g = s.group || 'other';
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(s);
+  }
+
+  let html = el.innerHTML; // keep review text
+  html += `<div class="at-reviewed-plan">
+    <div class="at-plan-header">
+      <span class="at-plan-title">Reviewed Plan — ${steps.length} steps</span>
+      <button class="btn primary btn-sm" data-action="at-run-reviewed-plan">Run Reviewed Plan</button>
+    </div>
+    <div class="at-plan-steps">`;
+
+  for (const [group, gSteps] of groups) {
+    html += `<div class="at-plan-group-name">${esc(group)}</div>`;
+    for (const s of gSteps) {
+      const methodCls = `at-method-${s.method.toLowerCase()}`;
+      html += `<div class="at-plan-step">
+        <span class="at-req-method ${methodCls}" style="font-size:.6rem">${s.method}</span>
+        <span class="at-plan-step-label">${esc(s.label || s.path)}</span>
+        ${s.extractId ? '<span class="at-plan-tag">ID추출</span>' : ''}
+        ${s.expect?.status ? `<span class="at-plan-tag">expect:${s.expect.status}</span>` : ''}
+      </div>`;
+    }
+  }
+
+  html += '</div></div>';
+  el.innerHTML = html;
+}
+
+async function runReviewedPlan() {
+  const steps = app.apiTester.reviewedPlan;
+  if (!steps?.length) { showToast('No reviewed plan', 'error'); return; }
+  const auth = _getAuthHeaders();
+  const withAuth = steps.map(s => ({ ...s, headers: { ...s.headers, ...auth } }));
+  await _runAutoTest(withAuth);
+}
+
+async function runRawSteps() {
+  const auth = _getAuthHeaders();
+  const steps = _buildAllAutoSteps().map(s => ({ ...s, headers: { ...s.headers, ...auth } }));
+  if (!steps.length) { showToast('No steps to run', 'error'); return; }
+  await _runAutoTest(steps);
+}
+
+async function generateAiScenarios() {
+  const swg = app.apiTester.swagger;
+  if (!swg) return;
+
+  const btn = document.getElementById('at-gen-scenarios-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Generating...'; }
+
+  const scenariosEl = document.getElementById('at-ai-scenarios');
+  if (scenariosEl) scenariosEl.innerHTML = '<div class="at-loading"><div class="at-spinner"></div> Claude analyzing spec...</div>';
+
+  const base = app.apiTester.swaggerBaseUrl;
+  const specSummary = {
+    info: swg.info,
+    endpoints: swg.endpoints.map(ep => ({ method: ep.method, path: ep.path, summary: ep.summary, parameters: ep.parameters, hasBody: !!ep.requestBody })),
+    resources: swg.resources.map(r => ({ basePath: r.basePath, name: r.name, steps: r.steps.map(s => s.method) })),
+    securitySchemes: swg.securitySchemes || [],
+  };
+
+  try {
+    const response = await fetch('/api/api-tester/generate-scenarios', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ spec: specSummary, baseUrl: base }),
+    });
+
+    if (!response.ok) {
+      let msg = `HTTP ${response.status}`;
+      try { msg = (await response.json()).error || msg; } catch { /* malformed JSON */ }
+      throw new Error(msg);
+    }
+
+    // Stream the response
+    let fullText = '';
+    for await (const event of _readSSE(response)) {
+      if (event.type === 'text') {
+        fullText += event.delta;
+        if (scenariosEl) scenariosEl.innerHTML = `<div class="at-ai-analysis-content">${simpleMarkdown(fullText)}</div>`;
+      } else if (event.type === 'scenarios') {
+        // Server parsed the AI output into executable steps
+        app.apiTester.aiScenarios = event.scenarios;
+        _renderAiScenarioButtons(event.scenarios);
+      } else if (event.type === 'error') {
+        throw new Error(event.message);
+      }
+    }
+
+    // If no structured scenarios came through, try parsing from the markdown
+    if (!app.apiTester.aiScenarios && fullText) {
+      _tryParseScenarios(fullText);
+    }
+  } catch (err) {
+    if (scenariosEl) scenariosEl.innerHTML = `<div class="at-response-error"><div class="at-error-msg">${esc(err.message)}</div></div>`;
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Generate AI Scenarios'; }
+  }
+}
+
+function _renderAiScenarioButtons(scenarios) {
+  const el = document.getElementById('at-ai-scenarios');
+  if (!el || !scenarios?.length) return;
+
+  let html = el.innerHTML;
+  html += '<div class="at-ai-scenario-actions">';
+  for (let i = 0; i < scenarios.length; i++) {
+    const s = scenarios[i];
+    html += `<button class="btn btn-sm" data-action="at-run-ai-scenario" data-idx="${i}">${esc(s.name)} (${s.steps.length} steps)</button>`;
+  }
+  html += '<button class="btn primary btn-sm" data-action="at-run-all-ai-scenarios">Run All Scenarios</button>';
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+function _tryParseScenarios(text) {
+  const jsonMatch = text.match(/```json\s*\n([\s\S]*?)\n```/);
+  if (!jsonMatch) return;
+  try {
+    const scenarios = JSON.parse(jsonMatch[1]);
+    if (Array.isArray(scenarios) && scenarios.length) {
+      app.apiTester.aiScenarios = scenarios;
+      _renderAiScenarioButtons(scenarios);
+    }
+  } catch { /* malformed JSON */ }
+}
+
+async function runAiScenario(idx) {
+  const scenarios = app.apiTester.aiScenarios;
+  if (!scenarios?.[idx]) return;
+  const auth = _getAuthHeaders();
+  const steps = scenarios[idx].steps.map(s => ({
+    ...s,
+    headers: { ...s.headers, ...auth },
+  }));
+  await _runAutoTest(steps);
+}
+
+async function runAllAiScenarios() {
+  const scenarios = app.apiTester.aiScenarios;
+  if (!scenarios?.length) { showToast('No AI scenarios generated', 'error'); return; }
+  const auth = _getAuthHeaders();
+  const allSteps = scenarios.flatMap(s => s.steps.map(step => ({
+    ...step,
+    headers: { ...step.headers, ...auth },
+  })));
+  await _runAutoTest(allSteps);
+}
+
+async function runGetTests() {
+  const swg = app.apiTester.swagger;
+  if (!swg) return;
+  const base = app.apiTester.swaggerBaseUrl;
+  const excluded = app.apiTester.swaggerExcluded;
+  const auth = _getAuthHeaders();
+
+  const steps = swg.endpoints
+    .filter(ep => ep.method === 'GET' && !excluded.has(`GET:${ep.path}`) && !ep.path.match(/\{[^}]+\}/))
+    .map(ep => ({
+      method: 'GET',
+      url: `${base}${ep.path}`,
+      path: ep.path,
+      headers: { Accept: 'application/json', ...auth },
+      label: `GET ${ep.path}`,
+    }));
+
+  if (!steps.length) { showToast('No GET endpoints to test', 'error'); return; }
+  await _runAutoTest(steps);
+}
+
+async function runCrudCycle(basePath) {
+  const swg = app.apiTester.swagger;
+  if (!swg) return;
+  const res = swg.resources.find(r => r.basePath === basePath);
+  if (!res) return;
+
+  const base = app.apiTester.swaggerBaseUrl;
+  const excluded = app.apiTester.swaggerExcluded;
+  const auth = _getAuthHeaders();
+  const itemPath = basePath + '/{id}';
+
+  const steps = [];
+  if (res.create && !excluded.has(`POST:${basePath}`)) {
+    const schema = res.create.requestBody?.content?.['application/json']?.schema;
+    const sample = schema ? _clientSampleFromSchema(schema, swg.defs || {}) : {};
+    steps.push({
+      method: 'POST', url: `${base}${basePath}`, path: basePath,
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...auth },
+      body: JSON.stringify(sample || {}), extractId: true, label: 'Create',
+    });
+  }
+  if (res.readOne && !excluded.has(`GET:${itemPath}`)) {
+    steps.push({ method: 'GET', url: `${base}${itemPath}`, path: itemPath, headers: { Accept: 'application/json', ...auth }, label: 'Read' });
+  }
+  if (res.update) {
+    const m = res.update.method;
+    if (!excluded.has(`${m}:${itemPath}`)) {
+      const schema = res.update.requestBody?.content?.['application/json']?.schema;
+      const sample = schema ? _clientSampleFromSchema(schema, swg.defs || {}) : {};
+      steps.push({
+        method: m, url: `${base}${itemPath}`, path: itemPath,
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...auth },
+        body: JSON.stringify(sample || {}), label: 'Update',
+      });
+    }
+  }
+  if (res.delete && !excluded.has(`DELETE:${itemPath}`)) {
+    steps.push({ method: 'DELETE', url: `${base}${itemPath}`, path: itemPath, headers: { Accept: 'application/json', ...auth }, label: 'Delete' });
+    if (res.readOne && !excluded.has(`GET:${itemPath}`)) {
+      steps.push({ method: 'GET', url: `${base}${itemPath}`, path: itemPath, headers: { Accept: 'application/json', ...auth }, label: 'Verify 404', expect: { status: 404 } });
+    }
+  }
+
+  if (!steps.length) { showToast('No steps (all excluded)', 'error'); return; }
+  await _runAutoTest(steps);
+}
+
+async function runAllCrudCycles() {
+  const swg = app.apiTester.swagger;
+  if (!swg?.resources.length) { showToast('No CRUD resources detected', 'error'); return; }
+  for (const res of swg.resources) {
+    await runCrudCycle(res.basePath);
+  }
+}
+
+async function _runAutoTest(steps) {
+  const at = app.apiTester.autoTest;
+  at.running = true;
+  at.results = [];
+  at.progress = { current: 0, total: steps.length, passed: 0, failed: 0 };
+
+  // Hide sections, show live progress
+  const sectionsEl = document.getElementById('at-autotest-sections');
+  if (sectionsEl) sectionsEl.style.display = 'none';
+
+  const el = document.getElementById('at-autotest-results');
+  if (!el) return;
+  el.style.display = '';
+  el.innerHTML = `
+    <div class="at-progress-wrap">
+      <div class="at-progress-info">
+        <span class="at-progress-label" id="at-progress-label">Starting...</span>
+        <span class="at-progress-count" id="at-progress-count">0/${steps.length}</span>
+      </div>
+      <div class="at-progress-bar"><div class="at-progress-fill" id="at-progress-fill"></div></div>
+      <div class="at-progress-stats" id="at-progress-stats"></div>
+    </div>
+    <div class="at-live-results" id="at-live-results"></div>
+  `;
+
+  try {
+    const response = await fetch('/api/api-tester/auto-test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ steps }),
+    });
+
+    if (!response.ok) {
+      let msg = `HTTP ${response.status}`;
+      try { msg = (await response.json()).error || msg; } catch { /* malformed JSON */ }
+      throw new Error(msg);
+    }
+
+    for await (const event of _readSSE(response)) {
+      if (event.type === 'running') {
+        _appendRunningItem(event);
+        const label = document.getElementById('at-progress-label');
+        if (label) label.textContent = `${event.method} ${event.label}`;
+      } else if (event.type === 'result') {
+        at.results.push(event);
+        _updateResultItem(event);
+        _updateAutoProgress(event.index + 1, event.total, event.passed, event.failed);
+      } else if (event.type === 'done') {
+        at.running = false;
+        _updateAutoProgress(event.total, event.total, event.passed, event.failed);
+        _showAutoTestDone(event);
+        // Auto-trigger AI analysis
+        setTimeout(() => analyzeWithAI(), 600);
+      }
+    }
+  } catch (err) {
+    at.running = false;
+    showToast('Auto test failed: ' + err.message, 'error');
+  }
+}
+
+function _updateAutoProgress(current, total, passed, failed) {
+  const fill = document.getElementById('at-progress-fill');
+  const count = document.getElementById('at-progress-count');
+  const stats = document.getElementById('at-progress-stats');
+  if (fill) fill.style.width = `${(current / total) * 100}%`;
+  if (count) count.textContent = `${current}/${total}`;
+  if (stats) stats.innerHTML = `<span class="at-autotest-pass">✓ ${passed}</span> <span class="at-autotest-fail">✗ ${failed}</span>`;
+}
+
+function _appendRunningItem(event) {
+  const el = document.getElementById('at-live-results');
+  if (!el) return;
+  const methodCls = `at-method-${event.method.toLowerCase()}`;
+  const item = document.createElement('div');
+  item.className = 'at-live-item at-live-running';
+  item.id = `at-live-${event.index}`;
+  item.innerHTML = `
+    <div class="at-live-spinner"></div>
+    <span class="at-req-method ${methodCls}" style="font-size:.6rem">${event.method}</span>
+    <span class="at-live-label">${esc(event.label)}</span>
+    <span class="at-live-status">running...</span>
+  `;
+  el.appendChild(item);
+  item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function _updateResultItem(event) {
+  const item = document.getElementById(`at-live-${event.index}`);
+  if (!item) return;
+  const statusCls = event.pass ? 'at-status-2xx' : (event.result?.status >= 500 ? 'at-status-5xx' : 'at-status-4xx');
+  const badge = event.pass ? '✓' : '✗';
+  const badgeCls = event.pass ? 'at-live-pass' : 'at-live-fail';
+  const status = event.result?.status || 'ERR';
+  const time = event.result?.time ? `${event.result.time}ms` : '-';
+  const methodCls = `at-method-${event.method.toLowerCase()}`;
+  item.className = `at-live-item at-live-done ${badgeCls}`;
+  item.innerHTML = `
+    <span class="at-live-badge ${badgeCls}">${badge}</span>
+    <span class="at-req-method ${methodCls}" style="font-size:.6rem">${event.method}</span>
+    <span class="at-live-label">${esc(event.label || event.path || event.url)}</span>
+    <span class="at-status-badge at-status-sm ${statusCls}">${status}</span>
+    <span class="at-res-time">${time}</span>
+  `;
+}
+
+function _showAutoTestDone(event) {
+  const label = document.getElementById('at-progress-label');
+  if (label) label.textContent = event.failed > 0 ? `Done — ${event.failed} failed` : 'All tests passed!';
+  const fill = document.getElementById('at-progress-fill');
+  if (fill) fill.classList.add(event.failed > 0 ? 'at-progress-warn' : 'at-progress-ok');
+  const stats = document.getElementById('at-progress-stats');
+  if (stats) stats.innerHTML += `<button class="btn btn-sm at-ai-btn" data-action="at-analyze-ai" style="margin-left:auto">AI Analyze</button>`;
+}
+
+// ═══════════════════════════════════════════════════════
+// AI Analysis (SSE streaming)
+// ═══════════════════════════════════════════════════════
+
+async function analyzeWithAI() {
+  const at = app.apiTester;
+  if (!at.autoTest.results.length) { showToast('Run tests first', 'error'); return; }
+  if (at.aiAnalyzing) return;
+  at.aiAnalyzing = true;
+
+  const analysisEl = document.getElementById('at-ai-analysis');
+  if (!analysisEl) return;
+  analysisEl.style.display = '';
+  analysisEl.innerHTML = `
+    <div class="at-ai-analysis-header">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+      AI Analysis
+      <span class="at-ai-typing">analyzing...</span>
+    </div>
+    <div class="at-ai-analysis-content" id="at-ai-stream"></div>
+  `;
+
+  let fullText = '';
+  const contentEl = document.getElementById('at-ai-stream');
+
+  try {
+    const response = await fetch('/api/api-tester/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        spec: at.swagger?.info || null,
+        steps: at.autoTest.results.map(r => ({ method: r.method, url: r.url, label: r.label, path: r.path, expect: r.expect })),
+        results: at.autoTest.results.map(r => ({ pass: r.pass, status: r.result?.status, time: r.result?.time, body: _truncateBody(r.result?.body), error: r.result?.error })),
+      }),
+    });
+
+    if (!response.ok) {
+      let msg = `HTTP ${response.status}`;
+      try { msg = (await response.json()).error || msg; } catch { /* malformed JSON */ }
+      throw new Error(msg);
+    }
+
+    for await (const event of _readSSE(response)) {
+      if (event.type === 'text') {
+        fullText += event.delta;
+        if (contentEl) contentEl.innerHTML = simpleMarkdown(fullText);
+      } else if (event.type === 'error') {
+        throw new Error(event.message);
+      }
+    }
+
+    at.aiAnalysis = fullText;
+  } catch (err) {
+    if (analysisEl) analysisEl.innerHTML = `<div class="at-response-error"><div class="at-error-msg">${esc(err.message)}</div></div>`;
+  } finally {
+    at.aiAnalyzing = false;
+    analysisEl?.querySelector('.at-ai-typing')?.remove();
+  }
+}
+
+function _truncateBody(body) {
+  if (body == null) return null;
+  const s = typeof body === 'string' ? body : JSON.stringify(body);
+  return s.length > 500 ? s.slice(0, 500) + '...' : s;
+}
+
+// ─── Auth Config ───
+function _renderAuthFields() {
+  const type = document.getElementById('at-auth-type')?.value || 'none';
+  const el = document.getElementById('at-auth-fields');
+  if (!el) return;
+  const saved = app.apiTester.authConfig || {};
+
+  if (type === 'none') { el.innerHTML = ''; return; }
+  if (type === 'bearer') {
+    el.innerHTML = `<input type="text" class="at-url" id="at-auth-token" placeholder="Bearer token..." value="${esc(saved.token || '')}" style="width:100%;box-sizing:border-box">`;
+  } else if (type === 'apikey') {
+    el.innerHTML = `<div style="display:flex;gap:6px"><input type="text" class="at-url" id="at-auth-key-name" placeholder="Header name (e.g. X-API-Key)" value="${esc(saved.keyName || '')}" style="flex:1"><input type="text" class="at-url" id="at-auth-key-value" placeholder="Key value" value="${esc(saved.keyValue || '')}" style="flex:1"></div>`;
+  } else if (type === 'basic') {
+    el.innerHTML = `<div style="display:flex;gap:6px"><input type="text" class="at-url" id="at-auth-user" placeholder="Username" value="${esc(saved.user || '')}" style="flex:1"><input type="password" class="at-url" id="at-auth-pass" placeholder="Password" value="${esc(saved.pass || '')}" style="flex:1"></div>`;
+  } else if (type === 'custom') {
+    el.innerHTML = `<div style="display:flex;gap:6px"><input type="text" class="at-url" id="at-auth-hdr-name" placeholder="Header name" value="${esc(saved.hdrName || '')}" style="flex:1"><input type="text" class="at-url" id="at-auth-hdr-value" placeholder="Header value" value="${esc(saved.hdrValue || '')}" style="flex:1"></div>`;
+  }
+}
+
+function _getAuthHeaders() {
+  const type = document.getElementById('at-auth-type')?.value || 'none';
+  const headers = {};
+  if (type === 'bearer') {
+    const token = document.getElementById('at-auth-token')?.value?.trim();
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+  } else if (type === 'apikey') {
+    const name = document.getElementById('at-auth-key-name')?.value?.trim();
+    const value = document.getElementById('at-auth-key-value')?.value?.trim();
+    if (name && value) headers[name] = value;
+  } else if (type === 'basic') {
+    const user = document.getElementById('at-auth-user')?.value || '';
+    const pass = document.getElementById('at-auth-pass')?.value || '';
+    if (user) headers['Authorization'] = `Basic ${btoa(user + ':' + pass)}`;
+  } else if (type === 'custom') {
+    const name = document.getElementById('at-auth-hdr-name')?.value?.trim();
+    const value = document.getElementById('at-auth-hdr-value')?.value?.trim();
+    if (name && value) headers[name] = value;
+  }
+  return headers;
+}
+
 // ─── Action Registration ───
 registerClickActions({
   'at-send': sendRequest,
@@ -433,4 +1415,30 @@ registerClickActions({
   'at-config-tab': (el) => switchConfigTab(el.dataset.tab),
   'at-select': (el) => selectRequest(el.dataset.id),
   'at-delete': (el, e) => { e.stopPropagation(); deleteReq(el.dataset.id); },
+  'at-import-swagger': openSwaggerImportDialog,
+  'at-parse-swagger': parseSwagger,
+  'at-fetch-swagger': fetchSwaggerUrl,
+  'at-import-mode': (el) => _switchImportMode(el.dataset.mode),
+  'at-sidebar-mode': (el) => switchSidebarMode(el.dataset.mode),
+  'at-load-swagger-ep': (el) => loadSwaggerEndpoint(el.dataset.method, el.dataset.path),
+  'at-toggle-ep': (el) => toggleEndpoint(el.dataset.key),
+  'at-toggle-all-ep': toggleAllEndpoints,
+  'at-open-auto-test': openAutoTestDialog,
+  'at-run-get-tests': runGetTests,
+  'at-run-crud': (el) => runCrudCycle(el.dataset.path),
+  'at-run-all-crud': runAllCrudCycles,
+  'at-analyze-ai': analyzeWithAI,
+  'at-review-plan': reviewTestPlan,
+  'at-run-reviewed-plan': runReviewedPlan,
+  'at-run-raw': runRawSteps,
+  'at-gen-ai-scenarios': generateAiScenarios,
+  'at-run-ai-scenario': (el) => runAiScenario(+el.dataset.idx),
+  'at-run-all-ai-scenarios': runAllAiScenarios,
+});
+registerInputActions({
+  'at-swagger-filter': (el) => { app.apiTester.swaggerFilter = el.value; renderSwaggerList(); },
+});
+registerChangeActions({
+  'at-toggle-ep-check': (el) => toggleEndpoint(el.dataset.key, el.checked),
+  'at-auth-type-change': () => _renderAuthFields(),
 });

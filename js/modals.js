@@ -1,7 +1,7 @@
 // ─── Modals: settings, project CRUD, folder picker, dev servers, command palette,
 //     file preview, context menu, error log, discover, notifications, git log, sessions ───
-import { app } from './state.js';
-import { esc, escapeHtml, showToast, timeAgo, fuzzyMatch, IMG_EXT, fetchJson, fetchText, postJson } from './utils.js';
+import { app, notify } from './state.js';
+import { esc, escapeHtml, showToast, timeAgo, fuzzyMatch, IMG_EXT, fetchJson, postJson } from './utils.js';
 import { registerClickActions, registerChangeActions } from './actions.js';
 
 // ─── Settings Panel ───
@@ -19,7 +19,7 @@ async function loadSettingsApiKeys() {
       inp.value = '';
       inp.placeholder = data.geminiApiKey;
     }
-  } catch {}
+  } catch { /* request failed */ }
 }
 export async function saveSettingsGeminiKey() {
   const inp = document.getElementById('settings-gemini-key');
@@ -146,7 +146,7 @@ export async function saveProject() {
   };
   if (!data.name || !data.path) { showToast('Name and path required', 'error'); return; }
   const tag = document.getElementById('pm-tag').value.trim();
-  if (editId) window.setProjectTag?.(editId, tag);
+  if (editId) notify('setProjectTag', { id: editId, tag });
   if (editId) {
     await postJson(`/api/projects/${editId}`, data, { method: 'PUT' });
     showToast('Project updated', 'success');
@@ -191,11 +191,11 @@ export async function browseTo(dir) {
       `<li class="fp-item" data-action="browse-to" data-path="${esc(e.path)}">\
 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>${e.name}</li>`
     ).join('');
-  } catch (err) {
+  } catch {
     showToast('Browse failed', 'error');
   }
 }
-function renderBreadcrumb(current, parent) {
+function renderBreadcrumb(current, _parent) {
   const bc = document.getElementById('fp-breadcrumb');
   if (!current) { bc.innerHTML = '<span style="color:var(--text-3)">Drives</span>'; return; }
   const parts = current.replace(/\/$/, '').split('/');
@@ -223,13 +223,13 @@ export async function confirmDeleteProject(id) {
 }
 export async function refreshProjectList() {
   app.projectList = await fetchJson('/api/projects');
-  window.renderAllCards?.(app.projectList);
+  notify('renderAllCards', app.projectList);
   app.projectList.forEach(p => {
-    if (app.state.projects.has(p.id)) window.renderCard?.(p.id);
+    if (app.state.projects.has(p.id)) notify('renderCard', p.id);
   });
   renderSettingsProjectList();
   populateProjectSelects();
-  window.updateSummaryStats?.();
+  notify('updateSummaryStats');
 }
 export function populateProjectSelects() {
   const plainOpts = app.projectList.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
@@ -320,7 +320,7 @@ export async function toggleDevServer(projectId) {
     const data = await fetchJson('/api/dev-servers');
     app.devServerState = data.running || [];
     updateDevBadge();
-    window.renderCard?.(projectId);
+    notify('renderCard', projectId);
     if (endpoint === 'start') {
       const pName = app.projectList.find(p => p.id === projectId)?.name || projectId;
       showToast(`Starting ${pName}...`, 'info', 2000);
@@ -438,55 +438,55 @@ function buildCommandList() {
   const themeIcon = icon('<path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z"/>');
 
   // Navigation
-  cmds.push({ group: 'Navigation', label: 'Go to Overview', hint: 'Ctrl+1', icon: navIcon, action: () => window.switchView?.('dashboard') });
-  cmds.push({ group: 'Navigation', label: 'Go to Terminal', hint: 'Ctrl+2', icon: termIcon, action: () => window.switchView?.('terminal') });
-  cmds.push({ group: 'Navigation', label: 'Go to Changes', hint: 'Ctrl+3', icon: gitIcon, action: () => window.switchView?.('diff') });
+  cmds.push({ group: 'Navigation', label: 'Go to Overview', hint: 'Ctrl+1', icon: navIcon, action: () => notify('switchView', 'dashboard') });
+  cmds.push({ group: 'Navigation', label: 'Go to Terminal', hint: 'Ctrl+2', icon: termIcon, action: () => notify('switchView', 'terminal') });
+  cmds.push({ group: 'Navigation', label: 'Go to Changes', hint: 'Ctrl+3', icon: gitIcon, action: () => notify('switchView', 'diff') });
   const jiraIcon = icon('<path d="M11.53 2c-.55 0-1.07.22-1.46.6L2.6 10.07a2.07 2.07 0 000 2.93l7.47 7.47c.39.38.91.6 1.46.6s1.07-.22 1.46-.6l7.47-7.47a2.07 2.07 0 000-2.93L13 2.6c-.39-.38-.91-.6-1.47-.6z"/>');
-  cmds.push({ group: 'Navigation', label: 'Go to Jira', hint: 'Ctrl+4', icon: jiraIcon, action: () => window.switchView?.('jira') });
+  cmds.push({ group: 'Navigation', label: 'Go to Jira', hint: 'Ctrl+4', icon: jiraIcon, action: () => notify('switchView', 'jira') });
   const cicdIcon = icon('<circle cx="12" cy="12" r="10"/><path d="M8 12l2 2 4-4"/>');
-  cmds.push({ group: 'Navigation', label: 'Go to CI/CD', hint: 'Ctrl+5', icon: cicdIcon, action: () => window.switchView?.('cicd') });
+  cmds.push({ group: 'Navigation', label: 'Go to CI/CD', hint: 'Ctrl+5', icon: cicdIcon, action: () => notify('switchView', 'cicd') });
   const notesIcon = icon('<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/>');
-  cmds.push({ group: 'Navigation', label: 'Go to Notes', hint: 'Ctrl+6', icon: notesIcon, action: () => window.switchView?.('notes') });
+  cmds.push({ group: 'Navigation', label: 'Go to Notes', hint: 'Ctrl+6', icon: notesIcon, action: () => notify('switchView', 'notes') });
   const logsIcon = icon('<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>');
-  cmds.push({ group: 'Navigation', label: 'Go to Workflows', hint: 'Ctrl+7', icon: logsIcon, action: () => window.switchView?.('workflows') });
-  cmds.push({ group: 'Navigation', label: 'Go to Forge', hint: 'Ctrl+8', icon: navIcon, action: () => window.switchView?.('forge') });
-  cmds.push({ group: 'Navigation', label: 'Go to README', hint: 'Ctrl+9', icon: navIcon, action: () => window.switchView?.('readme') });
+  cmds.push({ group: 'Navigation', label: 'Go to Workflows', hint: 'Ctrl+7', icon: logsIcon, action: () => notify('switchView', 'workflows') });
+  cmds.push({ group: 'Navigation', label: 'Go to Forge', hint: 'Ctrl+8', icon: navIcon, action: () => notify('switchView', 'forge') });
+  cmds.push({ group: 'Navigation', label: 'Go to README', hint: 'Ctrl+9', icon: navIcon, action: () => notify('switchView', 'readme') });
   const agentIcon = icon('<path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 110 2h-1.17A7 7 0 0113 22h-2a7 7 0 01-6.83-6H3a1 1 0 110-2h1a7 7 0 017-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 012-2z"/>');
-  cmds.push({ group: 'Navigation', label: 'Toggle Agent', hint: 'Ctrl+`', icon: agentIcon, action: () => window.toggleAgentPanel?.() });
+  cmds.push({ group: 'Navigation', label: 'Toggle Agent', hint: 'Ctrl+`', icon: agentIcon, action: () => notify('toggleAgentPanel') });
 
   // Projects
   for (const p of app.projectList) {
     const pIcon = icon('<path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/>');
     cmds.push({ group: 'Projects', label: `Switch to ${p.name}`, icon: pIcon, action: () => {
-      window.switchView?.('diff');
+      notify('switchView', 'diff');
       document.getElementById('diff-project').value = p.id;
-      window.loadDiff?.();
+      notify('loadDiff');
     }});
   }
 
   // Terminals
   for (const [tid, t] of app.termMap) {
     cmds.push({ group: 'Terminals', label: `Terminal: ${t.label || tid}`, icon: termIcon, action: () => {
-      window.switchView?.('terminal');
+      notify('switchView', 'terminal');
       app.activeTermId = tid;
-      window.renderLayout?.();
-      window.updateTermHeaders?.();
+      notify('renderLayout');
+      notify('updateTermHeaders');
     }});
   }
 
   // Actions
-  cmds.push({ group: 'Actions', label: 'Recent Conversations', icon: navIcon, action: () => window.showConvList?.() });
-  cmds.push({ group: 'Actions', label: 'New Terminal', hint: 'Ctrl+T', icon: termIcon, action: () => { window.switchView?.('terminal'); window.openNewTermModal?.(); } });
-  cmds.push({ group: 'Actions', label: 'Toggle Theme', icon: themeIcon, action: () => window.toggleTheme?.() });
+  cmds.push({ group: 'Actions', label: 'Recent Conversations', icon: navIcon, action: () => notify('showConvList') });
+  cmds.push({ group: 'Actions', label: 'New Terminal', hint: 'Ctrl+T', icon: termIcon, action: () => { notify('switchView', 'terminal'); notify('openNewTermModal'); } });
+  cmds.push({ group: 'Actions', label: 'Toggle Theme', icon: themeIcon, action: () => notify('toggleTheme') });
   cmds.push({ group: 'Actions', label: 'Open Settings', icon: settingsIcon, action: () => openSettingsPanel() });
   cmds.push({ group: 'Actions', label: 'Keyboard Shortcuts', hint: '?', icon: settingsIcon, action: () => showShortcutHelp() });
-  cmds.push({ group: 'Actions', label: 'Refresh Diff', hint: 'R', icon: gitIcon, action: () => { window.switchView?.('diff'); window.loadDiff?.(); } });
-  cmds.push({ group: 'Actions', label: 'Export Terminal Output', icon: termIcon, action: () => { window.switchView?.('terminal'); window.exportTerminal?.(); } });
-  cmds.push({ group: 'Actions', label: 'Fetch All Projects', icon: gitIcon, action: () => window.fetchAllProjects?.() });
-  cmds.push({ group: 'Actions', label: 'Pull All Projects', icon: gitIcon, action: () => window.pullAllProjects?.() });
-  cmds.push({ group: 'Actions', label: 'Filter: Active Only', icon: navIcon, action: () => { window.switchView?.('dashboard'); window.setProjectFilter?.('active'); } });
-  cmds.push({ group: 'Actions', label: 'Filter: Idle Only', icon: navIcon, action: () => { window.switchView?.('dashboard'); window.setProjectFilter?.('idle'); } });
-  cmds.push({ group: 'Actions', label: 'Filter: Show All', icon: navIcon, action: () => { window.switchView?.('dashboard'); window.setProjectFilter?.('all'); } });
+  cmds.push({ group: 'Actions', label: 'Refresh Diff', hint: 'R', icon: gitIcon, action: () => { notify('switchView', 'diff'); notify('loadDiff'); } });
+  cmds.push({ group: 'Actions', label: 'Export Terminal Output', icon: termIcon, action: () => { notify('switchView', 'terminal'); notify('exportTerminal'); } });
+  cmds.push({ group: 'Actions', label: 'Fetch All Projects', icon: gitIcon, action: () => notify('fetchAllProjects') });
+  cmds.push({ group: 'Actions', label: 'Pull All Projects', icon: gitIcon, action: () => notify('pullAllProjects') });
+  cmds.push({ group: 'Actions', label: 'Filter: Active Only', icon: navIcon, action: () => { notify('switchView', 'dashboard'); notify('setProjectFilter', 'active'); } });
+  cmds.push({ group: 'Actions', label: 'Filter: Idle Only', icon: navIcon, action: () => { notify('switchView', 'dashboard'); notify('setProjectFilter', 'idle'); } });
+  cmds.push({ group: 'Actions', label: 'Filter: Show All', icon: navIcon, action: () => { notify('switchView', 'dashboard'); notify('setProjectFilter', 'all'); } });
 
   return cmds;
 }
@@ -1024,7 +1024,7 @@ export function insertPathToTerminal() {
   const p = el._filePath;
   app.ws.send(JSON.stringify({ type: 'input', termId: app.activeTermId, data: p.includes(' ') ? `"${p}"` : p }));
   closeFilePreview();
-  window.switchView?.('terminal');
+  notify('switchView', 'terminal');
   showToast('Path inserted');
 }
 

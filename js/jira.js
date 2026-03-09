@@ -16,7 +16,7 @@ function proxyJiraImages(html) {
     try {
       const u = new URL(src, app.jiraConfig.url);
       if (u.hostname === jiraHost) return prefix + '/api/jira/image-proxy?url=' + encodeURIComponent(u.href);
-    } catch {}
+    } catch { /* invalid URL */ }
     return full;
   });
 }
@@ -157,7 +157,7 @@ export async function testJiraConnection() {
       document.getElementById('jira-board-picker').style.display = '';
       document.getElementById('jira-default-project').innerHTML = '<option value="">All</option>' + projects.map(p => `<option value="${esc(p.key)}">${esc(p.name)} (${esc(p.key)})</option>`).join('');
       document.getElementById('jira-board-select').innerHTML = '<option value="">None</option>' + boards.map(b => `<option value="${b.id}">${esc(b.name)} (${b.type})</option>`).join('');
-    } catch {}
+    } catch { /* request failed */ }
   } catch (e) {
     result.textContent = e.message;
     result.className = 'err';
@@ -362,7 +362,7 @@ export function filterJiraBySprintChip(sprintId) {
 // ─── View Switching ───
 export function setJiraView(mode) {
   app._jiraView = mode;
-  try { localStorage.setItem('dl-jira-view', mode); } catch {}
+  try { localStorage.setItem('dl-jira-view', mode); } catch { /* storage unavailable */ }
   document.querySelectorAll('.jira-view-btn').forEach(b => b.classList.toggle('active', b.dataset.view === mode));
   document.getElementById('jira-list-view').style.display = mode === 'list' ? '' : 'none';
   document.getElementById('jira-board-view').style.display = mode === 'board' ? '' : 'none';
@@ -431,7 +431,7 @@ function saveJiraFilterState() {
       sprint: app._jiraFilter.sprint,
       status: app._jiraFilter.status,
     }));
-  } catch {}
+  } catch { /* storage unavailable */ }
 }
 
 function restoreJiraFilterState() {
@@ -440,7 +440,7 @@ function restoreJiraFilterState() {
     if (saved.project) app._jiraFilter.project = saved.project;
     if (saved.sprint) app._jiraFilter.sprint = saved.sprint;
     if (saved.status) app._jiraFilter.status = saved.status;
-  } catch {}
+  } catch { /* malformed JSON */ }
 }
 
 // ─── Sorting ───

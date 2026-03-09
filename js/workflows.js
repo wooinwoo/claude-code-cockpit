@@ -188,7 +188,7 @@ function buildGraphViz(def) {
       const trueName = resolveNames(edge.condition.true);
       const falseName = resolveNames(edge.condition.false);
       const falseIsParallel = Array.isArray(edge.condition.false);
-      const trueIsParallel = Array.isArray(edge.condition.true);
+      const _trueIsParallel = Array.isArray(edge.condition.true);
       lines.push(`<div class="wf-gv-branch">
         <div class="wf-gv-cond-label">pattern: <code>${esc(edge.condition.pattern.slice(0, 30))}</code></div>
         <div class="wf-gv-cond-yes">✓ match → ${esc(trueName)}</div>
@@ -279,7 +279,7 @@ function buildProgressBar(steps, runStatus, workflowId, startedAt) {
   const total = steps.length;
   const done = steps.filter(s => s.status === 'done').length;
   const errors = steps.filter(s => s.status === 'error').length;
-  const running = steps.filter(s => s.status === 'running').length;
+  const _running = steps.filter(s => s.status === 'running').length;
   const pct = total ? Math.round(((done + errors) / total) * 100) : 0;
 
   let statusText = '';
@@ -445,7 +445,7 @@ export async function selectWorkflowDef(id) {
 
     // Recent values from past runs
     const recents = _getRecentValues(id, inp.key);
-    const recentHtml = recents.length ? `<div class="wf-recent-vals">${recents.map((v, i) => `<button class="wf-recent-chip" data-recent-key="${esc(inp.key)}" data-recent-value="${esc(v)}" title="${esc(v)}">${esc(v.length > 30 ? v.slice(0, 30) + '…' : v)}</button>`).join('')}</div>` : '';
+    const recentHtml = recents.length ? `<div class="wf-recent-vals">${recents.map((v, _i) => `<button class="wf-recent-chip" data-recent-key="${esc(inp.key)}" data-recent-value="${esc(v)}" title="${esc(v)}">${esc(v.length > 30 ? v.slice(0, 30) + '…' : v)}</button>`).join('')}</div>` : '';
 
     const labelExtra = `${esc(inp.label)}${inp.required ? ' *' : ''}`;
 
@@ -688,7 +688,7 @@ export function copyStepOutput(runId, stepId) {
 }
 
 // ─── Copy Final Output ───
-export function copyWorkflowOutput(runId) {
+export function copyWorkflowOutput(_runId) {
   // Prefer raw text over markdown rendered
   const raw = document.querySelector('.wf-output-raw');
   const md = document.querySelector('.wf-output-md');
@@ -886,7 +886,7 @@ export function handleWorkflowEvent(eventName, data) {
 
 // ─── Schedule Functions ───
 
-const PRESET_LABELS = { daily: '매일', weekly: '매주', monthly: '매월' };
+const _PRESET_LABELS = { daily: '매일', weekly: '매주', monthly: '매월' };
 const DAY_LABELS = ['일', '월', '화', '수', '목', '금', '토'];
 
 async function loadSchedules() {

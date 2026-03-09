@@ -1,6 +1,6 @@
 // ─── Diff: Changes tab, diff rendering, git ops, auto-commit, branches ───
 import { app } from './state.js';
-import { esc, showToast, DIFF_LINE_LIMIT, fetchJson, postJson } from './utils.js';
+import { esc, showToast, DIFF_LINE_LIMIT, fetchJson, postJson, simpleMarkdown } from './utils.js';
 import { highlightLine, getLangFromPath } from './highlight.js';
 import { registerClickActions, registerChangeActions, registerInputActions } from './actions.js';
 
@@ -843,6 +843,107 @@ export function renderProjectChips() {
   }
 }
 
+// ─── Agent Code Review (개발팀) ───
+let _agentReviewSSE = false;
+let _agentReviewState = null;
+
+async function agentReviewDiff() {
+  const projectId = document.getElementById('diff-project').value;
+  if (!projectId) return showToast('프로젝트를 선택하세요', 'error');
+
+  const btn = document.querySelector('[data-action="agent-review-diff"]');
+  if (btn) { btn.disabled = true; btn.textContent = '리뷰 중...'; }
+
+  try {
+    const data = await fetchJson(`/api/projects/${projectId}/diff`);
+    const diff = ((data.staged?.diff || '') + '\n' + (data.unstaged?.diff || '')).trim();
+    if (!diff) {
+      showToast('변경사항이 없습니다', 'info');
+      if (btn) { btn.disabled = false; btn.textContent = '🤖 AI 리뷰'; }
+      return;
+    }
+
+    const allFiles = [...(data.staged?.files || []), ...(data.unstaged?.files || [])];
+    const fileList = allFiles.map(f => `${f.status || '?'} ${f.file} (+${f.additions || 0}/-${f.deletions || 0})`).join('\n');
+
+    // Create agent conversation and send review request to dev_bujang
+    const conv = await postJson('/api/agent/conversations', {});
+    _agentReviewState = { convId: conv.id, projectId };
+
+    const prompt = `아래 git diff를 코드리뷰해줘.
+
+프로젝트: ${projectId}
+변경 파일:
+${fileList}
+
+diff:
+\`\`\`
+${diff.slice(0, 15000)}
+\`\`\`
+
+리뷰 포맷:
+1. **전체 요약**: 변경사항 한 줄 요약
+2. **이슈 목록**: 각 이슈마다 [심각도: HIGH/MED/LOW] [파일: 경로] [설명] [수정 제안]
+3. **긍정적인 점**: 잘된 부분도 언급
+
+보안, 성능, 가독성, 에러 처리 관점에서 리뷰해.`;
+
+    await postJson('/api/agent/chat', { convId: conv.id, message: prompt, agentId: 'dev_bujang' });
+
+    // Listen for SSE events
+    if (!_agentReviewSSE) {
+      _agentReviewSSE = true;
+      for (const evt of ['agent:response', 'agent:done', 'agent:error']) {
+        document.addEventListener(evt, e => _onAgentReviewEvent(evt, e.detail));
+      }
+    }
+  } catch (err) {
+    showToast('코드리뷰 실패: ' + err.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '🤖 AI 리뷰'; }
+  }
+}
+
+function _onAgentReviewEvent(evt, data) {
+  if (!_agentReviewState || !data) return;
+  if (data.convId && data.convId !== _agentReviewState.convId) return;
+
+  const btn = document.querySelector('[data-action="agent-review-diff"]');
+
+  if (evt === 'agent:response' && data.content) {
+    _showAgentReviewResult(data.content, _agentReviewState.projectId);
+    if (btn) { btn.disabled = false; btn.textContent = '🤖 AI 리뷰'; }
+    _agentReviewState = null;
+  } else if (evt === 'agent:done') {
+    if (btn) { btn.disabled = false; btn.textContent = '🤖 AI 리뷰'; }
+    _agentReviewState = null;
+  } else if (evt === 'agent:error') {
+    showToast('리뷰 실패: ' + (data.error || ''), 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '🤖 AI 리뷰'; }
+    _agentReviewState = null;
+  }
+}
+
+function _showAgentReviewResult(content, _projectId) {
+  const mainEl = document.getElementById('diff-main');
+  if (!mainEl) return;
+
+  mainEl.querySelector('.agent-review-overlay')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'agent-review-overlay';
+  // Use simpleMarkdown if available, otherwise raw
+  const rendered = simpleMarkdown(content);
+  overlay.innerHTML = `
+    <div class="ar-header">
+      <span class="ar-title">🤖 김부장 코드리뷰</span>
+      <span class="ar-badge" style="background:#a855f7;color:#fff;padding:2px 8px;border-radius:4px;font-size:.75rem">개발팀</span>
+      <button class="ar-close" onclick="this.closest('.agent-review-overlay').remove()">✕</button>
+    </div>
+    <div class="ar-body">${rendered}</div>`;
+
+  mainEl.insertBefore(overlay, mainEl.firstChild);
+}
+
 // ─── Forge Review Integration ───
 export async function forgeReviewDiff() {
   const projectId = document.getElementById('diff-project').value;
@@ -941,6 +1042,7 @@ registerClickActions({
   'refresh-diff': loadDiff,
   'start-auto-commit': startAutoCommit,
   'forge-review-diff': forgeReviewDiff,
+  'agent-review-diff': agentReviewDiff,
   'do-pull': doPull,
   'do-fetch': doFetch,
   'do-stash': doStash,

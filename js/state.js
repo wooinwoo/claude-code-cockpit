@@ -29,6 +29,7 @@ const _app = {
   notifyEnabled: localStorage.getItem('dl-notify') !== 'false',
   chartPeriod: parseInt(localStorage.getItem('dl-chart-period') || '30'),
   termFontSize: parseInt(localStorage.getItem('dl-term-font-size') || '13'),
+  viewZoom: JSON.parse(localStorage.getItem('dl-view-zoom') || '{}'),
   currentTheme: _themeManual
     ? localStorage.getItem('dl-theme')
     : window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark',
@@ -144,6 +145,18 @@ const _app = {
     configTab: 'params',
     response: null,
     loading: false,
+    swagger: null,
+    swaggerBaseUrl: '',
+    sidebarMode: 'requests',
+    swaggerFilter: '',
+    swaggerExcluded: new Set(),
+    autoTest: { running: false, results: [], progress: { current: 0, total: 0, passed: 0, failed: 0 } },
+    aiAnalysis: null,
+    aiAnalyzing: false,
+    detectedAuth: null,
+    authConfig: {},
+    aiScenarios: null,
+    reviewedPlan: null,
   },
 
   notes: {
@@ -173,6 +186,11 @@ const _app = {
     activeDefId: null,
     activeRunId: null,
     init: false,
+  },
+
+  quickBar: {
+    visible: JSON.parse(localStorage.getItem('dl-quick-bar-visible') || 'false'),
+    customCmds: JSON.parse(localStorage.getItem('dl-quick-cmds') || '[]'),
   },
 };
 

@@ -1,6 +1,6 @@
 // ─── Forge Module: Autonomous Development Engine UI ───
 import { app } from './state.js';
-import { esc, showToast, simpleMarkdown, fetchJson, postJson } from './utils.js';
+import { esc, showToast, fetchJson, postJson } from './utils.js';
 
 const ROLE_ICONS = {
   architect: '🏗️', critic: '🔍', builder_react: '⚛️', builder_nest: '🐈',
@@ -33,7 +33,10 @@ let _activeTaskId = null;
 let _logAutoScroll = true;
 
 // ─── Init ───
+let _forgeInitialized = false;
 export function initForge() {
+  if (_forgeInitialized) return;
+  _forgeInitialized = true;
   loadForgeRuns();
   renderForgeUI();
 }
@@ -42,7 +45,7 @@ async function loadForgeRuns() {
   try {
     _forgeRuns = await fetchJson('/api/forge/runs');
     renderRunList();
-  } catch {}
+  } catch { /* request failed */ }
 }
 
 // ─── Main Render ───

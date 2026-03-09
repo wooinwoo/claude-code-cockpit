@@ -4,7 +4,7 @@ import { esc, showToast, timeAgo, fetchJson, fetchText, postJson } from './utils
 import { registerClickActions, registerChangeActions, registerInputActions } from './actions.js';
 
 let _prList = [];
-let _prFilter = { project: '', status: 'all', search: '' };
+const _prFilter = { project: '', status: 'all', search: '' };
 let _prLoading = false;
 let _prInitialized = false;
 let _prDetailData = null;
@@ -247,7 +247,7 @@ async function handleViewDiff(el) {
     diffEl.innerHTML = `<h4>Diff</h4><pre class="prd-diff-pre">${esc(diff)}</pre>`;
     panel.querySelector('.pr-detail-body').appendChild(diffEl);
     btn.textContent = 'Hide Diff';
-  } catch (e) {
+  } catch {
     showToast('Failed to load diff', 'error');
     btn.textContent = 'View Diff';
   }
