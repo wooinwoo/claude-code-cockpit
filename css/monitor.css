@@ -1,0 +1,38 @@
+/* ─── Monitor View ─── */
+#monitor-view.active { overflow: hidden; padding: 0; gap: 0; }
+.monitor-toolbar { display: flex; align-items: center; gap: 10px; padding: 8px 16px; background: var(--bg-surface); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.mon-toolbar-title { font-weight: 700; font-size: .88rem; color: var(--text-0); }
+.monitor-content { flex: 1; overflow-y: auto; padding: 20px 24px; display: flex; flex-direction: column; gap: 20px; }
+.mon-system-info { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 10px 16px; background: var(--bg-surface); border-radius: var(--radius-sm); border: 1px solid var(--border); font-size: .78rem; color: var(--text-2); }
+.mon-info-item strong { color: var(--text-0); }
+.mon-gauges { display: flex; gap: 24px; justify-content: center; flex-wrap: wrap; }
+.mon-gauge { display: flex; flex-direction: column; align-items: center; position: relative; width: 140px; }
+.mon-gauge-svg { width: 120px; height: 120px; }
+.mon-gauge-label { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; }
+.mon-gauge-val { font-size: 1.3rem; font-weight: 800; display: block; }
+.mon-gauge-name { font-size: .72rem; color: var(--text-3); text-transform: uppercase; letter-spacing: .04em; margin-top: 6px; display: block; }
+.mon-gauge-text { justify-content: center; padding-top: 20px; }
+.mon-gauge-big { font-size: 1rem; font-weight: 700; color: var(--text-0); }
+.mon-section { }
+.mon-section-title { font-size: .76rem; font-weight: 700; color: var(--text-2); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px; }
+.mon-disks { display: flex; gap: 12px; flex-wrap: wrap; }
+.mon-disk { flex: 1; min-width: 200px; max-width: 300px; padding: 12px; background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.mon-disk-head { display: flex; justify-content: space-between; margin-bottom: 6px; }
+.mon-disk-drive { font-weight: 700; font-size: .88rem; color: var(--text-0); }
+.mon-disk-pct { font-weight: 700; font-size: .88rem; }
+.mon-disk-bar { height: 6px; background: var(--bg-3); border-radius: 3px; overflow: hidden; }
+.mon-disk-fill { height: 100%; border-radius: 3px; transition: width .5s ease; }
+.mon-disk-info { font-size: .72rem; color: var(--text-3); margin-top: 4px; }
+.mon-proc-table { width: 100%; border-collapse: collapse; max-width: 700px; }
+.mon-proc-table th { text-align: left; font-size: .7rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text-3); padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.mon-proc-table td { padding: 5px 10px; font-size: .8rem; border-bottom: 1px solid var(--border); }
+.mon-pid { font-family: var(--mono); font-size: .74rem; color: var(--text-3); }
+.mon-pname { font-weight: 600; color: var(--text-1); }
+.mon-pcpu { font-family: var(--mono); font-size: .76rem; color: var(--text-2); }
+.mon-pmem { font-family: var(--mono); font-size: .76rem; color: var(--blue); }
+.mon-header-bar { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; background: var(--bg-surface); border-radius: var(--radius-sm); border: 1px solid var(--border); }
+.mon-header-bar .mon-system-info { border: none; padding: 0; background: none; }
+.mon-actions { display: flex; gap: 4px; }
+.mon-sortable { cursor: pointer; user-select: none; }
+.mon-sortable:hover { color: var(--accent); }
+.monitor-paused { background: var(--yellow-dim) !important; color: var(--yellow) !important; border-color: rgba(245, 158, 11, .3) !important; }

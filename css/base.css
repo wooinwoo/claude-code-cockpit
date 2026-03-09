@@ -367,9 +367,11 @@ header::after {
   display: none;
   flex: 1;
   overflow: hidden;
+  contain: strict;
 }
 .view.active {
   display: flex;
   flex-direction: column;
+  contain: content;
 }
 

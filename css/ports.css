@@ -1,0 +1,29 @@
+/* ─── Port Manager ─── */
+#ports-view.active { display: flex; flex-direction: column; overflow: hidden; padding: 0; gap: 0; }
+.port-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.port-toolbar-left { display: flex; align-items: center; gap: 14px; }
+.port-toolbar-right { display: flex; align-items: center; gap: 8px; }
+.port-title { font-size: .88rem; font-weight: 600; color: var(--text-0); margin: 0; }
+.port-search { background: var(--bg-2); border: 1px solid var(--border); color: var(--text-1); padding: 5px 10px; border-radius: var(--radius-sm); font-size: .78rem; width: 200px; }
+.port-search:focus { outline: none; border-color: var(--accent); }
+.port-dev-filter { display: flex; align-items: center; gap: 5px; font-size: .75rem; color: var(--text-2); cursor: pointer; user-select: none; }
+.port-dev-filter input { accent-color: var(--accent); }
+.port-content { flex: 1; overflow-y: auto; padding: 0 20px 20px; }
+.port-table { width: 100%; border-collapse: collapse; font-size: .8rem; margin-top: 8px; }
+.port-table thead th { text-align: left; padding: 8px 10px; color: var(--text-3); font-weight: 600; font-size: .72rem; text-transform: uppercase; letter-spacing: .5px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg-1); z-index: 1; }
+.port-table tbody td { padding: 7px 10px; border-bottom: 1px solid rgba(255,255,255,.04); color: var(--text-1); }
+.port-table tbody tr:hover { background: rgba(255,255,255,.03); }
+.port-row-dev { background: rgba(52, 211, 153, .04); }
+.port-row-dev:hover { background: rgba(52, 211, 153, .08) !important; }
+.port-num { font-family: var(--mono); font-weight: 600; color: var(--accent); font-size: .82rem; }
+.port-pname { font-family: var(--mono); font-size: .78rem; }
+.port-pid { font-family: var(--mono); font-size: .76rem; color: var(--text-3); }
+.port-addr { font-family: var(--mono); font-size: .74rem; color: var(--text-3); }
+.port-badge-dev { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: .7rem; font-weight: 600; background: rgba(52, 211, 153, .12); color: var(--green); }
+.port-actions { display: flex; gap: 2px; }
+.port-action-btn { width: 26px; height: 26px; }
+.port-kill-btn:hover { color: var(--red) !important; background: rgba(248,113,113,.1) !important; }
+.port-sortable { cursor: pointer; user-select: none; }
+.port-sortable:hover { color: var(--accent); }
+.port-summary { padding: 10px; text-align: right; font-size: .72rem; color: var(--text-3); }
+.port-empty { text-align: center; color: var(--text-3); padding: 40px 0 !important; }
