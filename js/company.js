@@ -280,10 +280,13 @@ export async function initCompany() {
   renderTasks();
   renderStatsBar();
   startClock();
+  loadProjectOptions();
   if (!_sseBound) {
     _sseBound = true;
     for (const ev of ['agent:start','agent:thinking','agent:tool','agent:response','agent:done','orch:start','orch:plan','orch:sub-start','orch:sub-done','orch:response','orch:done'])
       document.addEventListener(ev, e => onEv(ev, e.detail));
+    for (const ev of ['sprint:start','sprint:phase','sprint:log','sprint:validate','sprint:done','sprint:error','sprint:stopped','sprint:cost','sprint:agent'])
+      document.addEventListener(ev, e => onSprintEvent(ev, e.detail));
     document.addEventListener('agent:proactive', e => onAlert(e.detail));
     // Monitor-triggered reviews
     document.addEventListener('monitor:review-start', e => onMonitorReviewStart(e.detail));
@@ -622,13 +625,17 @@ async function submitTask() {
   const msg = input.value.trim(); if (!msg) return;
   input.value = '';
   const agentId = _targetAgent?.id || 'auto';
+  const projSelect = document.getElementById('co-project-select');
+  const projectId = projSelect?.value || null;
   clearTarget();
   const task = { id: `t-${Date.now()}`, message: msg, status: 'routing', team: null, agent: null, emoji: null, color: null, result: null, ts: Date.now() };
   _tasks.unshift(task); renderTasks();
   try {
     const conv = await postJson('/api/agent/conversations', {});
     task.convId = conv.id;
-    await postJson('/api/agent/chat', { convId: conv.id, message: msg, agentId });
+    const payload = { convId: conv.id, message: msg, agentId };
+    if (projectId) payload.projectId = projectId;
+    await postJson('/api/agent/chat', payload);
     task.status = 'assigned'; renderTasks();
   } catch (e) { task.status = 'error'; task.result = e.message; renderTasks(); }
 }
@@ -669,8 +676,8 @@ function renderTasks() {
       const isLong = t.result.length > 300;
       resHtml = `<div class="co-msg-result${isLong ? ' collapsed' : ''}" data-task-id="${t.id}">
         <div class="co-msg-result-content">${rendered}</div>
-        ${isLong ? `<button class="co-msg-expand" data-action="co-toggle-msg" data-task-id="${t.id}">펼치기</button>` : ''}
-      </div>`;
+      </div>
+      ${isLong ? `<button class="co-msg-expand" data-action="co-toggle-msg" data-task-id="${t.id}">펼치기</button>` : ''}`;
     }
 
     // Working spinner
@@ -1360,8 +1367,193 @@ async function dismissReport(reportId) {
   try { await postJson('/api/agent/reports/dismiss', { reportId }); } catch { /* request failed */ }
 }
 
+// ══════════════════════════════════════════════════
+// Sprint Mode — AutoBE-inspired React Dev Pipeline
+// ══════════════════════════════════════════════════
+
+let _sprintMode = false;
+let _activeSprint = null;
+
+function setSprintMode(enabled) {
+  _sprintMode = enabled;
+  const toggle = document.getElementById('co-mode-toggle');
+  if (toggle) {
+    toggle.querySelectorAll('.co-mode-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.mode === (enabled ? 'sprint' : 'chat'))
+    );
+  }
+  const projSelect = document.getElementById('co-project-select');
+  if (projSelect) {
+    // 프로젝트 선택은 항상 표시 (채팅/스프린트 모두 필요)
+    projSelect.style.display = '';
+    if (projSelect.options.length <= 1) loadProjectOptions();
+  }
+  const input = document.getElementById('co-counter-input');
+  if (input) input.placeholder = enabled
+    ? '구현할 작업을 입력하세요... (예: 다크모드 추가)'
+    : '업무를 지시하세요... (자동 배정)';
+}
+
+async function loadProjectOptions() {
+  const sel = document.getElementById('co-project-select');
+  if (!sel) return;
+  try {
+    const projects = await fetchJson('/api/projects');
+    sel.innerHTML = '<option value="">프로젝트 선택</option>' +
+      projects.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
+  } catch { /* ok */ }
+}
+
+async function startSprintFromUI() {
+  const input = document.getElementById('co-counter-input');
+  const projSelect = document.getElementById('co-project-select');
+  if (!input || !projSelect) return;
+  const task = input.value.trim();
+  const projectId = projSelect.value;
+  if (!task) return;
+  if (!projectId) { alert('프로젝트를 선택해주세요'); return; }
+  input.value = '';
+
+  try {
+    const result = await postJson('/api/sprint/start', { projectId, task });
+    _activeSprint = { sprintId: result.sprintId, branch: result.branch, task, projectId };
+    showSprintPanel(task);
+  } catch (err) {
+    alert(`스프린트 시작 실패: ${err.message}`);
+  }
+}
+
+function showSprintPanel(task) {
+  const panel = document.getElementById('sprint-panel');
+  if (!panel) return;
+  panel.style.display = '';
+  document.getElementById('sprint-title').textContent = `🏃 Sprint: ${task}`;
+  document.getElementById('sprint-stop-btn').style.display = '';
+  document.getElementById('sprint-diff-btn').style.display = 'none';
+  renderSprintPhases(null);
+  document.getElementById('sprint-log').innerHTML = '';
+  document.getElementById('sprint-validation').innerHTML = '';
+}
+
+function renderSprintPhases(currentPhase) {
+  const el = document.getElementById('sprint-phases');
+  if (!el) return;
+  const phases = [
+    { id: 'planning', label: '📋 Planning', icon: '📋' },
+    { id: 'implementing', label: '🔨 Implementing', icon: '🔨' },
+    { id: 'validating', label: '✅ Validating', icon: '✅' },
+    { id: 'reviewing', label: '👀 Reviewing', icon: '👀' },
+    { id: 'finalizing', label: '🎉 Finalizing', icon: '🎉' },
+  ];
+  const phaseOrder = phases.map(p => p.id);
+  const currentIdx = phaseOrder.indexOf(currentPhase);
+
+  el.innerHTML = phases.map((p, i) => {
+    let cls = 'sprint-phase';
+    if (i < currentIdx) cls += ' done';
+    else if (i === currentIdx) cls += ' active';
+    return `<div class="${cls}"><span class="sprint-phase-icon">${p.icon}</span><span class="sprint-phase-label">${p.label}</span></div>`;
+  }).join('<span class="sprint-phase-arrow">→</span>');
+}
+
+function addSprintLog(role, message) {
+  const el = document.getElementById('sprint-log');
+  if (!el) return;
+  const roleEmojis = {
+    dev_bujang: '🦊', dev_gwajang: '😎', dev_daeri: '🧐', dev_sawon: '🐣',
+    dev_reviewer: '🔍', dev_security: '🛡️', system: '⚙️',
+  };
+  const roleNames = {
+    dev_bujang: '김부장', dev_gwajang: '원과장', dev_daeri: '핏대리', dev_sawon: '콕사원',
+    dev_reviewer: '이코드', dev_security: '방보안', system: '시스템',
+  };
+  const emoji = roleEmojis[role] || '🔧';
+  const name = roleNames[role] || role;
+  const line = document.createElement('div');
+  line.className = 'sprint-log-entry';
+  line.innerHTML = `<span class="sprint-log-role">${emoji} ${esc(name)}</span> <span class="sprint-log-msg">${esc(message)}</span>`;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+function updateSprintValidation(data) {
+  const el = document.getElementById('sprint-validation');
+  if (!el) return;
+  const icon = data.passed ? '✅' : '❌';
+  const label = data.label || data.command;
+  const line = document.createElement('div');
+  line.className = `sprint-validate-entry ${data.passed ? 'passed' : 'failed'}`;
+  line.innerHTML = `${icon} ${esc(label)} <span class="sprint-validate-cycle">(cycle ${data.cycle})</span>`;
+  el.appendChild(line);
+}
+
+// Sprint SSE event handlers
+function onSprintEvent(ev, detail) {
+  if (!detail || !_activeSprint) return;
+  if (detail.sprintId !== _activeSprint.sprintId) return;
+
+  switch (ev) {
+    case 'sprint:phase':
+      renderSprintPhases(detail.phase);
+      // Pixel office: work/done animations for all 6 agents
+      if (detail.phase === 'planning') { work('dev_sawon', '구조 스캔'); work('dev_bujang', '플래닝'); }
+      else if (detail.phase === 'implementing') { done('dev_sawon'); done('dev_bujang'); work('dev_gwajang', '구현'); work('dev_daeri', '서브 구현'); }
+      else if (detail.phase === 'validating') { done('dev_daeri'); work('dev_gwajang', '검증'); }
+      else if (detail.phase === 'reviewing') { done('dev_gwajang'); work('dev_reviewer', '리뷰'); work('dev_security', '보안'); }
+      else if (detail.phase === 'finalizing') { done('dev_reviewer'); done('dev_security'); work('dev_bujang', '최종검토'); }
+      break;
+    case 'sprint:agent':
+      // Individual agent activity from sprint engine
+      if (detail.agentId) work(detail.agentId, detail.action || '');
+      break;
+    case 'sprint:log':
+      addSprintLog(detail.role, detail.message);
+      break;
+    case 'sprint:validate':
+      updateSprintValidation(detail);
+      break;
+    case 'sprint:done':
+      renderSprintPhases('done');
+      addSprintLog('system', `✅ 스프린트 완료! Branch: ${detail.branch}`);
+      if (detail.prUrl) addSprintLog('system', `PR: ${detail.prUrl}`);
+      document.getElementById('sprint-stop-btn').style.display = 'none';
+      document.getElementById('sprint-diff-btn').style.display = '';
+      // All agents done
+      ['dev_bujang', 'dev_gwajang', 'dev_daeri', 'dev_sawon', 'dev_reviewer', 'dev_security'].forEach(id => done(id));
+      break;
+    case 'sprint:error':
+      addSprintLog('system', `❌ 에러: ${detail.error}`);
+      document.getElementById('sprint-stop-btn').style.display = 'none';
+      ['dev_bujang', 'dev_gwajang', 'dev_daeri', 'dev_sawon', 'dev_reviewer', 'dev_security'].forEach(id => done(id));
+      break;
+    case 'sprint:stopped':
+      addSprintLog('system', '🛑 스프린트 중단됨');
+      document.getElementById('sprint-stop-btn').style.display = 'none';
+      ['dev_bujang', 'dev_gwajang', 'dev_daeri', 'dev_sawon', 'dev_reviewer', 'dev_security'].forEach(id => done(id));
+      break;
+  }
+}
+
+async function stopActiveSprint() {
+  if (!_activeSprint) return;
+  try {
+    await postJson(`/api/sprint/stop/${_activeSprint.sprintId}`, {});
+  } catch (err) {
+    addSprintLog('system', `중단 실패: ${err.message}`);
+  }
+}
+
+function closeSprintPanel() {
+  const panel = document.getElementById('sprint-panel');
+  if (panel) panel.style.display = 'none';
+  _activeSprint = null;
+}
+
 registerClickActions({
-  'co-submit-task': submitTask,
+  'co-submit-task': () => {
+    if (_sprintMode) startSprintFromUI();
+    else submitTask();
+  },
   'company-call-agent': (el) => {
     document.getElementById('co-profile-pop')?.remove();
     targetAgent(el.dataset.agent);
@@ -1393,5 +1585,12 @@ registerClickActions({
   'co-toggle-report': (el) => toggleReport(el.dataset.reportId),
   'co-dismiss-report': (el) => { el.stopPropagation?.(); dismissReport(el.dataset.reportId); },
   'co-clear-chat': () => { _tasks.length = 0; renderTasks(); renderStatsBar(); },
+  'co-mode-chat': () => setSprintMode(false),
+  'co-mode-sprint': () => setSprintMode(true),
+  'sprint-stop': stopActiveSprint,
+  'sprint-close-panel': closeSprintPanel,
+  'sprint-view-diff': () => {
+    if (_activeSprint) window.open(`/api/sprint/diff/${_activeSprint.sprintId}`, '_blank');
+  },
 });
 document.addEventListener('keydown', e => { if (e.target?.id === 'co-counter-input' && e.key === 'Enter') { e.preventDefault(); submitTask(); } });

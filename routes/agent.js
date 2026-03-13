@@ -81,7 +81,7 @@ export function register(ctx) {
     if (!rateLimit(`agent:chat:${req.socket?.remoteAddress}`, 30)) return json(res, { error: 'Too many requests — please wait' }, 429);
     const body = await readBody(req);
     if (!body.convId || !body.message) return json(res, { error: 'convId and message required' }, 400);
-    try { json(res, agentChat(body.convId, body.message, body.agentId || null)); }
+    try { json(res, agentChat(body.convId, body.message, body.agentId || null, body.projectId || null)); }
     catch (err) { json(res, { error: err.message }, 500); }
   });
 

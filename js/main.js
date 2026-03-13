@@ -97,6 +97,9 @@ import {
 // ─── Dashboard new features ───
 import { loadBriefing, checkSmartAlerts } from './dashboard.js';
 
+// ─── Frontend Team (AutoBuild) module ───
+import { initFrontendTeam, handleProjectPlanEvent } from './frontend-team.js';
+
 // ─── PR module ───
 import { initPR } from './pr.js';
 
@@ -906,6 +909,8 @@ subscribe('initCompany', () => initCompany());
 subscribe('initPR', () => initPR());
 subscribe('initWorkflows', () => initWorkflows());
 subscribe('initForge', () => initForge());
+subscribe('initFrontendTeam', () => initFrontendTeam());
+subscribe('handleProjectPlanEvent', ({ event, data }) => handleProjectPlanEvent(event, data));
 subscribe('initPorts', () => initPorts());
 subscribe('destroyPorts', () => destroyPorts());
 subscribe('initApiTester', () => initApiTester());

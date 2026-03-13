@@ -26,6 +26,8 @@ import { getAllStats as getMonitorStats } from './lib/monitor-service.js';
 import { initBatch } from './lib/batch-service.js';
 import { logger } from './lib/logger.js';
 import { initForge } from './lib/forge-service.js';
+import { initSprint } from './lib/sprint-engine.js';
+import { runSubAgentLoop } from './lib/agent-orchestrator.js';
 import { listNotes, getNote, createNote, updateNote } from './lib/notes-service.js';
 
 // Route modules
@@ -42,6 +44,9 @@ import { register as regProjects } from './routes/projects.js';
 import { register as regSystem } from './routes/system.js';
 import { register as regPorts } from './routes/ports.js';
 import { register as regApiTester } from './routes/api-tester.js';
+import { register as regSprint } from './routes/sprint.js';
+import { register as regProjectPlan } from './routes/project-plan.js';
+import { initProjectPlan } from './lib/project-plan.js';
 
 // node-pty and ws are CJS modules
 const require = createRequire(import.meta.url);
@@ -558,6 +563,8 @@ regForge(routeCtx);
 regGit(routeCtx);
 regPorts(routeCtx);
 regApiTester(routeCtx);
+regSprint(routeCtx);
+regProjectPlan(routeCtx);
 
 // ──────────── Polling ────────────
 
@@ -686,6 +693,10 @@ try {
 initBatch(poller);
 try { initForge(poller, callClaude, (path) => getProjects().find(p => p.path === path)); }
 catch (err) { logger.error('forge', 'Init failed', err.message); }
+try { initSprint({ poller, runSubAgentLoop, getProjectById, gitExec }); }
+catch (err) { logger.error('sprint', 'Init failed', err.message); }
+try { initProjectPlan({ poller, runSubAgentLoop, getProjectById }); }
+catch (err) { logger.error('project-plan', 'Init failed', err.message); }
 
 // Morning briefing: save daily snapshot on startup
 try {

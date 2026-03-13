@@ -254,6 +254,16 @@ export function connectSSE() {
   es.addEventListener('forge:done', e => { notify('handleForgeEvent', { event: 'forge:done', data: JSON.parse(e.data) }); });
   es.addEventListener('forge:error', e => { notify('handleForgeEvent', { event: 'forge:error', data: JSON.parse(e.data) }); });
   es.addEventListener('forge:stopped', e => { notify('handleForgeEvent', { event: 'forge:stopped', data: JSON.parse(e.data) }); });
+  // Sprint events
+  const sprintEvents = ['sprint:start','sprint:phase','sprint:log','sprint:validate','sprint:done','sprint:error','sprint:stopped','sprint:cost','sprint:agent'];
+  for (const evt of sprintEvents) {
+    es.addEventListener(evt, e => { const d = JSON.parse(e.data); emitDOM(evt, d); });
+  }
+  // Project Plan events
+  const projectEvents = ['project:plan','project:plan-generating','project:feature-update','project:progress','project:done','project:error','project:log'];
+  for (const evt of projectEvents) {
+    es.addEventListener(evt, e => { const d = JSON.parse(e.data); notify('handleProjectPlanEvent', { event: evt, data: d }); emitDOM(evt, d); });
+  }
   es.onerror = () => {
     setConn(false);
     es.close();
@@ -511,7 +521,7 @@ export function switchView(name) {
   if (name === 'diff') safeInit(() => notify('loadDiff'));
   if (name === 'company') safeInit(() => notify('initCompany'));
   // First-visit-only init views (each module also has internal guards)
-  const viewInitMap = { pr: 'initPR', jira: 'initJira', cicd: 'initCicd', notes: 'initNotes', workflows: 'initWorkflows', forge: 'initForge', ports: 'initPorts', 'api-tester': 'initApiTester' };
+  const viewInitMap = { pr: 'initPR', jira: 'initJira', cicd: 'initCicd', notes: 'initNotes', workflows: 'initWorkflows', forge: 'initForge', 'frontend-team': 'initFrontendTeam', ports: 'initPorts', 'api-tester': 'initApiTester' };
   if (name in viewInitMap) {
     if (!_viewInited.has(name)) {
       _viewInited.add(name);

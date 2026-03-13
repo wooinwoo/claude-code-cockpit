@@ -40,6 +40,7 @@
     <link rel="stylesheet" href="/css/workflows.css" />
     <link rel="stylesheet" href="/css/agent.css" />
     <link rel="stylesheet" href="/css/company.css" />
+    <link rel="stylesheet" href="/css/frontend-team.css" />
   </head>
   <body>
     <header>
@@ -136,6 +137,10 @@
             <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
           </svg>
           <span class="tab-label">Forge</span>
+        </button>
+        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="frontend-team-view" title="Frontend Team" data-action="switch-view" data-view="frontend-team">
+          <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+          <span class="tab-label">AutoBuild</span>
         </button>
         <button class="nav-tab" role="tab" aria-selected="false" aria-controls="ports-view" title="Ports" data-action="switch-view" data-view="ports">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
@@ -839,14 +844,37 @@
             <div class="co-right-header">
               <span class="co-right-title">💬 업무 채팅</span>
               <span class="co-chat-count" id="co-chat-count"></span>
-              <div class="co-target-indicator" id="co-target-indicator"></div>
               <div class="co-chatbar-feed" id="co-activity-feed"></div>
               <button class="co-chat-clear" data-action="co-clear-chat" title="대화 지우기">✕</button>
             </div>
             <div class="co-reports" id="co-reports"></div>
             <div class="co-alerts" id="co-alerts"></div>
             <div class="co-chat-log" id="co-counter-log"></div>
+            <!-- Sprint Progress Panel -->
+            <div class="sprint-panel" id="sprint-panel" style="display:none">
+              <div class="sprint-panel-header">
+                <span class="sprint-panel-title" id="sprint-title">Sprint</span>
+                <button class="sprint-panel-close" data-action="sprint-close-panel">&times;</button>
+              </div>
+              <div class="sprint-phases" id="sprint-phases"></div>
+              <div class="sprint-log" id="sprint-log"></div>
+              <div class="sprint-validation" id="sprint-validation"></div>
+              <div class="sprint-actions">
+                <button class="btn-sm btn-danger" data-action="sprint-stop" id="sprint-stop-btn" style="display:none">중단</button>
+                <button class="btn-sm" data-action="sprint-view-diff" id="sprint-diff-btn" style="display:none">diff 보기</button>
+              </div>
+            </div>
             <div class="co-chatbar">
+              <div class="co-chatbar-meta">
+                <select id="co-project-select" class="co-project-select">
+                  <option value="">프로젝트 선택</option>
+                </select>
+                <div class="co-mode-toggle" id="co-mode-toggle">
+                  <button class="co-mode-btn active" data-action="co-mode-chat" data-mode="chat">채팅</button>
+                  <button class="co-mode-btn" data-action="co-mode-sprint" data-mode="sprint">스프린트</button>
+                </div>
+                <span id="co-target-indicator" class="co-target-indicator"></span>
+              </div>
               <div class="co-chatbar-row">
                 <input id="co-counter-input" class="co-chat-input" placeholder="업무를 지시하세요... (자동 배정)" />
                 <button class="co-chat-send" data-action="co-submit-task">전송</button>
@@ -1008,6 +1036,65 @@
       <!-- Forge View -->
       <div class="view" id="forge-view" role="tabpanel">
         <div id="forge-content"></div>
+      </div>
+
+      <!-- Frontend Team (AutoBuild) View -->
+      <div class="view" id="frontend-team-view" role="tabpanel">
+        <div class="ab-container" id="autobuild-container">
+          <div class="ab-sidebar">
+            <div class="ab-sidebar-inner">
+              <h3 class="ab-sidebar-title">AutoBuild</h3>
+              <div class="ab-project-select">
+                <label>프로젝트</label>
+                <select id="ab-project" class="ab-select"></select>
+              </div>
+              <div class="ab-desc-area">
+                <label>프로젝트 설명</label>
+                <textarea id="ab-description" class="ab-textarea" rows="6" placeholder="만들고 싶은 앱을 설명해주세요...&#10;예: 입찰 정보 플랫폼. 로그인, 검색, 상세페이지, 마이페이지"></textarea>
+              </div>
+              <div class="ab-image-drop" id="ab-image-drop">
+                <span class="ab-drop-icon">🖼</span>
+                <span class="ab-drop-text">참고 이미지 드래그 or 클릭</span>
+                <input type="file" id="ab-image-input" accept="image/*" multiple hidden />
+              </div>
+              <div class="ab-image-preview" id="ab-image-preview"></div>
+              <button class="ab-btn ab-btn-primary" id="ab-generate-btn" data-action="ab-generate">AI 분석 시작</button>
+              <div class="ab-divider"></div>
+              <div class="ab-history-title">플랜 히스토리</div>
+              <div class="ab-history-list" id="ab-history-list"></div>
+            </div>
+          </div>
+          <div class="ab-main" id="ab-main">
+            <div class="ab-empty-state" id="ab-empty-state">
+              <div class="ab-empty-icon">🏗</div>
+              <div class="ab-empty-title">프로젝트 자동 빌더</div>
+              <div class="ab-empty-desc">왼쪽에서 프로젝트를 선택하고 설명을 입력하면<br>AI가 Feature를 분석하고 자동으로 빌드합니다</div>
+            </div>
+            <div class="ab-plan-view" id="ab-plan-view" style="display:none">
+              <div class="ab-plan-header">
+                <div class="ab-plan-info">
+                  <h2 class="ab-plan-title" id="ab-plan-title"></h2>
+                  <div class="ab-plan-status" id="ab-plan-status"></div>
+                </div>
+                <div class="ab-plan-actions" id="ab-plan-actions"></div>
+              </div>
+              <div class="ab-progress-bar" id="ab-progress-wrap" style="display:none">
+                <div class="ab-progress-track">
+                  <div class="ab-progress-fill" id="ab-progress-fill"></div>
+                </div>
+                <div class="ab-progress-text" id="ab-progress-text"></div>
+              </div>
+              <div class="ab-filter-bar" id="ab-filter-bar">
+                <button class="ab-filter-btn active" data-filter="all" data-action="ab-filter">All</button>
+                <button class="ab-filter-btn" data-filter="running" data-action="ab-filter">Running</button>
+                <button class="ab-filter-btn" data-filter="done" data-action="ab-filter">Done</button>
+                <button class="ab-filter-btn" data-filter="failed" data-action="ab-filter">Failed</button>
+              </div>
+              <div class="ab-phases" id="ab-phases"></div>
+              <div class="ab-feature-detail" id="ab-feature-detail" style="display:none"></div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Ports View -->
