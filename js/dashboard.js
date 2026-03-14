@@ -521,7 +521,7 @@ export function switchView(name) {
   if (name === 'diff') safeInit(() => notify('loadDiff'));
   if (name === 'company') safeInit(() => notify('initCompany'));
   // First-visit-only init views (each module also has internal guards)
-  const viewInitMap = { pr: 'initPR', jira: 'initJira', cicd: 'initCicd', notes: 'initNotes', workflows: 'initWorkflows', forge: 'initForge', 'frontend-team': 'initFrontendTeam', ports: 'initPorts', 'api-tester': 'initApiTester' };
+  const viewInitMap = { pr: 'initPR', jira: 'initJira', cicd: 'initCicd', notes: 'initNotes', workflows: 'initWorkflows', forge: 'initForge', 'autobuild': 'initAutoBuild', ports: 'initPorts', 'api-tester': 'initApiTester' };
   if (name in viewInitMap) {
     if (!_viewInited.has(name)) {
       _viewInited.add(name);
