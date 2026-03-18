@@ -3,21 +3,27 @@ import { app } from './state.js';
 import { esc, showToast, fetchJson, postJson } from './utils.js';
 
 const ROLE_ICONS = {
-  architect: '🏗️', critic: '🔍', builder_react: '⚛️', builder_nest: '🐈',
-  builder_test: '🧪', attacker: '⚔️', integrator: '🔗',
+  builder: '⚛️', attacker: '⚔️', system: '🔧',
+  'verify:tsc': '📋', 'verify:build': '🏗️', 'verify:eslint': '🔍',
+  'verify:knip': '✂️', 'verify:audit': '🛡️', 'verify:attacker': '⚔️',
 };
 const ROLE_COLORS = {
-  architect: '#3B82F6', critic: '#EF4444', builder_react: '#10B981', builder_nest: '#10B981',
-  builder_test: '#8B5CF6', attacker: '#F59E0B', integrator: '#6366F1',
+  builder: '#10B981', attacker: '#F59E0B', system: '#6B7280',
+  'verify:tsc': '#3B82F6', 'verify:build': '#3B82F6', 'verify:eslint': '#8B5CF6',
+  'verify:knip': '#8B5CF6', 'verify:audit': '#EF4444', 'verify:attacker': '#F59E0B',
 };
-const ROLE_LABELS = { architect: '설계자', critic: '검증자', builder_react: '빌더(React)', builder_nest: '빌더(Nest)', builder_test: '테스터', attacker: '공격자', integrator: '통합자' };
-const PHASE_LABELS = { design: '설계', build: '빌드', verify: '검증', integrate: '통합' };
-const FRAMEWORK_LABELS = { generic: '일반', nest: 'NestJS', react: 'React', fullstack: '풀스택' };
+const ROLE_LABELS = {
+  builder: '빌더', attacker: '보안검토', system: '시스템',
+  'verify:tsc': 'TypeScript', 'verify:build': '빌드', 'verify:eslint': 'ESLint',
+  'verify:knip': 'Knip', 'verify:audit': '보안감사', 'verify:attacker': '보안리뷰',
+};
+const PHASE_LABELS = { building: '빌드', verifying: '검증', fixing: '수정' };
+const FRAMEWORK_LABELS = { generic: '일반', react: 'React', nextjs: 'Next.js', express: 'Express' };
 
 const FORGE_MODES = {
-  quick:      { mode: 'quick',    preset: 'balanced', icon: '⚡', name: '빠른수정', desc: 'Sonnet · phased pipeline', costLimit: 1 },
-  standard:   { mode: 'balanced', preset: 'quality',  icon: '⚖️', name: '표준',     desc: 'Opus architect · phased pipeline', costLimit: 5 },
-  autonomous: { mode: 'thorough', preset: 'quality',  icon: '🤖', name: '자율',     desc: 'Opus · single long-running agent', costLimit: 10 },
+  quick:    { mode: 'quick',    icon: '⚡', name: '빠른',   desc: 'Sonnet · 1회 검증', costLimit: 2 },
+  standard: { mode: 'standard', icon: '⚙️', name: '표준',   desc: 'Opus · 2회 검증 + 보안', costLimit: 5 },
+  thorough: { mode: 'thorough', icon: '🔬', name: '정밀',   desc: 'Opus · 3회 검증 + 보안 + 전체 도구', costLimit: 10 },
 };
 
 let _activeTaskId = null;
@@ -87,7 +93,7 @@ export function openForgeWithPrefill(prefill) {
       if (ta) ta.value = prefill.task;
     }
     if (prefill.plan) {
-      const modeMap = { quick: 'quick', standard: 'standard', quality: 'standard', max: 'autonomous' };
+      const modeMap = { quick: 'quick', standard: 'standard', quality: 'standard', max: 'thorough' };
       const mode = modeMap[prefill.plan] || 'standard';
       const btn = document.querySelector(`.forge-mode-btn[data-mode="${mode}"]`);
       if (btn) selectMode(btn);
@@ -110,7 +116,6 @@ export async function submitForgeTask() {
       task,
       referenceFiles: [],
       mode: modeConfig.mode,
-      modelPreset: modeConfig.preset,
       costLimit: modeConfig.costLimit,
     });
 

@@ -56,8 +56,7 @@ export function register(ctx) {
       const result = await startForge({
         projectId: project.id, projectPath: project.path,
         task: body.task, referenceFiles,
-        mode: body.mode, modelPreset: body.modelPreset,
-        costLimit: body.costLimit,
+        mode: body.mode, costLimit: body.costLimit,
       });
       json(res, result);
     } catch (err) { json(res, { error: err.message }, 500); }
