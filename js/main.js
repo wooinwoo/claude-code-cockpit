@@ -97,8 +97,8 @@ import {
 // ─── Dashboard new features ───
 import { loadBriefing, checkSmartAlerts } from './dashboard.js';
 
-// ─── AutoBuild module ───
-import { initAutoBuild, handleProjectPlanEvent } from './autobuild.js';
+// ─── AutoBuild module (merged into Forge) ───
+// import { initAutoBuild, handleProjectPlanEvent } from './autobuild.js';
 
 // ─── PR module ───
 import { initPR } from './pr.js';
@@ -909,8 +909,7 @@ subscribe('initCompany', () => initCompany());
 subscribe('initPR', () => initPR());
 subscribe('initWorkflows', () => initWorkflows());
 subscribe('initForge', () => initForge());
-subscribe('initAutoBuild', () => initAutoBuild());
-subscribe('handleProjectPlanEvent', ({ event, data }) => handleProjectPlanEvent(event, data));
+// AutoBuild merged into Forge
 subscribe('initPorts', () => initPorts());
 subscribe('destroyPorts', () => destroyPorts());
 subscribe('initApiTester', () => initApiTester());
