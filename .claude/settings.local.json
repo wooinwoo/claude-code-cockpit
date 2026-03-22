@@ -103,7 +103,8 @@
       "WebFetch(domain:www.pencil.dev)",
       "Bash(cp \"$SRC/routes/forge.js\" \"$DST/routes/forge.js\")",
       "Bash(code --list-extensions)",
-      "Bash(code \"C:/Users/RST/AppData/Local/forge-app/designs/forge-workspace.pen\")"
+      "Bash(code \"C:/Users/RST/AppData/Local/forge-app/designs/forge-workspace.pen\")",
+      "Bash(node -e \"import\\(''../dashboard/lib/pencil-client.js''\\).then\\(\\(\\)=>console.log\\(''OK''\\)\\).catch\\(e=>console.log\\(''ERR:'',e.message\\)\\)\")"
     ]
   },
   "enabledMcpjsonServers": [
