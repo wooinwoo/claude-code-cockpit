@@ -1,4 +1,4 @@
-import { startForge, stopForge, getForgeRun, listForgeRuns, getPresets as getForgePresets, applyForgeResult, getForgeHistory, getForgeHistoryDetail, forgeReview } from '../lib/forge-service.js';
+import { startForge, stopForge, getForgeRun, listForgeRuns, getPresets as getForgePresets, applyForgeResult, getForgeHistory, getForgeHistoryDetail, forgeReview, approveForge, rejectForge, chatAboutPlan } from '../lib/forge-service.js';
 import { IS_WIN } from '../lib/platform.js';
 
 export function register(ctx) {
@@ -96,6 +96,36 @@ export function register(ctx) {
     if (!project) return json(res, { error: 'Project not found' }, 404);
     try {
       const result = await forgeReview({ projectId: project.id, projectPath: project.path, diff: body.diff, files: body.files || [] });
+      json(res, result);
+    } catch (err) { json(res, { error: err.message }, 500); }
+  });
+
+  // ──────────── Approve / Reject ────────────
+
+  addRoute('POST', '/api/forge/approve/:taskId', async (req, res) => {
+    const body = await readBody(req);
+    try {
+      approveForge(req.params.taskId, body.type || 'plan');
+      json(res, { ok: true });
+    } catch (err) { json(res, { error: err.message }, 400); }
+  });
+
+  addRoute('POST', '/api/forge/reject/:taskId', async (req, res) => {
+    const body = await readBody(req);
+    try {
+      rejectForge(req.params.taskId, body.type || 'plan', body.feedback);
+      json(res, { ok: true });
+    } catch (err) { json(res, { error: err.message }, 400); }
+  });
+
+  // ──────────── Plan Chat (LLM-powered) ────────────
+
+  addRoute('POST', '/api/forge/chat/:taskId', async (req, res) => {
+    if (!rateLimit(`forge:chat:${req.socket?.remoteAddress}`, 30)) return json(res, { error: 'Rate limit exceeded' }, 429);
+    const body = await readBody(req);
+    if (!body.message) return json(res, { error: 'message required' }, 400);
+    try {
+      const result = await chatAboutPlan(req.params.taskId, body.message, body.history || []);
       json(res, result);
     } catch (err) { json(res, { error: err.message }, 500); }
   });
