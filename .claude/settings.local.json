@@ -99,7 +99,8 @@
       "Bash(npm create:*)",
       "Bash(npm install:*)",
       "Bash(rm -rf \"C:/_project/side/forge-app\")",
-      "Bash(mkdir -p \"C:/_project/template/forge-app\")"
+      "Bash(mkdir -p \"C:/_project/template/forge-app\")",
+      "WebFetch(domain:www.pencil.dev)"
     ]
   },
   "enabledMcpjsonServers": [
