@@ -525,6 +525,22 @@ function callClaudeStream(prompt, { timeoutMs = LIMITS.claudeTimeoutMs, model = 
     child.on('close', code => {
       if (done) return;
       done = true; clearTimeout(timer);
+      // Flush remaining buffer
+      if (buffer.trim()) {
+        try {
+          const obj = JSON.parse(buffer);
+          if (obj.type === 'content_block_delta' && obj.delta?.type === 'text_delta') {
+            fullText += obj.delta.text;
+            if (onChunk) onChunk(obj.delta.text);
+          } else if (obj.type === 'result' && typeof obj.result === 'string') {
+            if (!fullText) fullText = obj.result;
+          } else if (obj.type === 'message' && obj.message?.content) {
+            for (const block of obj.message.content) {
+              if (block.type === 'text' && block.text && !fullText) fullText = block.text;
+            }
+          }
+        } catch { /* not valid JSON */ }
+      }
       if (code !== 0) reject(new Error(stderr.trim() || `claude exited with code ${code}`));
       else resolve(fullText);
     });
@@ -691,7 +707,7 @@ try {
 // ──────────── Init new services ────────────
 
 initBatch(poller);
-try { initForge(poller, callClaude, (path) => getProjects().find(p => p.path === path)); }
+try { initForge(poller, callClaudeStream, (path) => getProjects().find(p => p.path === path)); }
 catch (err) { logger.error('forge', 'Init failed', err.message); }
 try { initSprint({ poller, runSubAgentLoop, getProjectById, gitExec }); }
 catch (err) { logger.error('sprint', 'Init failed', err.message); }

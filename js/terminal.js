@@ -287,7 +287,22 @@ export function addTerminal(termId, projectId, addToView) {
           if (!t || app.ws?.readyState !== 1) return;
           const data = t.includes('\n') ? `\x1b[200~${t}\x1b[201~` : t;
           app.ws.send(JSON.stringify({ type: 'input', termId, data }));
-        } catch { /* clipboard denied */ }
+        } catch {
+          // Fallback: use hidden textarea for paste (works in Tauri WebView)
+          try {
+            const ta = document.createElement('textarea');
+            ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px';
+            document.body.appendChild(ta);
+            ta.focus();
+            document.execCommand('paste');
+            const t = ta.value;
+            document.body.removeChild(ta);
+            if (t && app.ws?.readyState === 1) {
+              const data = t.includes('\n') ? `\x1b[200~${t}\x1b[201~` : t;
+              app.ws.send(JSON.stringify({ type: 'input', termId, data }));
+            }
+          } catch { /* all paste methods failed */ }
+        }
       })();
       return false;
     }

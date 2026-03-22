@@ -17,7 +17,7 @@ const ROLE_LABELS = {
   'verify:tsc': 'TypeScript', 'verify:build': '빌드', 'verify:eslint': 'ESLint',
   'verify:knip': 'Knip', 'verify:audit': '보안감사', 'verify:attacker': '보안리뷰',
 };
-const PHASE_LABELS = { building: '빌드', verifying: '검증', fixing: '수정' };
+const PHASE_LABELS = { design: '설계', scaffold: '기반', building: '빌드', integrating: '통합', verifying: '검증', fixing: '수정' };
 const FRAMEWORK_LABELS = { generic: '일반', react: 'React', nextjs: 'Next.js', express: 'Express' };
 
 const FORGE_MODES = {
@@ -139,7 +139,7 @@ function showProgress(run) {
 }
 
 function updatePhaseBar(currentPhase, isDone) {
-  const phases = ['design', 'build', 'verify', 'integrate'];
+  const phases = ['design', 'scaffold', 'building', 'integrating', 'verifying'];
   const currentIdx = phases.indexOf(currentPhase);
   document.querySelectorAll('.forge-phase-step').forEach(step => {
     const phase = step.dataset.phase;
