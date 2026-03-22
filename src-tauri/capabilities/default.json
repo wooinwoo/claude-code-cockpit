@@ -5,6 +5,7 @@
   "permissions": [
     "core:default",
     "core:tray:default",
-    "core:menu:default"
+    "core:menu:default",
+    "core:webview:default"
   ]
 }

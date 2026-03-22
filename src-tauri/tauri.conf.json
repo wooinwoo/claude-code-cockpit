@@ -52,6 +52,7 @@
       "../package.json": "./",
       "../js/*": "./js/",
       "../css/*": "./css/",
+      "../vendor/*": "./vendor/",
       "../lib/*": "./lib/",
       "../routes/*": "./routes/",
       "../workflows/*": "./workflows/",
