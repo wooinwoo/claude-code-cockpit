@@ -101,7 +101,9 @@
       "Bash(rm -rf \"C:/_project/side/forge-app\")",
       "Bash(mkdir -p \"C:/_project/template/forge-app\")",
       "WebFetch(domain:www.pencil.dev)",
-      "Bash(cp \"$SRC/routes/forge.js\" \"$DST/routes/forge.js\")"
+      "Bash(cp \"$SRC/routes/forge.js\" \"$DST/routes/forge.js\")",
+      "Bash(code --list-extensions)",
+      "Bash(code \"C:/Users/RST/AppData/Local/forge-app/designs/forge-workspace.pen\")"
     ]
   },
   "enabledMcpjsonServers": [
