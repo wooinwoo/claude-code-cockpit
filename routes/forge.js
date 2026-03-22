@@ -125,7 +125,7 @@ export function register(ctx) {
     const body = await readBody(req);
     if (!body.message) return json(res, { error: 'message required' }, 400);
     try {
-      const result = await chatAboutPlan(req.params.taskId, body.message, body.history || []);
+      const result = await chatAboutPlan(req.params.taskId, body.message, body.history || [], body.plan || null);
       json(res, result);
     } catch (err) { json(res, { error: err.message }, 500); }
   });
