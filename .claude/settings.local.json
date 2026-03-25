@@ -105,7 +105,8 @@
       "Bash(code --list-extensions)",
       "Bash(code \"C:/Users/RST/AppData/Local/forge-app/designs/forge-workspace.pen\")",
       "Bash(node -e \"import\\(''../dashboard/lib/pencil-client.js''\\).then\\(\\(\\)=>console.log\\(''OK''\\)\\).catch\\(e=>console.log\\(''ERR:'',e.message\\)\\)\")",
-      "mcp__playwright__browser_run_code"
+      "mcp__playwright__browser_run_code",
+      "Bash(node -e \"process.stdin.setEncoding\\(''''utf8''''\\);let s='''''''';process.stdin.on\\(''''data'''',c=>s+=c\\);process.stdin.on\\(''''end'''',\\(\\)=>{const runs=JSON.parse\\(s\\);runs.forEach\\(r=>console.log\\('''' '''',r.taskId.slice\\(-6\\),r.phase,r.awaitingApproval||''''-''''\\)\\)}\\)\")"
     ]
   },
   "enabledMcpjsonServers": [
