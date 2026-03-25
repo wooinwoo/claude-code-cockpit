@@ -111,7 +111,10 @@
       "Bash(node -e \"process.stdin.setEncoding\\(''''utf8''''\\);let s='''''''';process.stdin.on\\(''''data'''',c=>s+=c\\);process.stdin.on\\(''''end'''',\\(\\)=>{const runs=JSON.parse\\(s\\);runs.forEach\\(r=>console.log\\('''' '''',r.taskId?.slice\\(-6\\),r.awaitingApproval||r.status,r.task?.slice\\(0,30\\)\\)\\)}\\)\")",
       "Bash(node -e \"process.stdin.setEncoding\\(''''utf8''''\\);let s='''''''';process.stdin.on\\(''''data'''',c=>s+=c\\);process.stdin.on\\(''''end'''',\\(\\)=>{const runs=JSON.parse\\(s\\);runs.forEach\\(r=>console.log\\('''' '''',r.taskId?.slice\\(-6\\),''''awaiting:'''',r.awaitingApproval,''''status:'''',r.status,''''phase:'''',r.phase\\)\\)}\\)\")",
       "Bash(node -e \"process.stdin.setEncoding\\(''''utf8''''\\);let s='''''''';process.stdin.on\\(''''data'''',c=>s+=c\\);process.stdin.on\\(''''end'''',\\(\\)=>{const runs=JSON.parse\\(s\\);runs.forEach\\(r=>{console.log\\(''''---''''\\);console.log\\(r.taskId?.slice\\(-4\\),r.task?.slice\\(0,40\\)\\);}\\)}\\)\")",
-      "Bash(code \"C:/_project/template/forge-app/design/rs-assist-architecture.pen\")"
+      "Bash(code \"C:/_project/template/forge-app/design/rs-assist-architecture.pen\")",
+      "Bash(pnpm build:*)",
+      "Bash(gh auth:*)",
+      "Bash(gh repo:*)"
     ]
   },
   "enabledMcpjsonServers": [
