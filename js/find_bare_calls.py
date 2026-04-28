@@ -13,8 +13,8 @@ WINDOW_GLOBALS = {
     'openNewTermModal', 'exportTerminal', 'loadBranchesForTerm', 'updateTermTheme',
     'loadDiff', 'debouncedLoadDiff', 'renderProjectChips', 'populateProjectSelects',
     'updateDevBadge', 'renderNotifFilterList', 'openFilePreview', 'openFilePreviewFromFile',
-    'toggleAgentPanel', 'handleAgentEvent', 'handleForgeEvent', 'handleWorkflowEvent',
-    'initJira', 'initCicd', 'initNotes', 'initWorkflows', 'initForge', 'initLogs', 'initMonitor'
+    'toggleAgentPanel', 'handleAgentEvent', 'handleWorkflowEvent',
+    'initJira', 'initCicd', 'initNotes', 'initWorkflows', 'initLogs', 'initMonitor'
 }
 
 def get_imports(content):
@@ -57,8 +57,8 @@ def find_function_calls(content):
         calls[fname].append(line_num)
     return calls
 
-files = ['dashboard.js', 'modals.js', 'terminal.js', 'diff.js', 'agent.js', 'jira.js', 
-         'cicd.js', 'notes.js', 'workflows.js', 'forge.js', 'logs.js', 'monitor.js']
+files = ['dashboard.js', 'modals.js', 'terminal.js', 'diff.js', 'agent.js', 'jira.js',
+         'cicd.js', 'notes.js', 'workflows.js', 'logs.js', 'monitor.js']
 
 for fname in files:
     try:

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # For each file, check for potentially problematic function calls
-files="dashboard.js modals.js terminal.js diff.js agent.js jira.js cicd.js notes.js workflows.js forge.js logs.js monitor.js"
+files="dashboard.js modals.js terminal.js diff.js agent.js jira.js cicd.js notes.js workflows.js logs.js monitor.js"
 
 # List of known functions that were removed from window object in main.js
 # (based on the reported 200 functions removed)

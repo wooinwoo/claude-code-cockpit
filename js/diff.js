@@ -944,104 +944,12 @@ function _showAgentReviewResult(content, _projectId) {
   mainEl.insertBefore(overlay, mainEl.firstChild);
 }
 
-// ─── Forge Review Integration ───
-export async function forgeReviewDiff() {
-  const projectId = document.getElementById('diff-project').value;
-  if (!projectId) return showToast('Select a project first', 'error');
-
-  const btn = document.getElementById('forge-review-btn');
-  if (btn) { btn.disabled = true; btn.textContent = '🔥 Reviewing...'; }
-
-  try {
-    const data = await fetchJson(`/api/projects/${projectId}/diff`);
-    const diff = ((data.staged?.diff || '') + '\n' + (data.unstaged?.diff || '')).trim();
-    if (!diff) { showToast('No changes to review', 'info'); return; }
-
-    const allFiles = [...(data.staged?.files || []), ...(data.unstaged?.files || [])];
-    const review = await postJson('/api/forge/review', { projectId, diff, files: allFiles });
-    _showReviewResults(review, projectId);
-  } catch (err) {
-    showToast('Review failed: ' + err.message, 'error');
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '🔥 Review'; }
-  }
-}
-
-function _showReviewResults(review, projectId) {
-  const mainEl = document.getElementById('diff-main');
-  if (!mainEl) return;
-
-  // Remove previous overlay if any
-  mainEl.querySelector('.forge-review-overlay')?.remove();
-
-  const riskColors = { high: 'var(--red)', medium: '#f59e0b', low: 'var(--green)', clean: 'var(--green)', unknown: 'var(--text-3)' };
-  const riskColor = riskColors[review.overallRisk] || riskColors.unknown;
-  const sevIcons = { HIGH: '🔴', MED: '🟡', LOW: '🟢' };
-  const issues = review.issues || [];
-
-  const overlay = document.createElement('div');
-  overlay.className = 'forge-review-overlay';
-  overlay.innerHTML = `
-    <div class="fr-header">
-      <span class="fr-title">🔥 Forge Review</span>
-      <span class="fr-risk" style="color:${riskColor}">${(review.overallRisk || 'unknown').toUpperCase()}</span>
-      <span class="fr-count">${issues.length} issue${issues.length !== 1 ? 's' : ''}</span>
-      <button class="fr-close" data-action="fr-close">✕</button>
-    </div>
-    <div class="fr-summary">${esc(review.summary || '')}</div>
-    ${issues.length === 0 ? '<div class="fr-clean">No issues found. Code looks clean.</div>' : ''}
-    <div class="fr-issues">
-      ${issues.map(i => `
-        <div class="fr-issue sev-${(i.severity || '').toLowerCase()}">
-          <div class="fri-head">
-            <span class="fri-sev">${sevIcons[i.severity] || '⚪'} ${i.severity || ''}</span>
-            <span class="fri-cat">${esc(i.category || '')}</span>
-            ${i.file ? `<span class="fri-file">${esc(i.file)}</span>` : ''}
-          </div>
-          <div class="fri-desc">${esc(i.description || '')}</div>
-          ${i.suggestion ? `<div class="fri-fix"><strong>Fix:</strong> ${esc(i.suggestion)}</div>` : ''}
-        </div>
-      `).join('')}
-    </div>
-    ${issues.length > 0 ? `<div class="fr-actions"><button class="btn primary" data-action="fr-fix">🔥 Fix with Forge</button></div>` : ''}
-  `;
-
-  app._lastForgeReview = { review, projectId };
-  mainEl.insertBefore(overlay, mainEl.firstChild);
-  overlay.addEventListener('click', e => {
-    const el = e.target.closest('[data-action]');
-    if (!el) return;
-    if (el.dataset.action === 'fr-close') overlay.remove();
-    else if (el.dataset.action === 'fr-fix') forgeFixFromReview();
-  });
-}
-
-export function forgeFixFromReview() {
-  const ctx = app._lastForgeReview;
-  if (!ctx?.review?.issues?.length) return;
-
-  const issueDescs = ctx.review.issues.map(i =>
-    `- [${i.severity}] ${i.file || ''}: ${i.description}${i.suggestion ? ` → ${i.suggestion}` : ''}`
-  ).join('\n');
-  const filePaths = [...new Set(ctx.review.issues.map(i => i.file).filter(Boolean))];
-
-  openForgeWithPrefill({
-    task: `Fix code review issues:\n\n${issueDescs}`,
-    referenceFiles: filePaths.join('\n'),
-    projectId: ctx.projectId,
-    plan: 'standard',
-    source: 'diff',
-    sourceRef: 'review',
-  });
-}
-
 // ─── Action Registration ───
 registerClickActions({
   'diff-expand-all': diffExpandAll,
   'diff-collapse-all': diffCollapseAll,
   'refresh-diff': loadDiff,
   'start-auto-commit': startAutoCommit,
-  'forge-review-diff': forgeReviewDiff,
   'agent-review-diff': agentReviewDiff,
   'do-pull': doPull,
   'do-fetch': doFetch,

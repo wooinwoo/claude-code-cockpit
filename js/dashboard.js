@@ -246,14 +246,6 @@ export function connectSSE() {
   for (const evt of orchEvents) {
     es.addEventListener(evt, e => { const d = JSON.parse(e.data); notify('handleAgentEvent', { event: evt, data: d }); emitDOM(evt, d); });
   }
-  // Forge events
-  es.addEventListener('forge:start', e => { notify('handleForgeEvent', { event: 'forge:start', data: JSON.parse(e.data) }); });
-  es.addEventListener('forge:log', e => { notify('handleForgeEvent', { event: 'forge:log', data: JSON.parse(e.data) }); });
-  es.addEventListener('forge:phase', e => { notify('handleForgeEvent', { event: 'forge:phase', data: JSON.parse(e.data) }); });
-  es.addEventListener('forge:cost', e => { notify('handleForgeEvent', { event: 'forge:cost', data: JSON.parse(e.data) }); });
-  es.addEventListener('forge:done', e => { notify('handleForgeEvent', { event: 'forge:done', data: JSON.parse(e.data) }); });
-  es.addEventListener('forge:error', e => { notify('handleForgeEvent', { event: 'forge:error', data: JSON.parse(e.data) }); });
-  es.addEventListener('forge:stopped', e => { notify('handleForgeEvent', { event: 'forge:stopped', data: JSON.parse(e.data) }); });
   // Sprint events
   const sprintEvents = ['sprint:start','sprint:phase','sprint:log','sprint:validate','sprint:done','sprint:error','sprint:stopped','sprint:cost','sprint:agent'];
   for (const evt of sprintEvents) {
@@ -521,7 +513,7 @@ export function switchView(name) {
   if (name === 'diff') safeInit(() => notify('loadDiff'));
   if (name === 'company') safeInit(() => notify('initCompany'));
   // First-visit-only init views (each module also has internal guards)
-  const viewInitMap = { pr: 'initPR', jira: 'initJira', cicd: 'initCicd', notes: 'initNotes', workflows: 'initWorkflows', forge: 'initForge', ports: 'initPorts', 'api-tester': 'initApiTester' };
+  const viewInitMap = { pr: 'initPR', jira: 'initJira', cicd: 'initCicd', notes: 'initNotes', workflows: 'initWorkflows', ports: 'initPorts', 'api-tester': 'initApiTester' };
   if (name in viewInitMap) {
     if (!_viewInited.has(name)) {
       _viewInited.add(name);

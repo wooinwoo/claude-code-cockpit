@@ -40,7 +40,6 @@
     <link rel="stylesheet" href="/css/workflows.css" />
     <link rel="stylesheet" href="/css/agent.css" />
     <link rel="stylesheet" href="/css/company.css" />
-    <!-- autobuild.css removed: merged into Forge -->
   </head>
   <body>
     <header>
@@ -132,13 +131,6 @@
           </svg>
           <span class="tab-label">Workflows</span>
         </button>
-        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="forge-view" title="Forge (Ctrl+9)" data-action="switch-view" data-view="forge">
-          <svg viewBox="0 0 24 24">
-            <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
-          </svg>
-          <span class="tab-label">Forge</span>
-        </button>
-        <!-- AutoBuild tab removed: merged into Forge -->
         <button class="nav-tab" role="tab" aria-selected="false" aria-controls="ports-view" title="Ports" data-action="switch-view" data-view="ports">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
           <span class="tab-label">Ports</span>
@@ -601,12 +593,6 @@
             data-action="agent-review-diff"
             title="개발팀(김부장) AI 코드리뷰"
           >🤖 AI 리뷰</button>
-          <button
-            class="ac-btn"
-            id="forge-review-btn"
-            data-action="forge-review-diff"
-            title="Review with Forge"
-          >🔥 Review</button>
           <div class="dt-act-group">
             <button
               class="dt-act-btn"
@@ -1025,80 +1011,6 @@
                 <div class="wf-empty-hint"><span class="wf-eh-icon">◇</span> Conditions</div>
                 <div class="wf-empty-hint"><span class="wf-eh-icon">⟲</span> Cycles</div>
               </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Forge View -->
-      <div class="view" id="forge-view" role="tabpanel">
-        <div class="forge-split">
-          <!-- Left Panel: Task + Progress + Logs -->
-          <div class="forge-left">
-            <div class="forge-topbar">
-              <select id="forge-project" class="forge-select"></select>
-              <div class="forge-mode-selector" id="forge-mode-selector">
-                <button class="forge-mode-btn" data-mode="quick" data-action="forge-select-mode" title="Sonnet builder, 1 verify loop">⚡ 빠른</button>
-                <button class="forge-mode-btn active" data-mode="standard" data-action="forge-select-mode" title="Opus builder, 2 verify loops + security">⚙️ 표준</button>
-                <button class="forge-mode-btn" data-mode="thorough" data-action="forge-select-mode" title="Opus builder, 3 verify loops + all tools">🔬 정밀</button>
-              </div>
-            </div>
-            <div class="forge-input-area">
-              <textarea id="forge-task" class="forge-textarea" rows="4" placeholder="무엇을 만들까요? 작업을 설명해주세요...&#10;예: 사용자 인증 API에 JWT refresh token 로직 추가"></textarea>
-              <div class="forge-input-actions">
-                <button class="forge-start-btn" data-action="forge-submit">시작</button>
-              </div>
-            </div>
-            <div class="forge-progress" id="forge-progress" style="display:none">
-              <div class="forge-phase-bar" id="forge-phase-bar">
-                <div class="forge-phase-step" data-phase="design"><span class="forge-phase-dot"></span>Design</div>
-                <div class="forge-phase-connector"></div>
-                <div class="forge-phase-step" data-phase="build"><span class="forge-phase-dot"></span>Build</div>
-                <div class="forge-phase-connector"></div>
-                <div class="forge-phase-step" data-phase="verify"><span class="forge-phase-dot"></span>Verify</div>
-                <div class="forge-phase-connector"></div>
-                <div class="forge-phase-step" data-phase="integrate"><span class="forge-phase-dot"></span>Integrate</div>
-              </div>
-              <div class="forge-status-line" id="forge-status-line">
-                <span class="forge-status-badge" id="forge-status-badge"></span>
-                <span class="forge-status-cost" id="forge-status-cost"></span>
-                <span class="forge-status-time" id="forge-status-time"></span>
-              </div>
-            </div>
-            <div class="forge-log-wrap" id="forge-log-wrap">
-              <div class="forge-log-toolbar">
-                <span class="forge-log-title">Agent Log</span>
-                <label class="forge-autoscroll-label"><input type="checkbox" checked data-action="forge-toggle-autoscroll"> Auto-scroll</label>
-              </div>
-              <div class="forge-log" id="forge-log">
-                <div class="forge-log-empty">작업을 시작하면 에이전트 로그가 여기에 표시됩니다.</div>
-              </div>
-            </div>
-            <div class="forge-bottom-actions" id="forge-bottom-actions" style="display:none">
-              <button class="btn danger" data-action="forge-stop">⏹ 중지</button>
-              <button class="btn" data-action="forge-apply">프로젝트에 적용</button>
-              <button class="btn primary" data-action="forge-create-pr">PR 생성</button>
-            </div>
-          </div>
-          <!-- Right Panel: Live Preview -->
-          <div class="forge-right">
-            <div class="forge-preview-toolbar">
-              <button class="forge-preview-btn" data-action="forge-preview-refresh" title="Refresh">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/></svg>
-              </button>
-              <input type="text" class="forge-preview-url" id="forge-preview-url" value="localhost:3000" readonly>
-              <button class="forge-preview-btn" data-action="forge-preview-open" title="Open in browser">
-                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-              </button>
-            </div>
-            <div class="forge-preview-container" id="forge-preview-container">
-              <div class="forge-preview-placeholder" id="forge-preview-placeholder">
-                <div class="forge-preview-placeholder-icon">
-                  <svg viewBox="0 0 24 24" width="48" height="48" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.3"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-                </div>
-                <div class="forge-preview-placeholder-text">미리보기를 사용하려면 프로젝트의 dev server를 실행하세요</div>
-              </div>
-              <iframe id="forge-preview-iframe" class="forge-preview-iframe" style="display:none"></iframe>
             </div>
           </div>
         </div>

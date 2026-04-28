@@ -449,8 +449,7 @@ function buildCommandList() {
   cmds.push({ group: 'Navigation', label: 'Go to Notes', hint: 'Ctrl+6', icon: notesIcon, action: () => notify('switchView', 'notes') });
   const logsIcon = icon('<path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/>');
   cmds.push({ group: 'Navigation', label: 'Go to Workflows', hint: 'Ctrl+7', icon: logsIcon, action: () => notify('switchView', 'workflows') });
-  cmds.push({ group: 'Navigation', label: 'Go to Forge', hint: 'Ctrl+8', icon: navIcon, action: () => notify('switchView', 'forge') });
-  cmds.push({ group: 'Navigation', label: 'Go to README', hint: 'Ctrl+9', icon: navIcon, action: () => notify('switchView', 'readme') });
+  cmds.push({ group: 'Navigation', label: 'Go to README', hint: 'Ctrl+8', icon: navIcon, action: () => notify('switchView', 'readme') });
   const agentIcon = icon('<path d="M12 2a2 2 0 012 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 017 7h1a1 1 0 110 2h-1.17A7 7 0 0113 22h-2a7 7 0 01-6.83-6H3a1 1 0 110-2h1a7 7 0 017-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 012-2z"/>');
   cmds.push({ group: 'Navigation', label: 'Toggle Agent', hint: 'Ctrl+`', icon: agentIcon, action: () => notify('toggleAgentPanel') });
 

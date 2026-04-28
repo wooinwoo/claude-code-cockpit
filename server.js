@@ -25,7 +25,6 @@ import { checkAlerts, saveDailySnapshot, generateBriefing } from './lib/briefing
 import { getAllStats as getMonitorStats } from './lib/monitor-service.js';
 import { initBatch } from './lib/batch-service.js';
 import { logger } from './lib/logger.js';
-import { initForge } from './lib/forge-service.js';
 import { initSprint } from './lib/sprint-engine.js';
 import { runSubAgentLoop } from './lib/agent-orchestrator.js';
 import { listNotes, getNote, createNote, updateNote } from './lib/notes-service.js';
@@ -38,7 +37,6 @@ import { register as regWorkflows } from './routes/workflows.js';
 import { register as regSessions } from './routes/sessions.js';
 import { register as regJira } from './routes/jira.js';
 import { register as regAgent } from './routes/agent.js';
-import { register as regForge } from './routes/forge.js';
 import { register as regGit } from './routes/git.js';
 import { register as regProjects } from './routes/projects.js';
 import { register as regSystem } from './routes/system.js';
@@ -393,7 +391,7 @@ addRoute('GET', '/vendor/:filename', async (req, res) => {
 // ──────────── Dev Server State ────────────
 const devServers = new Map(); // projectId → { process, command, startedAt, port }
 
-// ──────────── callClaude (used by init: workflows, forge) ────────────
+// ──────────── callClaude (used by init: workflows) ────────────
 
 /**
  * callClaude — invoke Claude CLI.
@@ -575,7 +573,6 @@ regWorkflows(routeCtx);
 regSessions(routeCtx);
 regJira(routeCtx);
 regAgent(routeCtx);
-regForge(routeCtx);
 regGit(routeCtx);
 regPorts(routeCtx);
 regApiTester(routeCtx);
@@ -707,8 +704,6 @@ try {
 // ──────────── Init new services ────────────
 
 initBatch(poller);
-try { initForge(poller, callClaudeStream, (path) => getProjects().find(p => p.path === path)); }
-catch (err) { logger.error('forge', 'Init failed', err.message); }
 try { initSprint({ poller, runSubAgentLoop, getProjectById, gitExec }); }
 catch (err) { logger.error('sprint', 'Init failed', err.message); }
 try { initProjectPlan({ poller, runSubAgentLoop, getProjectById }); }

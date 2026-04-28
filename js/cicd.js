@@ -176,7 +176,6 @@ export async function showCicdDetail(runId) {
       const runId = parseInt(btn.dataset.runid);
       if (btn.dataset.action === 'close-detail') closeCicdDetail();
       else if (btn.dataset.action === 'rerun') rerunCicd(runId, btn.dataset.failed === 'true');
-      else if (btn.dataset.action === 'forge-fix') forgeFixCicd(runId);
       else if (btn.dataset.action === 'view-logs') viewCicdLogs(runId);
     });
   }
@@ -214,7 +213,6 @@ function renderCicdDetail(run) {
       <div class="cd-actions">
         <button class="btn" data-action="rerun" data-runid="${run.databaseId}" data-failed="false">Rerun All</button>
         ${run.conclusion === 'failure' ? `<button class="btn primary" data-action="rerun" data-runid="${run.databaseId}" data-failed="true">Rerun Failed</button>` : ''}
-        ${run.conclusion === 'failure' ? `<button class="btn jd-forge-btn" data-action="forge-fix" data-runid="${run.databaseId}">🔥 Fix with Forge</button>` : ''}
         <button class="btn" data-action="view-logs" data-runid="${run.databaseId}">View Full Logs</button>
       </div>
     </div>
@@ -322,75 +320,6 @@ function formatDuration(ms) {
   if (m < 60) return `${m}m ${s % 60}s`;
   const h = Math.floor(m / 60);
   return `${h}h ${m % 60}m`;
-}
-
-// ─── Forge Integration ───
-export async function forgeFixCicd(runId) {
-  if (!app._cicdProject) return;
-  showToast('Fetching failure logs...', 'info');
-
-  try {
-    const logsText = await fetchText(`/api/cicd/runs/${app._cicdProject}/${runId}/logs`);
-
-    const run = app.cicdRuns?.find(r => r.databaseId === runId);
-    const failedJobs = (run?.jobs || [])
-      .filter(j => j.conclusion === 'failure')
-      .map(j => ({
-        name: j.name,
-        failedSteps: (j.steps || []).filter(s => s.conclusion === 'failure').map(s => s.name)
-      }));
-
-    const errorContext = _extractErrorLines(logsText, 150);
-    const filePaths = _extractFilePaths(logsText);
-
-    let task = `Fix CI/CD failure: ${run?.displayTitle || 'Workflow Run'}\n`;
-    task += `Branch: ${run?.headBranch || 'unknown'}\n\n`;
-    if (failedJobs.length) {
-      task += 'Failed jobs:\n';
-      failedJobs.forEach(j => {
-        task += `- ${j.name}`;
-        if (j.failedSteps.length) task += `: ${j.failedSteps.join(', ')}`;
-        task += '\n';
-      });
-      task += '\n';
-    }
-    if (errorContext) task += 'Error output:\n```\n' + errorContext + '\n```';
-
-    openForgeWithPrefill({
-      task,
-      referenceFiles: filePaths.join('\n'),
-      projectId: app._cicdProject,
-      plan: 'quick',
-      source: 'cicd',
-      sourceRef: String(runId),
-    });
-  } catch (err) {
-    showToast('Failed to prepare: ' + err.message, 'error');
-  }
-}
-
-function _extractErrorLines(logs, maxLines) {
-  if (!logs) return '';
-  const lines = logs.split('\n');
-  const indicators = ['error', 'Error', 'ERROR', 'FAIL', 'fail', 'exception', 'Exception', 'TypeError', 'ReferenceError'];
-  const result = [];
-  for (let i = 0; i < lines.length; i++) {
-    if (indicators.some(ind => lines[i].includes(ind))) {
-      for (let j = Math.max(0, i - 2); j < Math.min(lines.length, i + 5); j++) {
-        if (!result.includes(lines[j])) result.push(lines[j]);
-      }
-    }
-  }
-  return result.slice(0, maxLines).join('\n');
-}
-
-function _extractFilePaths(logs) {
-  if (!logs) return [];
-  const regex = /((?:src|lib|app|test|spec|pages|components)\/[\w./-]+\.\w+)/g;
-  const paths = new Set();
-  let m;
-  while ((m = regex.exec(logs)) !== null) paths.add(m[1]);
-  return [...paths].slice(0, 10);
 }
 
 // ─── Action Registration ───

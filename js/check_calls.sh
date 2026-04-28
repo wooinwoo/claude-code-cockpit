@@ -17,7 +17,7 @@ get_bare_calls() {
   grep -oE '\b[a-zA-Z_$][a-zA-Z0-9_$]*\s*\(' "$file" | sed 's/\s*($//' | sort -u
 }
 
-for file in dashboard.js modals.js terminal.js diff.js agent.js jira.js cicd.js notes.js workflows.js forge.js logs.js monitor.js; do
+for file in dashboard.js modals.js terminal.js diff.js agent.js jira.js cicd.js notes.js workflows.js logs.js monitor.js; do
   echo "=== $file ==="
   echo "Imports:"
   get_imports "$file"

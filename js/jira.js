@@ -803,7 +803,6 @@ export async function showIssueDetail(key) {
       switch (el.dataset.action) {
         case 'close-detail': closeIssueDetail(); break;
         case 'change-status': changeIssueStatus(el.dataset.key, el.dataset.tid); break;
-        case 'forge-jira': forgeFromJira(el.dataset.key); break;
         case 'add-comment': addJiraComment(el.dataset.key); break;
       }
     });
@@ -824,7 +823,6 @@ export async function showIssueDetail(key) {
       <div class="jd-summary">${esc(issue.summary)}</div>
       ${issue.parent ? `<div class="jd-parent"><span class="jd-parent-label">Parent:</span> <a href="${esc(jiraUrl(issue.parent.key))}" target="_blank" rel="noopener" class="jd-parent-key">${esc(issue.parent.key)}</a> <span class="jd-parent-sum">${esc(issue.parent.summary)}</span></div>` : ''}
       ${issue.transitions?.length ? `<div class="jd-transitions">${issue.transitions.map(t => `<button class="jd-trans-btn" data-action="change-status" data-key="${esc(issue.key)}" data-tid="${t.id}">${esc(t.name)}</button>`).join('')}</div>` : ''}
-      <div class="jd-actions"><button class="btn jd-forge-btn" data-action="forge-jira" data-key="${esc(issue.key)}">🔥 Forge</button></div>
       <div class="jd-meta">
         <span class="jd-meta-label">Assignee</span>
         <span class="jd-meta-value">${issue.assignee ? `<img class="jt-avatar" src="${proxyImg(issue.assignee.avatarUrl)}" alt=""> ${esc(issue.assignee.displayName)}` : 'Unassigned'}</span>
@@ -910,42 +908,6 @@ function priorityIcon(priority) {
   if (priority.iconUrl) return `<img class="jt-priority" src="${proxyImg(priority.iconUrl)}" alt="${esc(priority.name)}" title="${esc(priority.name)}">`;
   const cls = 'jp-' + (priority.name || '').toLowerCase();
   return `<span class="${cls}" title="${esc(priority.name)}">${esc(priority.name)}</span>`;
-}
-
-// ─── Forge Integration ───
-export function forgeFromJira(issueKey) {
-  const issue = app.jiraIssues.find(i => i.key === issueKey);
-  if (!issue) { showToast('Issue not found', 'error'); return; }
-
-  let descText = '';
-  if (issue.renderedDescription) {
-    const div = document.createElement('div');
-    div.innerHTML = issue.renderedDescription;
-    descText = div.textContent || '';
-  } else if (typeof issue.description === 'string') {
-    descText = issue.description;
-  }
-
-  // Extract file paths from description
-  const pathRegex = /(?:^|\s)((?:src|lib|app|test|pages|components|services|utils|config)\/[\w./-]+\.\w+)/gm;
-  const paths = [];
-  let m;
-  while ((m = pathRegex.exec(descText)) !== null) {
-    if (!paths.includes(m[1])) paths.push(m[1]);
-  }
-
-  // Match project by Jira key prefix
-  const prefix = issueKey.split('-')[0].toLowerCase();
-  const proj = (app.projectList || []).find(p => p.name.toLowerCase().includes(prefix));
-
-  openForgeWithPrefill({
-    task: `[${issue.key}] ${issue.summary}\n\n${descText}`.trim(),
-    referenceFiles: paths.slice(0, 10).join('\n'),
-    projectId: proj?.id || '',
-    plan: 'standard',
-    source: 'jira',
-    sourceRef: issueKey,
-  });
 }
 
 // ─── Action Registration ───

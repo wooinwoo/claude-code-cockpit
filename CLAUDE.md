@@ -71,7 +71,6 @@ dashboard/
 │   ├── notes.js        # Notes 탭: 마크다운 문서 뷰어/에디터
 │   ├── modals.js       # 모든 다이얼로그, 설정 패널, 커맨드 팔레트
 │   ├── cicd.js         # CI/CD 탭: GitHub Actions 파이프라인
-│   ├── forge.js        # Forge: AI 코드 생성
 │   ├── workflows.js    # Workflows: 커스텀 자동화
 │   ├── highlight.js    # diff 구문 강조
 │   ├── ports.js        # 포트 매니저 UI
@@ -82,7 +81,6 @@ dashboard/
 │   ├── projects.js         # 프로젝트 CRUD, dev server
 │   ├── sessions.js         # Claude 세션 시작/재개/이력
 │   ├── agent.js            # AI 에이전트 API
-│   ├── forge.js            # AI 코드 생성 API
 │   ├── jira.js             # Jira 이슈/보드/스프린트
 │   ├── workflows.js        # 워크플로우 정의/실행
 │   ├── notes.js            # 노트 CRUD
@@ -93,7 +91,6 @@ dashboard/
 ├── lib/                # 서버 서비스 모듈
 │   ├── platform.js         # 크로스 플랫폼 헬퍼 (셸, kill, URL, IDE 경로)
 │   ├── agent-service.js    # Gemini API 클라이언트, 에이전트 도구 시스템 (98KB)
-│   ├── forge-service.js    # AI 코드 생성 서비스 (57KB)
 │   ├── claude-data.js      # Claude 세션/대화 데이터 파서
 │   ├── jira-service.js     # Jira REST API 클라이언트
 │   ├── cost-service.js     # 토큰 사용량/비용 추적
@@ -188,7 +185,6 @@ addRoute('POST', '/api/projects/:id/git/commit', handler);
 - `/api/cicd` — GitHub Actions 파이프라인 (routes/cicd.js)
 - `/api/notes` — 노트 CRUD (routes/notes.js)
 - `/api/workflows` — 워크플로우 정의/실행 (routes/workflows.js)
-- `/api/forge` — AI 코드 생성 (routes/forge.js)
 - `/api/ports` — 시스템 포트 스캔/프로세스 관리 (routes/ports.js)
 - `/api/api-tester` — HTTP 요청 프록시 (routes/api-tester.js)
 - `/api/open-in-ide` — IDE에서 파일 열기 (routes/system.js)
