@@ -3,7 +3,7 @@ import { getRecentActivity, discoverProjects } from '../lib/claude-data.js';
 import { generateQRSvg } from '../lib/qr.js';
 import { checkAlerts, generateBriefing, getAlertPrefs, saveAlertPrefs } from '../lib/briefing-service.js';
 import { getWhitelist, executeBatch, stopBatch, getBatchStatus } from '../lib/batch-service.js';
-import { IS_WIN, getIdeBin, getIdeSpawnOpts, getFirefoxDevBin, openUrl as platformOpenUrl, openFolder as platformOpenFolder } from '../lib/platform.js';
+import { IS_WIN, getIdeBin, getIdeSpawnOpts, getFirefoxDevBin, openUrl as platformOpenUrl, openFolder as platformOpenFolder, safeSpawnDetached } from '../lib/platform.js';
 
 export function register(ctx) {
   const { addRoute, json, readBody, rateLimit, getProjects, getProjectById, addProject, poller, LAN_TOKEN, isInsideAnyProject, isLocalhost, authCookie, toWinPath, PORT, LIMITS, join, resolve, normalize, readFile, readdir, stat, writeFile, mkdir, spawn, tmpdir, randomBytes, timingSafeEqual } = ctx;
@@ -174,14 +174,14 @@ export function register(ctx) {
     if (ide === 'zed') {
       const zedBin = getIdeBin('zed');
       const args = line > 0 ? [`${resolvedPath}:${line}`] : [resolvedPath];
-      spawn(zedBin, args, { detached: true, stdio: 'ignore', shell: false, windowsHide: true }).unref();
+      safeSpawnDetached(zedBin, args, { shell: false, windowsHide: true });
     } else {
       // VS Code/Cursor support --goto file:line:column
       const args = [];
       if (line > 0) { args.push('--goto', `${resolvedPath}:${line}${column > 0 ? ':' + column : ''}`); }
       else { args.push(resolvedPath); }
       const ideBin = getIdeBin(ide);
-      spawn(ideBin, args, getIdeSpawnOpts()).unref();
+      safeSpawnDetached(ideBin, args, getIdeSpawnOpts());
     }
     json(res, { opened: true });
   });
@@ -195,7 +195,7 @@ export function register(ctx) {
     const browser = body.browser || 'default';
     if (browser === 'firefox-dev') {
       const ffBin = getFirefoxDevBin();
-      spawn(ffBin, [url], { detached: true, stdio: 'ignore', shell: false, windowsHide: true }).unref();
+      safeSpawnDetached(ffBin, [url], { shell: false, windowsHide: true });
     } else {
       platformOpenUrl(url);
     }

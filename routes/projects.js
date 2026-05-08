@@ -4,7 +4,7 @@ import { resolve, normalize, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { computeUsage } from '../lib/cost-service.js';
 import { getBranches } from '../lib/git-service.js';
-import { IS_WIN, killProcessTree, getIdeBin, getIdeSpawnOpts } from '../lib/platform.js';
+import { IS_WIN, killProcessTree, getIdeBin, getIdeSpawnOpts, safeSpawnDetached } from '../lib/platform.js';
 
 /**
  * Register project CRUD, SSE events, and dev server management routes.
@@ -198,10 +198,10 @@ export function register(ctx) {
     const idePath = IS_WIN ? toWinPath(project.path) : project.path;
     if (ide === 'zed') {
       const zedBin = getIdeBin('zed');
-      spawn(zedBin, [idePath], { detached: true, stdio: 'ignore', shell: false, windowsHide: true }).unref();
+      safeSpawnDetached(zedBin, [idePath], { shell: false, windowsHide: true });
     } else {
       const ideBin = getIdeBin(ide);
-      spawn(ideBin, [idePath], getIdeSpawnOpts()).unref();
+      safeSpawnDetached(ideBin, [idePath], getIdeSpawnOpts());
     }
     json(res, { opened: true, ide, projectId: project.id });
   }));
