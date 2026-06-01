@@ -1,9 +1,9 @@
 import { createServer } from 'node:http';
 import { readFile, readdir, stat, writeFile, mkdir } from 'node:fs/promises';
-import { readFileSync, existsSync, unlinkSync, watch, writeFileSync, copyFileSync } from 'node:fs';
+import { readFileSync, existsSync, unlinkSync, watch, writeFileSync, copyFileSync, readlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve, normalize } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createRequire } from 'node:module';
@@ -19,7 +19,9 @@ import { IS_WIN, getShell, killProcessTree, openUrl as platformOpenUrl } from '.
 import { gitExec, spawnForProject, parseWslPath, toWinPath } from './lib/wsl-utils.js';
 import { init as initWorkflows, listWorkflowDefs, getWorkflowDef, startRun as startWorkflowRun, listRuns as listWorkflowRuns, getRunDetail as getWorkflowRunDetail } from './lib/workflows-service.js';
 import { init as initScheduler } from './lib/workflow-scheduler.js';
-import { init as initAgent, chat as agentChat, newConversation as agentNewConv } from './lib/agent-service.js';
+import { init as initAgent, chat as agentChat, newConversation as agentNewConv, getConversation as agentGetConv, isRunning as agentIsRunning } from './lib/agent-service.js';
+import * as telegramBridge from './lib/telegram-bridge.js';
+import * as autonomyScheduler from './lib/autonomy-scheduler.js';
 import { init as initMonitorAgent } from './lib/monitor-agent.js';
 import { checkAlerts, saveDailySnapshot, generateBriefing } from './lib/briefing-service.js';
 import { getAllStats as getMonitorStats } from './lib/monitor-service.js';
@@ -44,6 +46,10 @@ import { register as regPorts } from './routes/ports.js';
 import { register as regApiTester } from './routes/api-tester.js';
 import { register as regSprint } from './routes/sprint.js';
 import { register as regProjectPlan } from './routes/project-plan.js';
+import { register as regTelegram } from './routes/telegram.js';
+import { register as regSupervisor } from './routes/supervisor.js';
+import * as supervisorService from './lib/supervisor-service.js';
+import * as supervisorLlm from './lib/supervisor-llm.js';
 import { initProjectPlan } from './lib/project-plan.js';
 
 // node-pty and ws are CJS modules
@@ -387,6 +393,253 @@ addRoute('GET', '/vendor/:filename', async (req, res) => {
     res.end(content);
   } catch { /* file not found */ res.writeHead(404); res.end('Not found'); }
 });
+// Claude sessions 목록 — 해당 프로젝트의 .jsonl 파일들 (mtime 순)
+// in-memory 캐시: file → { mtime, size, title } · mtime 변경 시만 재파싱
+const SESSION_TITLE_CACHE = new Map(); // filePath → { mtime, title, size }
+addRoute('GET', '/api/claude-sessions', async (req, res) => {
+  try {
+    const projectPath = req.query?.projectPath;
+    if (!projectPath) { res.writeHead(400); return res.end('{}'); }
+    const encoded = projectPath.replace(/[/\\]/g, '-');
+    const dir = join(homedir(), '.claude', 'projects', encoded);
+    if (!existsSync(dir)) {
+      return res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ sessions: [] }));
+    }
+    const files = (await readdir(dir)).filter((f) => f.endsWith('.jsonl'));
+    const sessions = await Promise.all(files.map(async (f) => {
+      const fpath = join(dir, f);
+      const s = await stat(fpath);
+      const cached = SESSION_TITLE_CACHE.get(fpath);
+      // mtime / size 동일하면 캐시 hit
+      if (cached && cached.mtime === s.mtimeMs && cached.size === s.size) {
+        return { id: f.replace(/\.jsonl$/, ''), file: f, mtime: s.mtimeMs, size: s.size, title: cached.title };
+      }
+      // miss — 첫 user message peek (50라인만)
+      let title = '';
+      try {
+        // 큰 파일은 첫 8KB 만 read (50 message header 면 보통 1~4KB)
+        const fd = await readFile(fpath, { encoding: 'utf8' });
+        for (const line of fd.split('\n').slice(0, 50)) {
+          if (!line.trim()) continue;
+          try {
+            const d = JSON.parse(line);
+            if (d.type === 'user' && d.message?.content) {
+              const c = d.message.content;
+              const text = typeof c === 'string' ? c : Array.isArray(c) ? (c.find(x => x.type === 'text')?.text || '') : '';
+              if (text.trim()) { title = text.replace(/\s+/g, ' ').slice(0, 60); break; }
+            }
+          } catch { /* skip */ }
+        }
+      } catch { /* skip */ }
+      SESSION_TITLE_CACHE.set(fpath, { mtime: s.mtimeMs, size: s.size, title });
+      // LRU cap — 500 entries
+      if (SESSION_TITLE_CACHE.size > 500) {
+        const firstKey = SESSION_TITLE_CACHE.keys().next().value;
+        SESSION_TITLE_CACHE.delete(firstKey);
+      }
+      return { id: f.replace(/\.jsonl$/, ''), file: f, mtime: s.mtimeMs, size: s.size, title };
+    }));
+    sessions.sort((a, b) => b.mtime - a.mtime);
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ sessions }));
+  } catch (e) {
+    res.writeHead(500); res.end(JSON.stringify({ error: e.message }));
+  }
+});
+
+// Claude session.jsonl — 프로젝트 path 기준 최근 세션 파싱 (또는 sessionId 지정)
+addRoute('GET', '/api/claude-session', async (req, res) => {
+  try {
+    const projectPath = req.query?.projectPath;
+    if (!projectPath) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: 'projectPath required' }));
+    }
+    // Claude 의 jsonl 파일은 ~/.claude/projects/<encoded-path>/ 안에 저장됨
+    // 인코딩: / → -, 첫 / 도 - (예: /home/user → -home-user)
+    const encoded = projectPath.replace(/[/\\]/g, '-');
+    const dir = join(homedir(), '.claude', 'projects', encoded);
+    if (!existsSync(dir)) {
+      return res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ messages: [], session: null }));
+    }
+    const wantSession = req.query?.sessionId;
+    const files = (await readdir(dir)).filter((f) => f.endsWith('.jsonl'));
+    if (!files.length) {
+      return res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ messages: [], session: null }));
+    }
+    const sorted = await Promise.all(files.map(async (f) => {
+      const s = await stat(join(dir, f));
+      return { name: f, mtime: s.mtimeMs };
+    }));
+    sorted.sort((a, b) => b.mtime - a.mtime);
+    let latest = sorted[0].name;
+    if (wantSession) {
+      const match = files.find((f) => f === `${wantSession}.jsonl` || f.startsWith(wantSession));
+      if (match) latest = match;
+    }
+    const fstat = await stat(join(dir, latest));
+    const content = await readFile(join(dir, latest), 'utf8');
+    // usage 누적 — token 표시용
+    let tokensIn = 0, tokensOut = 0, model = '';
+    const messages = [];
+    for (const line of content.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const d = JSON.parse(line);
+        if (d.type === 'user' || d.type === 'assistant') {
+          const m = d.message || {};
+          if (m.usage) {
+            tokensIn += (m.usage.input_tokens || 0) + (m.usage.cache_creation_input_tokens || 0);
+            tokensOut += m.usage.output_tokens || 0;
+          }
+          if (m.model && !model) model = m.model;
+          const ts = d.timestamp || d.createdAt || null;
+          const c = m.content;
+          const parts = [];
+          if (typeof c === 'string') {
+            parts.push({ kind: 'text', text: c });
+          } else if (Array.isArray(c)) {
+            for (const item of c) {
+              if (!item || typeof item !== 'object') continue;
+              if (item.type === 'text') parts.push({ kind: 'text', text: item.text || '' });
+              else if (item.type === 'thinking') parts.push({ kind: 'thinking', text: item.thinking || '' });
+              else if (item.type === 'tool_use') parts.push({ kind: 'tool_use', name: item.name, input: item.input || {}, id: item.id });
+              else if (item.type === 'tool_result') {
+                // tool_result.content 도 array 일 수 있음 — image 포함 가능
+                if (Array.isArray(item.content)) {
+                  const flat = [];
+                  for (const sub of item.content) {
+                    if (!sub) continue;
+                    if (sub.type === 'image' && sub.source) {
+                      const s = sub.source;
+                      if (s.type === 'base64') parts.push({ kind: 'image', media_type: s.media_type, data: s.data, label: 'tool image' });
+                      else if (s.type === 'url') parts.push({ kind: 'image', url: s.url, label: 'tool image' });
+                    } else if (sub.type === 'text') {
+                      flat.push(sub.text || '');
+                    } else if (typeof sub === 'string') {
+                      flat.push(sub);
+                    }
+                  }
+                  if (flat.length) parts.push({ kind: 'tool_result', content: flat.join('\n'), tool_use_id: item.tool_use_id });
+                } else {
+                  parts.push({ kind: 'tool_result', content: item.content, tool_use_id: item.tool_use_id });
+                }
+              }
+              else if (item.type === 'image' && item.source) {
+                const s = item.source;
+                if (s.type === 'base64') parts.push({ kind: 'image', media_type: s.media_type, data: s.data });
+                else if (s.type === 'url') parts.push({ kind: 'image', url: s.url });
+              }
+            }
+          }
+          if (parts.length) messages.push({ role: d.type, ts, parts });
+        }
+      } catch { /* skip */ }
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      session: latest,
+      mtime: fstat.mtimeMs,
+      model,
+      usage: { in: tokensIn, out: tokensOut },
+      messages,
+    }));
+  } catch (e) {
+    res.writeHead(500, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: e.message }));
+  }
+});
+
+// vendor/fonts/X.woff2 (Pretendard 등)
+addRoute('GET', '/vendor/fonts/:filename', async (req, res) => {
+  const filename = req.params.filename;
+  if (filename.includes('..') || /[^a-zA-Z0-9._-]/.test(filename)) { res.writeHead(404); res.end('Not found'); return; }
+  const ct = filename.endsWith('.woff2') ? 'font/woff2'
+           : filename.endsWith('.woff') ? 'font/woff'
+           : filename.endsWith('.ttf') ? 'font/ttf'
+           : 'application/octet-stream';
+  try {
+    const content = await readFile(join(__dirname, 'vendor', 'fonts', filename));
+    res.writeHead(200, { 'Content-Type': ct, 'Cache-Control': 'public, max-age=31536000' });
+    res.end(content);
+  } catch { res.writeHead(404); res.end('Not found'); }
+});
+
+// ──────────── Image Upload (chat view paste/drop) ────────────
+const UPLOAD_DIR = join(tmpdir(), 'cockpit-uploads');
+try { await mkdir(UPLOAD_DIR, { recursive: true }); } catch { /* dir exists */ }
+
+addRoute('POST', '/api/uploads', async (req, res) => {
+  const contentType = req.headers['content-type'] || '';
+  if (!contentType.startsWith('multipart/form-data')) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'expected multipart/form-data' }));
+    return;
+  }
+  // 간단 multipart 파서 (단일 파일, boundary 만 처리)
+  const boundaryMatch = contentType.match(/boundary=(?:"([^"]+)"|([^;\s]+))/);
+  if (!boundaryMatch) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'no boundary in content-type' }));
+    return;
+  }
+  const boundary = '--' + (boundaryMatch[1] || boundaryMatch[2]);
+  const chunks = [];
+  let totalSize = 0;
+  const MAX_SIZE = 10 * 1024 * 1024; // 10MB
+
+  await new Promise((resolve, reject) => {
+    req.on('data', (chunk) => {
+      totalSize += chunk.length;
+      if (totalSize > MAX_SIZE) { reject(new Error('file too large (>10MB)')); return; }
+      chunks.push(chunk);
+    });
+    req.on('end', resolve);
+    req.on('error', reject);
+  }).catch((e) => {
+    res.writeHead(413, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: e.message }));
+    return null;
+  });
+  if (totalSize > MAX_SIZE) return;
+
+  const buf = Buffer.concat(chunks);
+  // boundary 로 분할 — 단일 파일 만 처리
+  const parts = buf.toString('binary').split(boundary);
+  let saved = null;
+  for (const part of parts) {
+    if (!part.includes('Content-Disposition')) continue;
+    const headerEnd = part.indexOf('\r\n\r\n');
+    if (headerEnd < 0) continue;
+    const header = part.slice(0, headerEnd);
+    const body = part.slice(headerEnd + 4, part.lastIndexOf('\r\n'));
+    const filenameMatch = header.match(/filename="([^"]+)"/);
+    if (!filenameMatch) continue;
+    const origName = filenameMatch[1];
+    const ext = (origName.split('.').pop() || 'bin').toLowerCase().slice(0, 8);
+    if (!/^[a-z0-9]+$/.test(ext)) continue;
+    if (!['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext)) {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: `extension .${ext} not allowed` }));
+      return;
+    }
+    const ts = Date.now().toString(36);
+    const rand = randomBytes(3).toString('hex');
+    const name = `img-${ts}-${rand}.${ext}`;
+    const filePath = join(UPLOAD_DIR, name);
+    const data = Buffer.from(body, 'binary');
+    await writeFile(filePath, data);
+    saved = { path: filePath, name, size: data.length };
+    break;
+  }
+  if (!saved) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'no file found in upload' }));
+    return;
+  }
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(saved));
+});
 
 // ──────────── Dev Server State ────────────
 const devServers = new Map(); // projectId → { process, command, startedAt, port }
@@ -578,6 +831,8 @@ regPorts(routeCtx);
 regApiTester(routeCtx);
 regSprint(routeCtx);
 regProjectPlan(routeCtx);
+regTelegram(routeCtx);
+regSupervisor(routeCtx);
 
 // ──────────── Polling ────────────
 
@@ -699,6 +954,50 @@ try {
   );
 } catch (err) { logger.error('agent', 'Init failed', err.message); }
 
+// Initialize Telegram bridge (optional — uses telegram-config.json)
+try {
+  telegramBridge.init(
+    {
+      chat: agentChat,
+      getConversation: agentGetConv,
+      isRunning: agentIsRunning,
+      newConversation: agentNewConv,
+    },
+    { logger },
+    {
+      getProjects,
+      poller,
+      supervisor: supervisorService,
+      listTerminals: () => { const r = []; for (const [id, t] of terminals) r.push({ termId: id, projectId: t.projectId, command: t.command || '' }); return r; },
+      readTerminalBuffer: (id) => { const t = terminals.get(id); return t ? bufRead(t) : null; },
+    },
+  );
+  if (telegramBridge.isEnabled()) {
+    telegramBridge.startPolling();
+  } else {
+    logger.info('telegram', 'not configured — polling skipped');
+  }
+} catch (err) { logger.error('telegram', 'Init failed', err.message); }
+
+// Initialize Autonomy Scheduler (자율 트리거)
+try {
+  autonomyScheduler.init({
+    agent: { chat: agentChat, getConversation: agentGetConv, isRunning: agentIsRunning, newConversation: agentNewConv },
+    telegram: telegramBridge,
+    logger,
+  });
+} catch (err) { logger.error('scheduler', 'Init failed', err.message); }
+
+// Initialize Supervisor (PreToolUse hook 결정 자동화)
+try {
+  supervisorLlm.init({ logger });
+  supervisorService.init({
+    telegram: telegramBridge,
+    logger,
+  });
+  logger.info('supervisor', `initialized (LLM ${supervisorLlm.isReady() ? 'ready' : 'no api key'})`);
+} catch (err) { logger.error('supervisor', 'Init failed', err.message); }
+
 // Agent Monitor init — deferred to after terminals Map declaration (see below)
 
 // ──────────── Init new services ────────────
@@ -726,7 +1025,7 @@ const server = createServer(async (req, res) => {
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-XSS-Protection', '0');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws://localhost:* http://localhost:*; font-src 'self'");
+  res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.jsdelivr.net; img-src 'self' data: blob:; connect-src 'self' ws://localhost:* http://localhost:*; font-src 'self' data: https://fonts.gstatic.com https://cdn.jsdelivr.net");
 
   const url = new URL(req.url, `http://localhost:${PORT}`);
 
@@ -842,7 +1141,11 @@ function saveTerminalState() {
     _saveQueued = false;
     const st = [];
     for (const [id, t] of terminals) {
-      st.push({ termId: id, projectId: t.projectId, command: t.command || '' });
+      // 셸의 실제 현재 경로 캡처 (사용자가 cd 로 바꾼 경로까지). Linux/WSL: /proc/<pid>/cwd
+      let cwd = '';
+      try { if (t.pty?.pid) cwd = readlinkSync(`/proc/${t.pty.pid}/cwd`); }
+      catch { /* /proc 없음(비-Linux) 또는 프로세스 종료 — 경로 생략, 복원 시 루트로 폴백 */ }
+      st.push({ termId: id, projectId: t.projectId, command: t.command || '', cwd });
     }
     if (st.length === 0 && !existsSync(STATE_FILE)) return;
     try {
@@ -875,11 +1178,20 @@ function restoreTerminals() {
   const restored = [];
 
   for (const entry of saved.terminals) {
-    const project = getProjectById(entry.projectId);
-    if (!project) continue;
+    // __home__ = 프로젝트 비종속 빈 터미널. 그 외엔 등록 프로젝트 필요.
+    const isHome = entry.projectId === '__home__';
+    const project = isHome ? null : getProjectById(entry.projectId);
+    if (!isHome && !project) continue;
+
+    // 복원 기준 경로: 저장된 cwd(사용자가 cd 한 위치)가 아직 살아있으면 그것, 아니면 프로젝트 루트(홈)
+    const basePath = isHome ? homedir() : project.path;
+    let termPath = basePath;
+    if (entry.cwd && existsSync(IS_WIN ? toWinPath(entry.cwd) : entry.cwd)) {
+      termPath = entry.cwd;
+    }
 
     const newTermId = `${entry.projectId}-${randomBytes(6).toString('hex')}`;
-    const wsl = parseWslPath(project.path);
+    const wsl = parseWslPath(termPath);
     let shell, shellArgs, cwd;
     if (wsl) {
       shell = 'wsl.exe';
@@ -888,7 +1200,7 @@ function restoreTerminals() {
     } else {
       shell = _defaultShell;
       shellArgs = [];
-      cwd = IS_WIN ? toWinPath(project.path) : project.path;
+      cwd = IS_WIN ? toWinPath(termPath) : termPath;
     }
 
     const term = pty.spawn(shell, shellArgs, {
@@ -918,13 +1230,9 @@ function restoreTerminals() {
     idMap[entry.termId] = newTermId;
     restored.push({ termId: newTermId, projectId: entry.projectId });
 
-    // Re-run the command that was running — m6: strict command validation
-    if (entry.command && typeof entry.command === 'string' && entry.command.length < 500
-        && /^(claude|npm|npx|node|git|python|pip|docker|yarn|pnpm|bun|cargo|make|cmake|go|rustc|ruby|java|javac|mvn|gradle|dotnet|terraform|kubectl|helm|ansible|packer|deno|tsx|ts-node|jest|vitest|pytest|eslint|prettier|tsc)\b/.test(entry.command)
-        && !/[&|<>^;`$(){}]/.test(entry.command)
-        && !/\s+-[cCeE]\s/.test(entry.command)) { // Block -c/-e (arbitrary code exec)
-      setTimeout(() => term.write(entry.command + '\r'), 500);
-    }
+    // 복원된 모든 터미널에 'claude' 를 미리 입력만 해둠 (실행 X — 사용자가 Enter 로 시작).
+    // \r 안 붙임: 프롬프트에 타이핑만 된 상태로 대기.
+    setTimeout(() => { try { term.write('claude'); } catch { /* term already gone */ } }, 500);
   }
 
   // Clean up state file after successful restore
@@ -964,26 +1272,33 @@ let _terminalsRestored = false;
 wss.on('connection', (ws) => {
   let _currentTermId = null;
 
-  ws.on('message', (raw) => {
+  ws.on('message', async (raw) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; /* malformed JSON, ignore message */ }
 
     switch (msg.type) {
       case 'create': {
-        // Create a new PTY terminal for a project
-        const project = getProjectById(msg.projectId);
-        if (!project) { ws.send(JSON.stringify({ type: 'error', message: 'Unknown project' })); return; }
+        // Plain/scratch terminal — not tied to any project, opens in home dir
+        const isHome = msg.projectId === '__home__';
+        let termPath;
+        if (isHome) {
+          termPath = homedir();
+        } else {
+          // Create a new PTY terminal for a project
+          const project = getProjectById(msg.projectId);
+          if (!project) { ws.send(JSON.stringify({ type: 'error', message: 'Unknown project' })); return; }
 
-        // C5: Validate cwd against project path — must be inside project or omitted
-        let termPath = project.path;
-        if (msg.cwd && typeof msg.cwd === 'string') {
-          const resolvedCwd = resolve(normalize(IS_WIN ? toWinPath(msg.cwd) : msg.cwd)).replace(/\\/g, '/').toLowerCase();
-          const projResolved = resolve(normalize(IS_WIN ? toWinPath(project.path) : project.path)).replace(/\\/g, '/').toLowerCase();
-          if (resolvedCwd.startsWith(projResolved + '/') || resolvedCwd === projResolved) {
-            termPath = msg.cwd;
-          } else {
-            ws.send(JSON.stringify({ type: 'error', message: 'cwd must be inside project directory' }));
-            return;
+          // C5: Validate cwd against project path — must be inside project or omitted
+          termPath = project.path;
+          if (msg.cwd && typeof msg.cwd === 'string') {
+            const resolvedCwd = resolve(normalize(IS_WIN ? toWinPath(msg.cwd) : msg.cwd)).replace(/\\/g, '/').toLowerCase();
+            const projResolved = resolve(normalize(IS_WIN ? toWinPath(project.path) : project.path)).replace(/\\/g, '/').toLowerCase();
+            if (resolvedCwd.startsWith(projResolved + '/') || resolvedCwd === projResolved) {
+              termPath = msg.cwd;
+            } else {
+              ws.send(JSON.stringify({ type: 'error', message: 'cwd must be inside project directory' }));
+              return;
+            }
           }
         }
 
@@ -1065,12 +1380,56 @@ wss.on('connection', (ws) => {
         if (t) { t.pty.kill(); terminals.delete(msg.termId); }
         break;
       }
+
+      case 'chat-watch': {
+        // session.jsonl 변경 실시간 push (한 leaf 당 한 watcher)
+        const projectPath = msg.projectPath;
+        const termId = msg.termId;
+        if (!projectPath || !termId) break;
+        const encoded = projectPath.replace(/[/\\]/g, '-');
+        const dir = join(homedir(), '.claude', 'projects', encoded);
+        if (!existsSync(dir)) break;
+        if (!ws._chatWatchers) ws._chatWatchers = new Map();
+        // 이미 watching 이면 패스
+        if (ws._chatWatchers.has(termId)) break;
+        let debounceTimer = null;
+        try {
+          const watcher = watch(dir, { persistent: false }, (eventType, fname) => {
+            if (!fname || !fname.endsWith('.jsonl')) return;
+            if (debounceTimer) clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+              try {
+                if (ws.readyState === 1) {
+                  ws.send(JSON.stringify({ type: 'session-update', termId, projectPath, file: fname }));
+                }
+              } catch { /* ws closed */ }
+            }, 120);
+          });
+          watcher.on('error', () => { try { watcher.close(); } catch {} ws._chatWatchers?.delete(termId); });
+          ws._chatWatchers.set(termId, watcher);
+        } catch (e) {
+          logger.warn?.('chat-watch', 'failed to watch ' + dir + ': ' + e.message);
+        }
+        break;
+      }
+
+      case 'chat-unwatch': {
+        const termId = msg.termId;
+        if (!ws._chatWatchers) break;
+        const w = ws._chatWatchers.get(termId);
+        if (w) { try { w.close(); } catch {} ws._chatWatchers.delete(termId); }
+        break;
+      }
     }
   });
 
   ws.on('close', () => {
-    // Don't kill terminals on disconnect — they persist
-    // User can reconnect and resume
+    // chat watchers cleanup
+    if (ws._chatWatchers) {
+      for (const w of ws._chatWatchers.values()) { try { w.close(); } catch {} }
+      ws._chatWatchers.clear();
+    }
+    // terminals 는 유지
   });
 
   // On connect: restore from saved state if no active terminals (once only)

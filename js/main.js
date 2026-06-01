@@ -20,7 +20,7 @@ import {
 import {
   connectWS, renderLayout, fitAllTerminals,
   updateTermHeaders, debouncedUpdateTermHeaders, closeTerminal,
-  openNewTermModal, openNewTermModalWithSplit, openTermWith,
+  openNewTermModal, openNewTermModalWithSplit, openHomeTerminal, openTermWith,
   toggleTermSearch, closeTermSearch, doTermSearch, exportTerminal,
   changeTermFontSize, resetTermFontSize, setupTermEventDelegation,
   loadBranchesForTerm, initFileDrop,
@@ -96,6 +96,7 @@ import { initPR } from './pr.js';
 
 // ─── Ports module ───
 import { initPorts, destroyPorts, refreshPorts, togglePortPause, filterPortSearch, toggleDevFilter } from './ports.js';
+import { initSupervisor, refreshSupervisor, setSupervisorFilter } from './supervisor.js';
 
 // ─── API Tester module ───
 import { initApiTester } from './api-tester.js';
@@ -859,6 +860,7 @@ subscribe('initPR', () => initPR());
 subscribe('initWorkflows', () => initWorkflows());
 subscribe('initPorts', () => initPorts());
 subscribe('destroyPorts', () => destroyPorts());
+subscribe('initSupervisor', () => initSupervisor());
 subscribe('initApiTester', () => initApiTester());
 
 async function showMobileConnect() {
@@ -925,6 +927,9 @@ registerClickActions({
   // Ports
   'port-refresh': refreshPorts,
   'port-toggle-pause': togglePortPause,
+  // Supervisor
+  'supervisor-refresh': refreshSupervisor,
+  'supervisor-filter': (el) => setSupervisorFilter(el.dataset.filter),
 });
 registerInputActions({
   'port-search': (el) => filterPortSearch(el.value),
@@ -1014,6 +1019,9 @@ document.addEventListener('keydown', e => {
   }
   if (mod && e.key === 't' && !e.shiftKey) {
     if (document.getElementById('terminal-view').classList.contains('active')) { e.preventDefault(); openNewTermModal(); return; }
+  }
+  if (mod && (e.key === 't' || e.key === 'T') && e.shiftKey) {
+    e.preventDefault(); openHomeTerminal(); return;
   }
   if (mod && e.key === 'w' && !e.shiftKey) {
     if (document.getElementById('terminal-view').classList.contains('active') && app.activeTermId) { e.preventDefault(); closeTerminal(app.activeTermId); return; }

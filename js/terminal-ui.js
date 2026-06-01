@@ -26,7 +26,8 @@ export function renderLayout() {
   if (!app.layoutRoot) {
     container.innerHTML = `<div class="term-empty">
         <div class="term-empty-icon">&#x2756;</div>
-        <button class="btn" data-action="new-term">+ New Terminal</button>
+        <button class="btn primary" data-action="new-home-term">+ 빈 터미널 (홈)</button>
+        <button class="btn" data-action="new-term">+ New Terminal (프로젝트)</button>
         <div class="term-empty-hint">Ctrl+T</div>
         <div class="term-empty-features">
           <span class="term-ef">&#x2194;&#xFE0F; Split</span>
@@ -48,6 +49,7 @@ export function renderLayout() {
         try { t.xterm.loadAddon(new ImageAddon.ImageAddon()); } catch { /* addon not available */ }
         t.opened = true;
         if (t.pendingBuffer) { t.xterm.write(t.pendingBuffer); t.pendingBuffer = null; }
+        guardXtermPaste(t);
       }
     }
     setTimeout(() => _core.fitAllTerminals(), 120);
@@ -68,7 +70,8 @@ function renderMobileLayout() {
   if (app.termMap.size === 0) {
     container.innerHTML = `<div class="term-empty">
         <div class="term-empty-icon">&#x2756;</div>
-        <button class="btn" data-action="new-term">+ New Terminal</button>
+        <button class="btn primary" data-action="new-home-term">+ 빈 터미널 (홈)</button>
+        <button class="btn" data-action="new-term">+ New Terminal (프로젝트)</button>
         <div class="term-empty-hint">Ctrl+T</div>
       </div>`;
     if (mobTabs) mobTabs.style.display = 'none';
@@ -101,11 +104,21 @@ function renderMobileLayout() {
     if (activeTab) activeTab.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
   }
 
-  // Render only the active terminal
+  // Render only the active terminal — chat-view 포함된 split-leaf wrapper 안에
   const activeT = app.termMap.get(app.activeTermId);
   if (activeT) {
+    const leaf = document.createElement('div');
+    leaf.className = 'split-leaf active mobile-leaf';
+    leaf.dataset.termId = app.activeTermId;
+    leaf.style.position = 'relative';
+    leaf.style.display = 'flex';
+    leaf.style.flexDirection = 'column';
+    leaf.style.flex = '1';
+    const p = app.projectList.find(pp => pp.id === activeT.projectId);
+    if (p?.path) leaf.dataset.projectPath = p.path;
     activeT.element.style.flex = '1';
-    container.appendChild(activeT.element);
+    leaf.appendChild(activeT.element);
+    container.appendChild(leaf);
     requestAnimationFrame(() => {
       if (!activeT.opened) {
         activeT.xterm.open(activeT.element);
@@ -113,6 +126,7 @@ function renderMobileLayout() {
         try { activeT.xterm.loadAddon(new ImageAddon.ImageAddon()); } catch { /* addon not available */ }
         activeT.opened = true;
         if (activeT.pendingBuffer) { activeT.xterm.write(activeT.pendingBuffer); activeT.pendingBuffer = null; }
+        guardXtermPaste(activeT);
       }
       setTimeout(() => { try { activeT.fitAddon.fit(); } catch { /* addon not available */ } }, 80);
       if (app.ws?.readyState === 1) app.ws.send(JSON.stringify({ type: 'resize', termId: app.activeTermId, cols: activeT.xterm.cols, rows: activeT.xterm.rows }));
@@ -132,6 +146,84 @@ export function mobileCloseTerm(termId) {
   renderMobileLayout();
 }
 
+// xterm 의 helper textarea 가 native paste 받는 경로 차단 (우클릭 붙여넣기 등)
+// — 이미지면 자동 업로드 + path 텍스트, 텍스트 binary 면 차단
+// 워크트리 path 에 새 터미널 — 같은 project, cwd 는 워크트리
+function openTerminalAtWorktree(projectId, wtPath) {
+  if (app.ws?.readyState !== 1) return;
+  // cockpit 의 새 터미널 생성 — cwd 지정 (server 가 project path 내부 검증함)
+  // 워크트리가 project path 안이면 cwd 그대로 전송. 밖이면 일반 cwd 후 cd 명령.
+  const proj = app.projectList.find(p => p.id === projectId);
+  const projPath = (proj?.path || '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  const wtNorm = wtPath.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  // boundary 정확히 — 같거나, project path + '/' 로 시작
+  const isInside = projPath && (wtNorm === projPath || wtNorm.startsWith(projPath + '/'));
+  const cols = 120, rows = 30;
+  if (isInside) {
+    // 직접 cwd 로 생성
+    app.ws.send(JSON.stringify({ type: 'create', projectId, cwd: wtPath, cols, rows }));
+    showToast(`새 터미널 → 워크트리 (${wtPath.split('/').pop()})`, 'success');
+  } else {
+    // project cwd 로 생성 후 cd
+    app.ws.send(JSON.stringify({ type: 'create', projectId, cols, rows }));
+    // 새 termId 알려면 created 메시지 기다려야 — 마지막에 생성된 거 기준
+    // 간단히 0.7초 후 가장 최근 termId 에 cd 명령
+    setTimeout(() => {
+      const ids = [...app.termMap.keys()];
+      const lastId = ids[ids.length - 1];
+      if (lastId && app.ws?.readyState === 1) {
+        const cmd = `cd ${JSON.stringify(wtPath)}\n`;
+        app.ws.send(JSON.stringify({ type: 'input', termId: lastId, data: cmd }));
+      }
+    }, 700);
+    showToast(`새 터미널 + cd → ${wtPath}`, 'success');
+  }
+}
+
+function guardXtermPaste(t, termId) {
+  if (!t || t._pasteGuarded) return;
+  const ta = t.element?.querySelector('.xterm-helper-textarea');
+  if (!ta) return;
+  const tid = termId || [...app.termMap.entries()].find(([, v]) => v === t)?.[0];
+  if (!tid) return;
+  t._pasteGuarded = true;
+  ta.addEventListener('paste', (e) => {
+    const items = e.clipboardData?.items || [];
+    // 이미지 우선 처리
+    for (const it of items) {
+      if (it.type && it.type.startsWith('image/')) {
+        e.preventDefault(); e.stopPropagation();
+        const blob = it.getAsFile();
+        if (!blob) return;
+        (async () => {
+          try {
+            const ext = (it.type.split('/')[1] || 'png').replace(/[^a-z0-9]/gi, '').toLowerCase();
+            const fd = new FormData();
+            fd.append('file', new File([blob], `paste.${ext}`, { type: it.type }));
+            const r = await fetch('/api/uploads', { method: 'POST', body: fd });
+            if (!r.ok) throw new Error('upload ' + r.status);
+            const { path } = await r.json();
+            if (path && app.ws?.readyState === 1) {
+              app.ws.send(JSON.stringify({ type: 'input', termId: tid, data: path + ' ' }));
+              showToast(`Image pasted → ${path}`, 'success');
+            }
+          } catch (err) {
+            showToast(`Image paste failed: ${err.message || err}`, 'error');
+          }
+        })();
+        return;
+      }
+    }
+    // 텍스트 — binary 가 들어있으면 차단
+    const text = e.clipboardData?.getData('text') || '';
+    if (/[\x00-\x08\x0E-\x1F]/.test(text.slice(0, 100))) {
+      e.preventDefault();
+      showToast('이미지 / binary 데이터라 paste 차단됨', 'warning');
+    }
+    // 일반 텍스트는 xterm 의 기본 처리에 위임
+  }, true); // capture phase 로 다른 핸들러 전에
+}
+
 function renderNode(node, container) {
   if (node.type === 'leaf') {
     const t = app.termMap.get(node.termId);
@@ -139,6 +231,10 @@ function renderNode(node, container) {
     const leaf = document.createElement('div');
     leaf.className = 'split-leaf'; leaf.dataset.termId = node.termId;
     leaf.style.display = 'flex'; leaf.style.flexDirection = 'column';
+    leaf.style.position = 'relative';
+    // 프로젝트 path → chat-view 의 session.jsonl 위치 결정
+    const p = app.projectList.find(pp => pp.id === t.projectId);
+    if (p?.path) leaf.dataset.projectPath = p.path;
     const head = document.createElement('div');
     head.className = 'term-head'; head.draggable = true; head.dataset.termId = node.termId; head.style.cursor = 'grab';
     leaf.appendChild(head); leaf.appendChild(t.element);
@@ -232,7 +328,7 @@ export function updateTermHeaders() {
     const bufUsed = t.xterm.buffer.active.length;
     const bufPct = Math.round(bufUsed / _core.getScrollback() * 100);
     const timerStr = t.createdAt ? fmtDuration(Date.now() - t.createdAt) : '';
-    const cacheKey = `${t.label}|${t.color}|${g.branch || ''}|${g.uncommittedCount || 0}|${model}|${nv}|${wt.length}|${tid === app.activeTermId}|${bufPct}|${timerStr}`;
+    const cacheKey = `${t.label}|${t.color}|${g.branch || ''}|${g.uncommittedCount || 0}|${model}|${nv}|${wt.length}|${tid === app.activeTermId}|${bufPct}|${timerStr}|${leaf.classList.contains('chat-active') ? 'c' : 's'}`;
     if (app._headCache.get(tid) === cacheKey) return;
     app._headCache.set(tid, cacheKey);
     const p = app.projectList.find(pp => pp.id === t.projectId);
@@ -241,7 +337,7 @@ export function updateTermHeaders() {
     let wtTag = '';
     if (wt.length > 1) {
       const wtName = currentWt ? currentWt.path.split('/').pop() : wt[0].path.split('/').pop();
-      const popoverItems = wt.map(w => { const isCur = w === currentWt; return `<div class="wt-popover-item${isCur ? ' wt-current' : ''}"><span class="wt-branch">${esc(w.branch || '?')}${isCur ? ' \u2190' : ''}</span><span class="wt-path">${esc(w.path)}</span></div>`; }).join('');
+      const popoverItems = wt.map(w => { const isCur = w === currentWt; return `<div class="wt-popover-item${isCur ? ' wt-current' : ''}" data-action="wt-open" data-wt-path="${esc(w.path)}" data-pid="${esc(t.projectId)}" title="${isCur ? '\ud604\uc7ac \uc6cc\ud06c\ud2b8\ub9ac' : '\uc0c8 \ud130\ubbf8\ub110 + \uc774 \uc6cc\ud06c\ud2b8\ub9ac\ub85c'}"><span class="wt-branch">${esc(w.branch || '?')}${isCur ? ' \u2190' : ''}</span><span class="wt-path">${esc(w.path)}</span></div>`; }).join('');
       wtTag = `<span class="th-tag th-worktree">${esc(wtName)} <span style="opacity:.5">+${wt.length - 1}</span><div class="wt-popover">${popoverItems}</div></span>`;
     }
     const projectPath = p?.path || '';
@@ -256,9 +352,30 @@ export function updateTermHeaders() {
       (bufPct >= 80 ? `<span class="th-tag th-buf" data-action="clear-buf" style="color:${bufPct >= 95 ? 'var(--red)' : 'var(--yellow)'};font-size:.7rem;cursor:pointer" title="Buffer ${bufPct}% — click to clear">${bufPct}%</span>` : '') +
       `<span class="th-spacer"></span>` +
       `<button class="th-close" data-action="close" title="Close">\u00d7</button>`;
+    // \ud604\uc7ac \ubaa8\ub4dc active \uc0c1\ud0dc \ubc18\uc601
+    {
+      const leafEl = head.parentElement;
+      const curMode = leafEl?.dataset?.mode || 'chat';
+      head.querySelectorAll('[data-cv-mode]').forEach((b) => {
+        b.classList.toggle('active', b.dataset.cvMode === curMode);
+      });
+    }
     head.onclick = e => {
       if (e.target.dataset.action === 'close') { e.stopPropagation(); _core.closeTerminal(tid); return; }
       if (e.target.dataset.action === 'clear-buf') { e.stopPropagation(); const tt = app.termMap.get(tid); if (tt?.xterm) { tt.xterm.clear(); showToast('Buffer cleared'); updateTermHeaders(); } return; }
+      if (e.target.dataset.cvMode) {
+        e.stopPropagation();
+        const newMode = e.target.dataset.cvMode;
+        const leaf2 = head.parentElement;
+        if (leaf2) {
+          leaf2.dataset.mode = newMode;
+          import('./chat-view.js').then((cv) => cv.setChatMode?.(tid, newMode)).catch(() => {});
+          const tt = app.termMap.get(tid);
+          setTimeout(() => { try { tt?.fitAddon?.fit(); } catch {} }, 50);
+          updateTermHeaders();
+        }
+        return;
+      }
       if (e.target.classList.contains('th-changes')) { e.stopPropagation(); showDiffForProject(e.target.dataset.pid); return; }
     };
     head.ondblclick = e => {
@@ -374,6 +491,7 @@ export function showTermCtxMenu(e, termId) {
   html += `<div class="ctx-item" data-act="split-h">${_ic('splitH')}Split Right</div>`;
   html += `<div class="ctx-item" data-act="split-v">${_ic('splitV')}Split Down</div>`;
   html += `<div class="ctx-item" data-act="new-term">${_ic('newTerm')}New Terminal</div>`;
+  html += `<div class="ctx-item" data-act="new-home-term">${_ic('newTerm')}빈 터미널 (홈)</div>`;
   html += `<div class="ctx-sep"></div>`;
 
   // Open ▸
@@ -395,6 +513,16 @@ export function showTermCtxMenu(e, termId) {
   html += `<div class="ctx-item" data-act="export">${_ic('export')}Export</div>`;
   html += `<div class="ctx-item" data-act="rename">${_ic('rename')}Rename</div>`;
   html += `</div>`;
+
+  // Layout ▸ (정리) — 터미널 2개 이상일 때만
+  if (termCount > 1) {
+    html += `<div class="ctx-item ctx-toggle" data-sub="arrange">${_ic('splitH')}정리<span class="ctx-chevron">${_ci.chevron}</span></div>`;
+    html += `<div class="ctx-panel" data-sub-id="arrange">`;
+    html += `<div class="ctx-item" data-act="arrange-grid">${_ic('splitH')}그리드 (2x2)</div>`;
+    html += `<div class="ctx-item" data-act="arrange-cols">${_ic('splitH')}가로 일렬</div>`;
+    html += `<div class="ctx-item" data-act="arrange-rows">${_ic('splitV')}세로 일렬</div>`;
+    html += `</div>`;
+  }
 
   html += `<div class="ctx-sep"></div>`;
   if (g.uncommittedCount > 0) html += `<div class="ctx-item" data-act="diff">${_ic('git')}Changes<span class="ctx-badge">${g.uncommittedCount}</span></div>`;
@@ -492,6 +620,10 @@ export function showTermCtxMenu(e, termId) {
       case 'split-h': _core.openNewTermModalWithSplit(termId, 'right'); break;
       case 'split-v': _core.openNewTermModalWithSplit(termId, 'bottom'); break;
       case 'new-term': _core.openTermWith(t.projectId); break;
+      case 'new-home-term': _core.openHomeTerminal(); break;
+      case 'arrange-grid': _core.arrangeTerminals('grid'); break;
+      case 'arrange-cols': _core.arrangeTerminals('cols'); break;
+      case 'arrange-rows': _core.arrangeTerminals('rows'); break;
       case 'ide': openInIDEProject(t.projectId, item.dataset.ide); break;
       case 'firefox-dev': openInFirefoxDevFromTerm(t.projectId); break;
       case 'folder': fetch('/api/open-folder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: app.projectList.find(p => p.id === t.projectId)?.path }) }).catch(() => {}); break;
@@ -624,6 +756,7 @@ export function setupTermEventDelegation() {
       if (!el) return;
       switch (el.dataset.action) {
         case 'new-term': _core.openNewTermModal(); break;
+        case 'new-home-term': _core.openHomeTerminal(); break;
         case 'mob-switch': mobileSwitchTerm(el.dataset.termid); break;
       }
     });
@@ -716,6 +849,20 @@ export function setupTermEventDelegation() {
   // Hide selection toolbar on click anywhere in term panels
   _termPanels.addEventListener('mousedown', e => {
     if (!e.target.closest('.term-selection-toolbar')) hideSelectionToolbar();
+  });
+  // 워크트리 popover 항목 클릭 → 새 터미널 + cd to worktree
+  _termPanels.addEventListener('click', e => {
+    const item = e.target.closest('[data-action="wt-open"]');
+    if (!item) return;
+    e.preventDefault(); e.stopPropagation();
+    const wtPath = item.dataset.wtPath;
+    const pid = item.dataset.pid;
+    if (!wtPath || !pid || app.ws?.readyState !== 1) return;
+    if (item.classList.contains('wt-current')) {
+      showToast('이미 이 워크트리에 있는 터미널이 있어요', 'info');
+      return;
+    }
+    openTerminalAtWorktree(pid, wtPath);
   });
   // Resize observer
   const termPanelsObs = new ResizeObserver(() => _core.debouncedFit());
@@ -1359,6 +1506,7 @@ export function scanOutput(t, data, termId) {
 registerClickActions({
   'toggle-broadcast': toggleBroadcastMode,
   'new-term': () => _core.openNewTermModal(),
+  'new-home-term': () => _core.openHomeTerminal(),
   'ts-toggle-case': (el) => { el.classList.toggle('active'); _core.doTermSearch('next'); },
   'ts-toggle-regex': (el) => { el.classList.toggle('active'); _core.doTermSearch('next'); },
   'term-search-prev': () => _core.doTermSearch('prev'),

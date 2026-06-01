@@ -202,24 +202,24 @@ const AGENTS = {
 ## 5. 테스트 방법
 
 ### 환경
-- **소스**: `C:/_project/template/dashboard/`
-- **실행**: `C:/Users/RST/AppData/Local/Cockpit/` (소스에서 복사)
-- **Dev Server**: `c:\tmp\start-devserver.bat` → port 3848
+- **소스**: `<repo>/` (클론한 저장소 루트)
+- **실행**: `%LOCALAPPDATA%/Cockpit/` (소스에서 복사)
+- **Dev Server**: `start-devserver.bat` → port 3848
 - **Cockpit App**: port 3847 (프로덕션)
 
 ### 테스트 절차
 
 ```bash
 # 1. 파일 배포
-SRC="c:/_project/template/dashboard"
-DST="C:/Users/RST/AppData/Local/Cockpit"
+SRC="<repo>"                    # 클론한 저장소 루트
+DST="$LOCALAPPDATA/Cockpit"
 cp "$SRC/lib/project-plan.js" "$DST/lib/project-plan.js"
 cp "$SRC/lib/agent-tools.js" "$DST/lib/agent-tools.js"
 cp "$SRC/routes/project-plan.js" "$DST/routes/project-plan.js"
 cp "$SRC/server.js" "$DST/server.js"
 
 # 2. 워크트리 정리
-cd c:/_project/side/test-autobuild
+cd <test-project>              # autobuild 테스트용 프로젝트 경로
 git worktree prune
 git worktree list | grep autobuild | awk '{print $1}' | xargs -I{} git worktree remove {} --force
 git branch | grep autobuild | xargs -r git branch -D

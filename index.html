@@ -15,6 +15,36 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
+    <style>
+      @font-face {
+        font-family: 'Pretendard Variable';
+        font-weight: 45 920;
+        font-style: normal;
+        font-display: swap;
+        src: url('/vendor/fonts/PretendardVariable.woff2') format('woff2-variations');
+      }
+      @font-face {
+        font-family: 'JetBrains Mono';
+        font-weight: 500;
+        font-style: normal;
+        font-display: swap;
+        src: url('/vendor/fonts/JetBrainsMono-Regular.woff2') format('woff2');
+      }
+      @font-face {
+        font-family: 'JetBrains Mono';
+        font-weight: 700 800;
+        font-style: normal;
+        font-display: swap;
+        src: url('/vendor/fonts/JetBrainsMono-Bold.woff2') format('woff2');
+      }
+      @font-face {
+        font-family: 'JetBrains Mono';
+        font-weight: 400;
+        font-style: italic;
+        font-display: swap;
+        src: url('/vendor/fonts/JetBrainsMono-Italic.woff2') format('woff2');
+      }
+    </style>
     <link rel="stylesheet" href="/vendor/xterm.min.css" />
     <script src="/vendor/xterm.min.js"></script>
     <script src="/vendor/addon-fit.min.js"></script>
@@ -40,6 +70,8 @@
     <link rel="stylesheet" href="/css/workflows.css" />
     <link rel="stylesheet" href="/css/agent.css" />
     <link rel="stylesheet" href="/css/company.css" />
+    <link rel="stylesheet" href="/css/supervisor.css" />
+    <link rel="stylesheet" href="/css/xterm-skin.css" />
   </head>
   <body>
     <header>
@@ -147,6 +179,13 @@
             />
           </svg>
           <span class="tab-label">README</span>
+        </button>
+        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="supervisor-view" title="Supervisor" data-action="switch-view" data-view="supervisor">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 2l8 4v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6z" />
+            <path d="M9 12l2 2 4-4" />
+          </svg>
+          <span class="tab-label">Supervisor</span>
         </button>
         <div class="nav-more-wrap" id="nav-more-wrap">
           <button class="nav-tab nav-more-btn" id="nav-more-btn" data-action="toggle-nav-more" title="More tabs">
@@ -1093,6 +1132,28 @@
           </div>
         </div>
         <div class="port-content" id="port-content"></div>
+      </div>
+
+      <!-- Supervisor View -->
+      <div class="view" id="supervisor-view" role="tabpanel">
+        <div class="sv-toolbar">
+          <div class="sv-toolbar-left">
+            <h3 class="sv-title">Supervisor</h3>
+            <span class="sv-pending" id="sv-pending">대기 없음</span>
+          </div>
+          <div class="sv-toolbar-right">
+            <div class="sv-filters" role="group" aria-label="결정 필터">
+              <button class="sv-filter active" data-action="supervisor-filter" data-filter="all">전체 <span class="sv-filter-count">0</span></button>
+              <button class="sv-filter" data-action="supervisor-filter" data-filter="approve">승인 <span class="sv-filter-count">0</span></button>
+              <button class="sv-filter" data-action="supervisor-filter" data-filter="block">차단 <span class="sv-filter-count">0</span></button>
+              <button class="sv-filter" data-action="supervisor-filter" data-filter="ask">질문 <span class="sv-filter-count">0</span></button>
+            </div>
+            <button class="dt-icon-btn" data-action="supervisor-refresh" title="새로고침" aria-label="새로고침">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 105.64-8.36L1 10"/></svg>
+            </button>
+          </div>
+        </div>
+        <ul class="sv-feed" id="sv-feed"></ul>
       </div>
 
       <!-- API Tester View -->

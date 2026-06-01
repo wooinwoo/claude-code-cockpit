@@ -36,6 +36,13 @@ export {
 
 let _splitTarget = null;
 
+// ─── Chat View 연결 (모드 = chat 일 때 PTY 데이터 카드 렌더) ───
+let _chatViewModule = null;
+async function getChatView() {
+  if (!_chatViewModule) _chatViewModule = await import('./chat-view.js');
+  return _chatViewModule;
+}
+
 // ─── Write Buffer ───
 function bufferWrite(t, data, id) {
   if (!id) { t.xterm.write(data); return; }
@@ -123,9 +130,10 @@ export function connectWS() {
     app._wsBackoff = 1000;
     app._wsConnectedAt = Date.now();
     showDisconnectIndicator(false);
-    // Refresh terminal headers every 30s for session timer
     if (app._termTimerInterval) clearInterval(app._termTimerInterval);
     app._termTimerInterval = setInterval(() => { if (app.termMap.size) updateTermHeaders(); }, 30000);
+    // chat-view fs.watch 재구독 (재연결 시)
+    setTimeout(() => { if (typeof window.cvRewatchAll === 'function') window.cvRewatchAll(); }, 200);
   };
   ws.onmessage = e => {
     const msg = JSON.parse(e.data);
@@ -167,6 +175,11 @@ export function connectWS() {
         }
         break;
       }
+      case 'session-update': {
+        // chat-view \uc758 fs.watch push \ucc98\ub9ac
+        if (typeof window.cvOnSessionUpdate === 'function') window.cvOnSessionUpdate(msg.termId);
+        break;
+      }
     }
     } catch (err) { console.error('[WS] message handler error', err); }
   };
@@ -195,16 +208,65 @@ export function connectWS() {
 // ─── Add Terminal ───
 export function addTerminal(termId, projectId, addToView) {
   if (typeof Terminal === 'undefined') { showToast('xterm.js not loaded', 'error'); return; }
+  console.log('[SKIN-v2] addTerminal — new theme (#0a0b16 + JetBrains Mono) applied');
   const project = app.projectList.find(p => p.id === projectId);
   const color = project?.color || '#666';
-  const name = project?.name || projectId;
-  const darkTheme = { background: '#08090d', foreground: '#e8e9f0', cursor: '#818cf8', selectionBackground: 'rgba(129,140,248,.3)', black: '#08090d', red: '#f87171', green: '#34d399', yellow: '#fbbf24', blue: '#60a5fa', magenta: '#c084fc', cyan: '#22d3ee', white: '#e8e9f0' };
-  const lightTheme = { background: '#ffffff', foreground: '#1e293b', cursor: '#6366f1', selectionBackground: 'rgba(99,102,241,.2)', black: '#1e293b', red: '#dc2626', green: '#16a34a', yellow: '#ca8a04', blue: '#2563eb', magenta: '#9333ea', cyan: '#0891b2', white: '#f8fafc' };
+  const name = project?.name || (projectId === '__home__' ? 'Home' : projectId);
+  // 다크 테마 — 가독성 우선. 보라 톤 제거, 부드러운 다크 그레이 + 분홍/시안 액센트
+  const darkTheme = {
+    background: '#15171c',           // 부드러운 다크 그레이 (보라 없음, 살짝 푸른 톤)
+    foreground: '#f5f1e8',           // 따뜻한 크림 화이트
+    cursor: '#7ee8fb',                // 시안 (보라 빼고 가독성)
+    cursorAccent: '#15171c',
+    selectionBackground: 'rgba(126,232,251,.25)',
+    selectionForeground: '#ffffff',
+    black: '#1c1e26',
+    red: '#ff8088',                   // 부드러운 산호
+    green: '#8fef8b',                 // 살짝 라임
+    yellow: '#ffd866',                // 꿀 톤
+    blue: '#82b0ff',                  // 부드러운 청
+    magenta: '#ff8fb8',               // 분홍 (보라 X)
+    cyan: '#7ee8fb',                  // 시안
+    white: '#f5f1e8',
+    brightBlack: '#6e7281',           // dim 텍스트 — 잘 보이게 명도 상향
+    brightRed: '#ffa7ad',
+    brightGreen: '#aff5ad',
+    brightYellow: '#ffe39c',
+    brightBlue: '#a8c8ff',
+    brightMagenta: '#ffb1d0',         // 밝은 분홍
+    brightCyan: '#a8f0ff',
+    brightWhite: '#ffffff',
+  };
+  const lightTheme = {
+    background: '#fdfcfa',
+    foreground: '#1e1f2a',
+    cursor: '#6366f1',
+    cursorAccent: '#fdfcfa',
+    selectionBackground: 'rgba(99,102,241,.22)',
+    black: '#1e1f2a',
+    red: '#dc2626', green: '#16a34a', yellow: '#ca8a04',
+    blue: '#2563eb', magenta: '#9333ea', cyan: '#0891b2',
+    white: '#f0eff5',
+  };
   const xterm = new Terminal({
     theme: app.currentTheme === 'light' ? lightTheme : darkTheme,
-    fontFamily: "'Cascadia Code','JetBrains Mono',monospace",
-    fontSize: app.termFontSize,
-    cursorBlink: true, allowProposedApi: true, scrollback: getScrollback(), fastScrollModifier: 'alt', fastScrollSensitivity: 5,
+    fontFamily: "'JetBrains Mono','Cascadia Code','D2Coding','NanumGothicCoding','Pretendard Variable',monospace",
+    fontSize: Math.max(16, app.termFontSize || 14),  // 최소 16
+    fontWeight: '500',
+    fontWeightBold: '800',
+    letterSpacing: 0,
+    lineHeight: 1.4,
+    cursorBlink: true,
+    cursorStyle: 'bar',
+    cursorWidth: 3,
+    cursorInactiveStyle: 'outline',
+    allowProposedApi: true,
+    scrollback: getScrollback(),
+    fastScrollModifier: 'alt',
+    fastScrollSensitivity: 5,
+    minimumContrastRatio: 4.5,  // WCAG AA — dim 텍스트 강제로 보이게
+    smoothScrollDuration: 120,
+    drawBoldTextInBrightColors: true,
   });
   const fitAddon = new FitAddon.FitAddon();
   xterm.loadAddon(fitAddon);
@@ -265,30 +327,47 @@ export function addTerminal(termId, projectId, addToView) {
     if (ev.ctrlKey && (ev.key === 'v' || ev.key === 'V')) {
       ev.preventDefault();
       (async () => {
+        // 1) 이미지 우선 — clipboard.read() 로 image MIME 찾기
+        let hasImage = false;
         try {
           const items = await navigator.clipboard.read();
           for (const item of items) {
             const imgType = item.types.find(t => t.startsWith('image/'));
-            if (imgType) {
-              const blob = await item.getType(imgType);
-              const resp = await fetch('/api/upload-image', { method: 'POST', headers: { 'Content-Type': imgType }, body: blob });
-              const { path } = await resp.json();
+            if (!imgType) continue;
+            hasImage = true;
+            const blob = await item.getType(imgType);
+            try {
+              const ext = (imgType.split('/')[1] || 'png').replace(/[^a-z0-9]/gi, '').toLowerCase();
+              const fd = new FormData();
+              fd.append('file', new File([blob], `paste.${ext}`, { type: imgType }));
+              const r = await fetch('/api/uploads', { method: 'POST', body: fd });
+              if (!r.ok) throw new Error('upload ' + r.status);
+              const { path } = await r.json();
               if (path && app.ws?.readyState === 1) {
                 app.ws.send(JSON.stringify({ type: 'input', termId, data: path + ' ' }));
                 const thumb = URL.createObjectURL(blob);
                 showToast(`<img src="${thumb}" style="max-width:120px;max-height:80px;border-radius:6px;vertical-align:middle;margin-right:6px" onload="URL.revokeObjectURL(this.src)">Image pasted`, 'success', 3000, true);
               }
-              return;
+            } catch (e) {
+              showToast(`Image paste failed: ${e.message || e}`, 'error');
             }
+            return; // 이미지 처리 후 텍스트 paste 안 함
           }
-        } catch { /* clipboard.read() not supported — fall through to text */ }
+        } catch { /* clipboard.read() 미지원 또는 권한 거부 — text 로 fallback */ }
+        // 2) 텍스트 paste — 단 이미지가 클립보드에 있으면 절대 텍스트로 안 감
+        if (hasImage) return;
         try {
           const t = await navigator.clipboard.readText();
           if (!t || app.ws?.readyState !== 1) return;
+          // 비 ASCII binary 가 들어오면 차단 (이미지 raw 가 텍스트로 변환된 경우)
+          if (/[\x00-\x08\x0E-\x1F]/.test(t.slice(0, 100))) {
+            showToast('이미지 또는 binary 라서 paste 차단됨 (텍스트만 가능)', 'warning');
+            return;
+          }
           const data = t.includes('\n') ? `\x1b[200~${t}\x1b[201~` : t;
           app.ws.send(JSON.stringify({ type: 'input', termId, data }));
         } catch {
-          // Fallback: use hidden textarea for paste (works in Tauri WebView)
+          // Fallback: hidden textarea (Tauri WebView)
           try {
             const ta = document.createElement('textarea');
             ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px';
@@ -297,10 +376,13 @@ export function addTerminal(termId, projectId, addToView) {
             document.execCommand('paste');
             const t = ta.value;
             document.body.removeChild(ta);
-            if (t && app.ws?.readyState === 1) {
-              const data = t.includes('\n') ? `\x1b[200~${t}\x1b[201~` : t;
-              app.ws.send(JSON.stringify({ type: 'input', termId, data }));
+            if (!t || app.ws?.readyState !== 1) return;
+            if (/[\x00-\x08\x0E-\x1F]/.test(t.slice(0, 100))) {
+              showToast('이미지 또는 binary 라서 paste 차단됨', 'warning');
+              return;
             }
+            const data = t.includes('\n') ? `\x1b[200~${t}\x1b[201~` : t;
+            app.ws.send(JSON.stringify({ type: 'input', termId, data }));
           } catch { /* all paste methods failed */ }
         }
       })();
@@ -394,6 +476,46 @@ export function removeFromLayoutTree(termId) {
   app.layoutRoot = collapse(app.layoutRoot);
 }
 
+// ─── Layout Presets (정리) ───
+// 현재 열린 터미널들을 순서대로 모아 균형 트리로 재배치
+function collectLeaves(node, acc = []) {
+  if (!node) return acc;
+  if (node.type === 'leaf') { acc.push(node.termId); return acc; }
+  collectLeaves(node.children[0], acc);
+  collectLeaves(node.children[1], acc);
+  return acc;
+}
+
+// 노드 배열을 절반씩 나눠 균등 비율(leaf 수 기준)의 split 트리로 결합
+function balanceNodes(nodes, dir) {
+  if (nodes.length === 1) return nodes[0];
+  const mid = Math.ceil(nodes.length / 2);
+  const left = nodes.slice(0, mid);
+  const right = nodes.slice(mid);
+  return { type: 'split', dir, ratio: left.length / nodes.length, children: [balanceNodes(left, dir), balanceNodes(right, dir)] };
+}
+
+// mode: 'grid'(2x2 등) | 'cols'(가로 일렬) | 'rows'(세로 일렬)
+export function arrangeTerminals(mode) {
+  if (!app.layoutRoot) return;
+  const ids = collectLeaves(app.layoutRoot).filter(id => app.termMap.has(id));
+  if (ids.length < 2) { showToast('터미널이 2개 이상일 때 정리할 수 있어요'); return; }
+  const leafOf = id => ({ type: 'leaf', termId: id });
+  let root;
+  if (mode === 'rows') root = balanceNodes(ids.map(leafOf), 'v');
+  else if (mode === 'cols') root = balanceNodes(ids.map(leafOf), 'h');
+  else { // grid — cols=ceil(sqrt(n)), 각 행은 좌우(h), 행끼리는 상하(v)
+    const cols = Math.ceil(Math.sqrt(ids.length));
+    const rows = [];
+    for (let i = 0; i < ids.length; i += cols) rows.push(balanceNodes(ids.slice(i, i + cols).map(leafOf), 'h'));
+    root = balanceNodes(rows, 'v');
+  }
+  app.layoutRoot = root;
+  renderLayout();
+  saveLayout();
+  debouncedFit();
+}
+
 // ─── Close/Fit ───
 export function closeTerminal(id) {
   const t = app.termMap.get(id);
@@ -404,6 +526,8 @@ export function closeTerminal(id) {
   const wb = app.writeBuffers.get(id);
   if (wb) { if (wb.timer) cancelAnimationFrame(wb.timer); app.writeBuffers.delete(id); }
   app._headCache.delete(id);
+  // chat-view 폴링/watch 정리 (메모리 누수 방지)
+  import('./chat-view.js').then(m => m.cleanupChatView?.(id));
   removeFromLayoutTree(id);
   if (app.activeTermId === id) { const first = app.termMap.keys().next().value; app.activeTermId = first || null; }
   renderLayout(); updateTermHeaders();
@@ -426,7 +550,8 @@ export function debouncedFit() {
 // ─── New Terminal ───
 export function openNewTermModal() {
   const sel = document.getElementById('nt-project');
-  sel.innerHTML = app.projectList.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
+  sel.innerHTML = `<option value="__home__">빈 터미널 (홈)</option>`
+    + app.projectList.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('');
   // Pre-select active terminal's project
   const activeT = app.activeTermId ? app.termMap.get(app.activeTermId) : null;
   if (activeT?.projectId) sel.value = activeT.projectId;
@@ -451,6 +576,14 @@ export function createTerminal() {
     return;
   }
   app.ws.send(JSON.stringify(msg));
+  notify('switchView', 'terminal');
+}
+
+// 모달 없이 즉시 빈 터미널(홈 디렉터리, 프로젝트 비종속) 열기
+export function openHomeTerminal() {
+  if (!app.ws || app.ws.readyState !== WebSocket.OPEN) { showToast('Terminal not connected', 'error'); return; }
+  app._selectedBranch = null;
+  app.ws.send(JSON.stringify({ type: 'create', projectId: '__home__', cols: 120, rows: 30 }));
   notify('switchView', 'terminal');
 }
 
@@ -541,13 +674,35 @@ export function doTermSearch(dir) {
   if (countEl) countEl.textContent = found ? '' : 'No match';
 }
 
-// ─── Terminal Theme Sync ───
+// ─── Terminal Theme Sync (addTerminal 과 동일 옵션 라이브 적용) ───
 export function updateTermTheme() {
-  const darkTheme = { background: '#08090d', foreground: '#e8e9f0', cursor: '#818cf8', selectionBackground: 'rgba(129,140,248,.3)', black: '#08090d', red: '#f87171', green: '#34d399', yellow: '#fbbf24', blue: '#60a5fa', magenta: '#c084fc', cyan: '#22d3ee', white: '#e8e9f0' };
-  const lightTheme = { background: '#ffffff', foreground: '#1e293b', cursor: '#6366f1', selectionBackground: 'rgba(99,102,241,.2)', black: '#1e293b', red: '#dc2626', green: '#16a34a', yellow: '#ca8a04', blue: '#2563eb', magenta: '#9333ea', cyan: '#0891b2', white: '#f8fafc' };
+  const darkTheme = {
+    background: '#15171c', foreground: '#f5f1e8', cursor: '#7ee8fb', cursorAccent: '#15171c',
+    selectionBackground: 'rgba(126,232,251,.25)', selectionForeground: '#ffffff',
+    black: '#1c1e26', red: '#ff8088', green: '#8fef8b', yellow: '#ffd866',
+    blue: '#82b0ff', magenta: '#ff8fb8', cyan: '#7ee8fb', white: '#f5f1e8',
+    brightBlack: '#6e7281', brightRed: '#ffa7ad', brightGreen: '#aff5ad',
+    brightYellow: '#ffe39c', brightBlue: '#a8c8ff', brightMagenta: '#ffb1d0',
+    brightCyan: '#a8f0ff', brightWhite: '#ffffff',
+  };
+  const lightTheme = {
+    background: '#fdfcfa', foreground: '#1e1f2a', cursor: '#6366f1', cursorAccent: '#fdfcfa',
+    selectionBackground: 'rgba(99,102,241,.22)',
+    black: '#1e1f2a', red: '#dc2626', green: '#16a34a', yellow: '#ca8a04',
+    blue: '#2563eb', magenta: '#9333ea', cyan: '#0891b2', white: '#f0eff5',
+  };
   const theme = app.currentTheme === 'light' ? lightTheme : darkTheme;
   for (const [, t] of app.termMap) {
     t.xterm.options.theme = theme;
+    t.xterm.options.fontFamily = "'JetBrains Mono','Cascadia Code','D2Coding','NanumGothicCoding','Pretendard Variable',monospace";
+    t.xterm.options.fontWeight = '500';
+    t.xterm.options.fontWeightBold = '800';
+    t.xterm.options.letterSpacing = 0;
+    t.xterm.options.lineHeight = 1.4;
+    t.xterm.options.cursorStyle = 'bar';
+    t.xterm.options.cursorWidth = 3;
+    t.xterm.options.minimumContrastRatio = 4.5;
+    t.fitAddon?.fit?.();
   }
 }
 
@@ -618,7 +773,7 @@ export async function loadBranchesForTerm() {
   const section = document.getElementById('nt-branch-section');
   const list = document.getElementById('nt-branch-list');
   app._selectedBranch = null;
-  if (!projectId) { section.style.display = 'none'; return; }
+  if (!projectId || projectId === '__home__') { section.style.display = 'none'; return; }
   section.style.display = '';
   list.innerHTML = '<div style="padding:10px;color:var(--text-3);font-size:.78rem">Loading...</div>';
   try {
@@ -663,7 +818,9 @@ initTermUI({
   closeTerminal,
   openNewTermModal,
   openNewTermModalWithSplit,
+  openHomeTerminal,
   openTermWith,
+  arrangeTerminals,
   createTerminal,
   selectBranch,
   loadBranchesForTerm,

@@ -28,10 +28,10 @@ Tauri Shell (cockpit.exe / Cockpit.app)
 
 | 용도 | 경로 |
 |------|------|
-| **소스 (개발)** | `c:/_project/template/wiw_claude-code/dashboard/` |
-| **실행 (Cockpit 앱)** | `C:/Users/RST/AppData/Local/Cockpit/` |
+| **소스 (개발)** | `<repo>/` (클론한 저장소 루트) |
+| **실행 (Cockpit 앱)** | `%LOCALAPPDATA%/Cockpit/` (Windows) / `~/.local/share/Cockpit/` (Linux·macOS) |
 
-- `cockpit.exe`는 `C:/Users/RST/AppData/Local/Cockpit/`에서 `server.js`를 실행
+- `cockpit.exe`는 `%LOCALAPPDATA%/Cockpit/`에서 `server.js`를 실행
 - `__dirname`이 Cockpit 디렉토리를 가리킴
 - **파일 수정 후 반드시 Cockpit 디렉토리에도 복사해야 반영됨**
 - `server.js` 변경 시 앱 재시작 필요 (프론트엔드 파일은 `Cache-Control: no-store`라 새로고침만으로 반영)
@@ -39,8 +39,8 @@ Tauri Shell (cockpit.exe / Cockpit.app)
 ### 배포 절차
 
 ```bash
-SRC="c:/_project/template/wiw_claude-code/dashboard"
-DST="C:/Users/RST/AppData/Local/Cockpit"
+SRC="<repo>"                      # 클론한 저장소 루트
+DST="$LOCALAPPDATA/Cockpit"       # Windows. Linux·macOS: ~/.local/share/Cockpit
 cp "$SRC/파일명" "$DST/파일명"
 ```
 

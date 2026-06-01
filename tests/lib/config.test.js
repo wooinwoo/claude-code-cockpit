@@ -82,13 +82,13 @@ describe('generateColor', () => {
 
 describe('toClaudeProjectDir', () => {
   it('replaces slashes and colons with hyphens (Windows path)', () => {
-    const result = toClaudeProjectDir('C:/Users/RST/projects/my-app');
-    assert.strictEqual(result, 'C--Users-RST-projects-my-app');
+    const result = toClaudeProjectDir('C:/Users/Dev/projects/my-app');
+    assert.strictEqual(result, 'C--Users-Dev-projects-my-app');
   });
 
   it('replaces backslashes with hyphens', () => {
-    const result = toClaudeProjectDir('C:\\Users\\RST\\projects');
-    assert.strictEqual(result, 'C--Users-RST-projects');
+    const result = toClaudeProjectDir('C:\\Users\\Dev\\projects');
+    assert.strictEqual(result, 'C--Users-Dev-projects');
   });
 
   it('preserves alphanumeric characters', () => {

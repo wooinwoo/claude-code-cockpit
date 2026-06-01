@@ -2,7 +2,8 @@
 # Run this script once as Administrator to enable auto-start
 
 $taskName = "ClaudeCodeDashboard"
-$batPath = "C:\_project\template\wiw_claude-code\dashboard\autostart.bat"
+# 이 스크립트와 같은 폴더의 autostart.bat 을 자동 참조 (경로 하드코딩 X)
+$batPath = Join-Path $PSScriptRoot "autostart.bat"
 
 # Remove existing task if present
 schtasks /delete /tn $taskName /f 2>$null

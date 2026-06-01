@@ -14,6 +14,7 @@ cockpit.exe
 # Secrets & credentials
 .cockpit-token
 jira-config.json
+telegram-config.json
 .env
 .env.*
 
@@ -31,6 +32,9 @@ workflows/
 # Logs
 *.log
 npm-debug.log*
+
+# Supervisor / Telegram 런타임 로그 (권한 결정 이력 — 명령·경로·세션ID 포함, 절대 커밋 X)
+logs/
 
 # OS files
 .DS_Store
@@ -50,3 +54,6 @@ test-*
 *.swp
 *.swo
 *~
+
+# Claude Code 개인 설정 (머신별 경로/권한 — 공유 X)
+.claude/settings.local.json
