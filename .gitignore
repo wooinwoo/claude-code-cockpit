@@ -1,0 +1,62 @@
+# Dependencies
+node_modules/
+
+# ncc bundle output
+dist/
+
+# Tauri build artifacts
+src-tauri/target/
+
+# Built binary
+cockpit.exe
+*.app
+
+# Secrets & credentials
+.cockpit-token
+jira-config.json
+telegram-config.json
+.env
+.env.*
+
+# Runtime state & cache
+session-state.json
+cost-cache.json
+agent-history.json
+workflow-runs.json
+
+# User-specific data
+projects.json
+notes/
+workflows/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Supervisor / Telegram 런타임 로그 (권한 결정 이력 — 명령·경로·세션ID 포함, 절대 커밋 X)
+logs/
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Test/debug files
+test-*
+*.png
+*.jpg
+*.jpeg
+
+# Tooling
+.playwright-mcp/
+
+# Editor
+*.swp
+*.swo
+*~
+
+# Claude Code 개인 설정 (머신별 경로/권한 — 공유 X)
+.claude/settings.local.json
+
+# worktrees
+.claude/worktrees/

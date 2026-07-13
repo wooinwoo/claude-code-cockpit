@@ -1,0 +1,51 @@
+{
+  "id": "tech-radar",
+  "name": "기술 트렌드 레이더",
+  "description": "HN/Reddit/GitHub Trending 병렬 크롤링 → 우리 스택 기준 필터 → 주간 리포트",
+  "maxIterations": 1,
+  "inputs": [
+    { "key": "stack", "label": "현재 기술스택 (예: React, NestJS, PostgreSQL, AWS)", "type": "text", "required": true },
+    { "key": "interests", "label": "관심 분야 (예: AI, 성능, 보안, DevOps)", "type": "text", "default": "전체" }
+  ],
+  "steps": [
+    {
+      "id": "hn_scout",
+      "name": "HN/블로그 스카우터",
+      "type": "llm",
+      "role": "Hacker News와 기술 블로그 전문 리서처.",
+      "provider": "gemini",
+      "model": "gemini-2.5-flash",
+      "timeout": 180000,
+      "tools": ["WebSearch", "WebFetch"],
+      "prompt": "관심 스택: {{stack}}\n관심 분야: {{interests}}\n\nHacker News, 주요 기술 블로그(The Pragmatic Engineer, ByteByteGo, etc.)에서 최근 1주일간 화제가 된 기술 소식을 검색해라.\n\n각 항목:\n- 제목 + URL\n- 핵심 내용 (2-3줄)\n- 우리 스택({{stack}})과의 관련성 (높음/보통/낮음)\n- HN 포인트/댓글 수 (있으면)\n\n최소 5-7개 항목을 찾아라.",
+      "outputKey": "hn_findings"
+    },
+    {
+      "id": "github_scout",
+      "name": "GitHub 트렌딩 스카우터",
+      "type": "llm",
+      "role": "GitHub Trending과 오픈소스 생태계 리서처.",
+      "provider": "gemini",
+      "model": "gemini-2.5-flash",
+      "timeout": 180000,
+      "tools": ["WebSearch", "WebFetch"],
+      "prompt": "관심 스택: {{stack}}\n관심 분야: {{interests}}\n\nGitHub Trending, Product Hunt, dev.to에서 최근 주목받는 도구/라이브러리/프레임워크를 검색해라.\n\n각 항목:\n- 이름 + GitHub URL\n- 설명 (한 줄)\n- 스타 수, 최근 증가 추세\n- 우리 스택과의 관련성\n- 실무 적용 가능성 (바로 쓸 수 있다 / 지켜볼 만하다 / 참고만)\n\n최소 5-7개 항목을 찾아라.",
+      "outputKey": "github_findings"
+    },
+    {
+      "id": "curator",
+      "name": "트렌드 큐레이터",
+      "type": "llm",
+      "role": "시니어 개발자 겸 기술 에디터. 수집된 정보를 팀에게 유용한 형태로 큐레이션한다.",
+      "provider": "claude",
+      "model": "sonnet",
+      "prompt": "## 우리 스택\n{{stack}}\n\n## HN/블로그 소식\n{{hn_findings}}\n\n## GitHub 트렌딩\n{{github_findings}}\n\n주간 기술 레이더 리포트를 작성해라.\n\n### 🔥 이번 주 핫토픽 (Top 3)\n가장 주목할 만한 것 3개, 왜 중요한지\n\n### 📦 체크할 도구/라이브러리\n실무 적용 가능성 높은 것 (우리 스택 기준)\n\n### 📰 업계 동향\n큰 그림에서 알아둘 트렌드\n\n### 💡 팀 액션 아이템\n- 지금 시도해볼 것\n- 다음 분기 검토할 것\n- 지켜볼 것\n\n간결하고 실용적으로. 링크 포함.",
+      "outputKey": "radar"
+    }
+  ],
+  "edges": [
+    { "from": "START", "to": ["hn_scout", "github_scout"] },
+    { "from": ["hn_scout", "github_scout"], "to": "curator" },
+    { "from": "curator", "to": "END" }
+  ]
+}

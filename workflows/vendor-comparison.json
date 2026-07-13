@@ -1,0 +1,64 @@
+{
+  "id": "vendor-comparison",
+  "name": "SaaS/벤더 비교 평가",
+  "description": "도구 A vs B — 기능/가격/리뷰 병렬 조사 → 비교 매트릭스 → 추천",
+  "maxIterations": 1,
+  "inputs": [
+    { "key": "vendors", "label": "비교 대상 (예: Datadog vs Grafana Cloud vs New Relic)", "type": "text", "required": true },
+    { "key": "requirements", "label": "요구사항 (뭘 해야 하는지)", "type": "textarea", "required": true },
+    { "key": "budget", "label": "월 예산", "type": "select", "options": ["무료/오픈소스만", "~$100/월", "~$500/월", "~$1000/월", "$1000+/월", "제한 없음"], "default": "~$500/월" }
+  ],
+  "steps": [
+    {
+      "id": "feature_researcher",
+      "name": "기능 조사관",
+      "type": "llm",
+      "role": "제품 분석가. 각 벤더의 기능을 공식 문서에서 조사하여 비교한다.",
+      "provider": "gemini",
+      "model": "gemini-2.5-flash",
+      "timeout": 180000,
+      "tools": ["WebSearch", "WebFetch"],
+      "prompt": "비교 대상: {{vendors}}\n요구사항: {{requirements}}\n\n각 벤더의 공식 사이트와 문서를 조사해라.\n\n벤더별로:\n1. 핵심 기능 목록\n2. 차별화 기능 (이 벤더만의 강점)\n3. 제한 사항 / 안 되는 것\n4. API/통합 지원 범위\n5. 요구사항 대비 적합도\n\n출처 URL 포함.",
+      "outputKey": "features"
+    },
+    {
+      "id": "pricing_researcher",
+      "name": "가격 조사관",
+      "type": "llm",
+      "role": "재무 분석가. 가격 체계, 숨은 비용, 실제 사용 사례별 비용을 조사한다.",
+      "provider": "gemini",
+      "model": "gemini-2.5-flash",
+      "timeout": 180000,
+      "tools": ["WebSearch", "WebFetch"],
+      "prompt": "비교 대상: {{vendors}}\n월 예산: {{budget}}\n\n각 벤더의 가격을 조사해라.\n\n벤더별로:\n1. 가격 플랜 (무료/기본/프로/엔터프라이즈)\n2. 과금 기준 (사용량? 사용자 수? 호스트 수?)\n3. 숨은 비용 (오버리지, 추가 기능, 데이터 보관)\n4. 우리 규모 예상 월 비용\n5. 무료 티어/트라이얼 기간\n6. 계약 조건 (연 계약 할인, 약정)\n\n가격 페이지 URL 포함.",
+      "outputKey": "pricing"
+    },
+    {
+      "id": "review_researcher",
+      "name": "사용자 리뷰 조사관",
+      "type": "llm",
+      "role": "UX 리서처. 실 사용자 후기와 만족도를 조사한다.",
+      "provider": "gemini",
+      "model": "gemini-2.5-flash",
+      "timeout": 180000,
+      "tools": ["WebSearch"],
+      "prompt": "비교 대상: {{vendors}}\n\nG2, Capterra, Reddit, HN에서 실 사용자 후기를 조사해라.\n\n벤더별로:\n1. G2/Capterra 평점\n2. 자주 칭찬하는 점 (Top 3)\n3. 자주 불만인 점 (Top 3)\n4. 고객 지원 평가\n5. 마이그레이션 경험 (다른 도구에서 넘어온 사례)\n6. 대표적 사용자 코멘트 인용",
+      "outputKey": "reviews"
+    },
+    {
+      "id": "evaluator",
+      "name": "종합 평가관",
+      "type": "llm",
+      "role": "CTO. 모든 조사를 종합하여 의사결정자를 위한 비교 보고서를 작성한다.",
+      "provider": "claude",
+      "model": "sonnet",
+      "prompt": "## 요구사항\n{{requirements}}\n## 예산\n{{budget}}\n\n## 기능 비교\n{{features}}\n\n## 가격 비교\n{{pricing}}\n\n## 사용자 후기\n{{reviews}}\n\n종합 비교 보고서를 작성해라.\n\n### 비교 매트릭스\n| 항목 | 벤더 A | 벤더 B | (벤더 C) |\n|------|--------|--------|----------|\n| 기능 적합도 | | | |\n| 월 비용 | | | |\n| 사용 편의성 | | | |\n| 고객 지원 | | | |\n| 확장성 | | | |\n| 통합/API | | | |\n| 사용자 만족도 | | | |\n| 종합 점수 | /10 | /10 | /10 |\n\n### 시나리오별 추천\n- 비용 최소화 → ?\n- 기능 최대화 → ?\n- 밸런스 → ?\n\n### 최종 추천\n우리 상황(요구사항 + 예산)에 가장 적합한 선택과 근거\n\n### 도입 시 체크리스트\n- 트라이얼/POC 계획\n- 마이그레이션 고려사항\n- 계약 전 확인 사항",
+      "outputKey": "evaluation"
+    }
+  ],
+  "edges": [
+    { "from": "START", "to": ["feature_researcher", "pricing_researcher", "review_researcher"] },
+    { "from": ["feature_researcher", "pricing_researcher", "review_researcher"], "to": "evaluator" },
+    { "from": "evaluator", "to": "END" }
+  ]
+}
