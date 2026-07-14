@@ -39,7 +39,7 @@ jobs:
         run: npm ci
 
       - name: Build Tauri app
-        run: npm run tauri build -- --bundles ${{ matrix.bundles }}
+        run: npm run tauri build -- --bundles ${{ matrix.bundles }} --verbose
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
