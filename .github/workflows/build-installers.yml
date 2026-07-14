@@ -17,7 +17,7 @@ jobs:
           - platform: windows-latest
             bundles: nsis
             artifact: 'src-tauri/target/release/bundle/nsis/*.exe'
-          - platform: macos-latest
+          - platform: macos-15
             bundles: dmg
             artifact: 'src-tauri/target/release/bundle/dmg/*.dmg'
     runs-on: ${{ matrix.platform }}
