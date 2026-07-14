@@ -1,6 +1,6 @@
 {
   "productName": "Cockpit",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "identifier": "com.cockpit.dashboard",
   "build": {
     "frontendDist": "http://localhost:3847"
