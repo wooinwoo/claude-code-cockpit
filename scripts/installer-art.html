@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: 'JBM'; src: url('JetBrainsMono-Bold.woff2') format('woff2'); font-weight: 700; }
+  @font-face { font-family: 'JBMR'; src: url('JetBrainsMono-Regular.woff2') format('woff2'); }
+  @font-face { font-family: 'Pretendard'; src: url('PretendardVariable.woff2') format('woff2'); }
+  body { background: #333; display: flex; gap: 20px; flex-wrap: wrap; padding: 20px; }
+  canvas { outline: 1px solid #666; }
+</style>
+</head>
+<body>
+<canvas id="icon" width="1024" height="1024"></canvas>
+<canvas id="sidebar" width="164" height="314"></canvas>
+<canvas id="header" width="150" height="57"></canvas>
+<canvas id="dmg" width="660" height="420"></canvas>
+<script>
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// ─── 1024 앱 아이콘: 다크 라운드 사각 + HUD 링 + C▍ 터미널 워드마크 ───
+function drawIcon() {
+  const c = document.getElementById('icon');
+  const ctx = c.getContext('2d');
+  const S = 1024, cx = S / 2, cy = S / 2;
+
+  // 배경 라운드 사각 (macOS squircle 느낌, Windows에서도 무난)
+  const bg = ctx.createLinearGradient(0, 0, S, S);
+  bg.addColorStop(0, '#141830');
+  bg.addColorStop(0.55, '#0d1020');
+  bg.addColorStop(1, '#131022');
+  roundRect(ctx, 0, 0, S, S, 228);
+  ctx.fillStyle = bg;
+  ctx.fill();
+
+  // 대각 하이라이트
+  const sheen = ctx.createLinearGradient(0, 0, S * 0.9, S * 0.9);
+  sheen.addColorStop(0, 'rgba(129,140,248,0.16)');
+  sheen.addColorStop(0.4, 'rgba(129,140,248,0.0)');
+  roundRect(ctx, 0, 0, S, S, 228);
+  ctx.fillStyle = sheen;
+  ctx.fill();
+
+  // 미세 그리드
+  ctx.save();
+  roundRect(ctx, 0, 0, S, S, 228);
+  ctx.clip();
+  ctx.strokeStyle = 'rgba(99,102,241,0.055)';
+  ctx.lineWidth = 2;
+  for (let i = 128; i < S; i += 128) {
+    ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i, S); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, i); ctx.lineTo(S, i); ctx.stroke();
+  }
+
+  // HUD 링 + 틱마크
+  const R = 356;
+  ctx.strokeStyle = 'rgba(99,102,241,0.35)';
+  ctx.lineWidth = 5;
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, -Math.PI * 0.42, Math.PI * 1.08);
+  ctx.stroke();
+  // 밝은 아크 세그먼트 (좌상단)
+  const arcGrad = ctx.createLinearGradient(cx - R, cy - R, cx + R, cy);
+  arcGrad.addColorStop(0, '#818cf8');
+  arcGrad.addColorStop(1, '#a78bfa');
+  ctx.strokeStyle = arcGrad;
+  ctx.lineWidth = 14;
+  ctx.lineCap = 'round';
+  ctx.shadowColor = 'rgba(129,140,248,0.85)';
+  ctx.shadowBlur = 36;
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, Math.PI * 0.78, Math.PI * 1.32);
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+  // 틱마크
+  ctx.lineCap = 'butt';
+  for (let a = 0; a < 360; a += 15) {
+    const rad = (a * Math.PI) / 180;
+    const major = a % 45 === 0;
+    ctx.strokeStyle = major ? 'rgba(165,180,252,0.55)' : 'rgba(99,102,241,0.28)';
+    ctx.lineWidth = major ? 8 : 4;
+    const r1 = R + 22, r2 = R + (major ? 52 : 38);
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(rad) * r1, cy + Math.sin(rad) * r1);
+    ctx.lineTo(cx + Math.cos(rad) * r2, cy + Math.sin(rad) * r2);
+    ctx.stroke();
+  }
+
+  // 중앙 워드마크: C + 커서 블록 (터미널 프롬프트 정체성)
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const tGrad = ctx.createLinearGradient(cx - 220, cy - 220, cx + 200, cy + 220);
+  tGrad.addColorStop(0, '#c7d2fe');
+  tGrad.addColorStop(0.5, '#818cf8');
+  tGrad.addColorStop(1, '#8b5cf6');
+  ctx.shadowColor = 'rgba(129,140,248,0.65)';
+  ctx.shadowBlur = 60;
+  ctx.fillStyle = tGrad;
+  ctx.font = '700 470px JBM';
+  ctx.fillText('C', cx - 78, cy + 14);
+  // 커서 블록
+  ctx.shadowBlur = 44;
+  const bw = 118, bh = 330;
+  roundRect(ctx, cx + 118, cy - bh / 2 + 14, bw, bh, 22);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.restore();
+}
+
+// ─── NSIS 사이드바 164×314: 웰컴/피니시 페이지 좌측 ───
+function drawSidebar() {
+  const c = document.getElementById('sidebar');
+  const ctx = c.getContext('2d');
+  const W = 164, H = 314;
+
+  const bg = ctx.createLinearGradient(0, 0, W * 0.3, H);
+  bg.addColorStop(0, '#171b33');
+  bg.addColorStop(0.5, '#0e1122');
+  bg.addColorStop(1, '#120f24');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // 미세 그리드
+  ctx.strokeStyle = 'rgba(99,102,241,0.07)';
+  ctx.lineWidth = 1;
+  for (let i = 24; i < W; i += 24) { ctx.beginPath(); ctx.moveTo(i + 0.5, 0); ctx.lineTo(i + 0.5, H); ctx.stroke(); }
+  for (let i = 24; i < H; i += 24) { ctx.beginPath(); ctx.moveTo(0, i + 0.5); ctx.lineTo(W, i + 0.5); ctx.stroke(); }
+
+  // 하단 HUD 링 (잘려나가는 배치)
+  const cx = W / 2, cy = H + 40;
+  for (const [r, alpha, lw] of [[150, 0.30, 2], [120, 0.22, 1.5], [92, 0.5, 2.5]]) {
+    ctx.strokeStyle = `rgba(129,140,248,${alpha})`;
+    ctx.lineWidth = lw;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, Math.PI, 2 * Math.PI);
+    ctx.stroke();
+  }
+  // 스윕 글로우
+  const sweep = ctx.createRadialGradient(cx, cy, 20, cx, cy, 160);
+  sweep.addColorStop(0, 'rgba(99,102,241,0.35)');
+  sweep.addColorStop(1, 'rgba(99,102,241,0)');
+  ctx.fillStyle = sweep;
+  ctx.fillRect(0, H - 170, W, 170);
+
+  // 미니 로고: C▍
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  const lg = ctx.createLinearGradient(20, 40, 120, 110);
+  lg.addColorStop(0, '#c7d2fe');
+  lg.addColorStop(1, '#8b5cf6');
+  ctx.fillStyle = lg;
+  ctx.shadowColor = 'rgba(129,140,248,0.8)';
+  ctx.shadowBlur = 14;
+  ctx.font = '700 58px JBM';
+  ctx.fillText('C', 20, 92);
+  ctx.fillRect(64, 46, 15, 44);
+  ctx.shadowBlur = 0;
+
+  // 워드마크
+  ctx.fillStyle = '#e6e9ff';
+  ctx.font = '700 25px JBM';
+  ctx.fillText('COCKPIT', 20, 148);
+  ctx.fillStyle = 'rgba(165,180,252,0.9)';
+  ctx.font = '12px JBMR';
+  ctx.fillText('Claude Code', 20, 174);
+  ctx.fillText('Mission Control', 20, 191);
+
+  // 포인트 라인
+  ctx.strokeStyle = 'rgba(129,140,248,0.6)';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(20, 208); ctx.lineTo(64, 208); ctx.stroke();
+}
+
+// ─── NSIS 헤더 150×57: 설치 진행 페이지 우상단 ───
+function drawHeader() {
+  const c = document.getElementById('header');
+  const ctx = c.getContext('2d');
+  const W = 150, H = 57;
+
+  const bg = ctx.createLinearGradient(0, 0, W, H);
+  bg.addColorStop(0, '#141830');
+  bg.addColorStop(1, '#0e1122');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.strokeStyle = 'rgba(99,102,241,0.1)';
+  ctx.lineWidth = 1;
+  for (let i = 19; i < W; i += 19) { ctx.beginPath(); ctx.moveTo(i + 0.5, 0); ctx.lineTo(i + 0.5, H); ctx.stroke(); }
+
+  // 미니 C▍ + COCKPIT
+  ctx.textBaseline = 'alphabetic';
+  const lg = ctx.createLinearGradient(10, 10, 60, 48);
+  lg.addColorStop(0, '#c7d2fe');
+  lg.addColorStop(1, '#8b5cf6');
+  ctx.fillStyle = lg;
+  ctx.shadowColor = 'rgba(129,140,248,0.7)';
+  ctx.shadowBlur = 8;
+  ctx.font = '700 26px JBM';
+  ctx.fillText('C', 12, 38);
+  ctx.fillRect(32, 17, 7, 20);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#e6e9ff';
+  ctx.font = '700 15px JBM';
+  ctx.fillText('COCKPIT', 50, 35);
+}
+
+// ─── macOS DMG 배경 660×420: 앱 → Applications 드래그 안내 ───
+function drawDmg() {
+  const c = document.getElementById('dmg');
+  const ctx = c.getContext('2d');
+  const W = 660, H = 420;
+
+  const bg = ctx.createLinearGradient(0, 0, W * 0.4, H);
+  bg.addColorStop(0, '#171b33');
+  bg.addColorStop(0.55, '#0e1122');
+  bg.addColorStop(1, '#131024');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // 미세 그리드
+  ctx.strokeStyle = 'rgba(99,102,241,0.06)';
+  ctx.lineWidth = 1;
+  for (let i = 55; i < W; i += 55) { ctx.beginPath(); ctx.moveTo(i + 0.5, 0); ctx.lineTo(i + 0.5, H); ctx.stroke(); }
+  for (let i = 55; i < H; i += 55) { ctx.beginPath(); ctx.moveTo(0, i + 0.5); ctx.lineTo(W, i + 0.5); ctx.stroke(); }
+
+  // 상단 HUD 링 (위에서 잘려 들어오는 배치)
+  const rcx = W / 2, rcy = -70;
+  for (const [r, alpha, lw] of [[190, 0.28, 2], [150, 0.2, 1.5], [118, 0.42, 2.5]]) {
+    ctx.strokeStyle = `rgba(129,140,248,${alpha})`;
+    ctx.lineWidth = lw;
+    ctx.beginPath();
+    ctx.arc(rcx, rcy, r, 0, Math.PI);
+    ctx.stroke();
+  }
+  const sweep = ctx.createRadialGradient(rcx, rcy, 30, rcx, rcy, 220);
+  sweep.addColorStop(0, 'rgba(99,102,241,0.3)');
+  sweep.addColorStop(1, 'rgba(99,102,241,0)');
+  ctx.fillStyle = sweep;
+  ctx.fillRect(0, 0, W, 170);
+
+  // 워드마크
+  ctx.textAlign = 'center';
+  const lg = ctx.createLinearGradient(rcx - 120, 40, rcx + 120, 90);
+  lg.addColorStop(0, '#c7d2fe');
+  lg.addColorStop(1, '#8b5cf6');
+  ctx.fillStyle = lg;
+  ctx.shadowColor = 'rgba(129,140,248,0.75)';
+  ctx.shadowBlur = 16;
+  ctx.font = '700 34px JBM';
+  ctx.fillText('COCKPIT', rcx, 74);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = 'rgba(165,180,252,0.85)';
+  ctx.font = '13px JBMR';
+  ctx.fillText('Claude Code Mission Control', rcx, 100);
+
+  // 드래그 안내 화살표 (앱 180,220 → Applications 480,220 사이)
+  ctx.strokeStyle = 'rgba(129,140,248,0.75)';
+  ctx.lineWidth = 3;
+  ctx.setLineDash([10, 8]);
+  ctx.beginPath();
+  ctx.moveTo(258, 230);
+  ctx.lineTo(392, 230);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = 'rgba(129,140,248,0.9)';
+  ctx.beginPath();
+  ctx.moveTo(392, 218);
+  ctx.lineTo(416, 230);
+  ctx.lineTo(392, 242);
+  ctx.closePath();
+  ctx.fill();
+
+  // 하단 힌트
+  ctx.fillStyle = 'rgba(165,180,252,0.55)';
+  ctx.font = '12px JBMR';
+  ctx.fillText('Drag Cockpit into Applications', rcx, 386);
+}
+
+window.addEventListener('load', async () => {
+  await document.fonts.load('700 470px JBM');
+  await document.fonts.load('12px JBMR');
+  await document.fonts.ready;
+  drawIcon(); drawSidebar(); drawHeader(); drawDmg();
+  const post = (name, body) => fetch(`/save?name=${name}`, { method: 'POST', body });
+  const iconBlob = await (await fetch(document.getElementById('icon').toDataURL('image/png'))).blob();
+  await post('icon-1024.png', iconBlob);
+  await post('sidebar.rgba', new Blob([document.getElementById('sidebar').getContext('2d').getImageData(0, 0, 164, 314).data]));
+  await post('header.rgba', new Blob([document.getElementById('header').getContext('2d').getImageData(0, 0, 150, 57).data]));
+  await post('dmg-background.png', await (await fetch(document.getElementById('dmg').toDataURL('image/png'))).blob());
+  document.title = 'ART-DONE';
+  document.body.insertAdjacentHTML('beforeend', '<div id="done">ART-DONE</div>');
+});
+</script>
+</body>
+</html>

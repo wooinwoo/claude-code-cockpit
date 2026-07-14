@@ -27,7 +27,7 @@ workflow-runs.json
 # User-specific data
 projects.json
 notes/
-workflows/
+/workflows/
 
 # Logs
 *.log
@@ -60,3 +60,8 @@ test-*
 
 # worktrees
 .claude/worktrees/
+
+# Tauri 아이콘/인스톨러 에셋은 전역 *.png 무시에서 제외 (CI 빌드에 필요)
+!src-tauri/icons/*.png
+src-tauri/icons/android/
+src-tauri/icons/ios/
