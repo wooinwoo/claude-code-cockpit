@@ -65,3 +65,4 @@ test-*
 !src-tauri/icons/*.png
 src-tauri/icons/android/
 src-tauri/icons/ios/
+!src-tauri/installer/*.png
