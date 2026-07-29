@@ -24,6 +24,32 @@ function tail(xterm) {
   return lines.slice(-3).join('\n') || '출력을 기다리는 중…';
 }
 
+// TUI 는 화면 하단 3줄에 claude/codex 단어가 거의 안 남으므로, 서버 스캔이 모름인
+// 플랫폼(Windows pty)에서는 스크롤백 전체(시작 배너·입력한 커맨드 라인)와 hook 이벤트로
+// 폴백한다. 한 번 잡히면 터미널이 닫힐 때까지 유지(sticky).
+function detectKind(termId, term, output) {
+  const hookKind = () => getAgentKind(agentEvents.find(event => event.termId === termId)?.kind || '', '');
+  if (term.agentScanKnown) return getAgentKind(term.agentCommand || '', '') || hookKind();
+  if (term.agentKindCache) return term.agentKindCache;
+  const kind = getAgentKind(term.agentCommand || term.command || '', output) || bufferKind(term) || hookKind();
+  if (kind) term.agentKindCache = kind;
+  return kind;
+}
+
+function bufferKind(term) {
+  const now = Date.now();
+  if (now - (term.agentKindScanAt || 0) < 5000) return null;
+  term.agentKindScanAt = now;
+  const buf = term.xterm?.buffer.active;
+  if (!buf) return null;
+  const lines = [];
+  for (let i = 0; i < buf.length; i++) {
+    const line = buf.getLine(i)?.translateToString(true);
+    if (line) lines.push(line);
+  }
+  return getAgentKind('', lines.join('\n'));
+}
+
 function agentState(term, output) {
   return getAgentState({
     exited: term.exited,
@@ -153,9 +179,7 @@ function render() {
   for (const [termId, term] of app.termMap) {
     if (term.exited) continue;
     const output = tail(term.xterm);
-    const kind = term.agentScanKnown
-      ? getAgentKind(term.agentCommand || '', '')
-      : getAgentKind(term.agentCommand || term.command || '', output);
+    const kind = detectKind(termId, term, output);
     if (!kind) continue;
     detected.push({ termId, term, kind, output });
   }
@@ -203,11 +227,9 @@ export function updateAgentWall() {
       fetchJson('/api/supervisor/agents', { timeoutMs: 3000 })
         .then(data => { agentEvents = Array.isArray(data) ? data : []; render(); })
         .catch(() => {});
-      const projectIds = [...new Set([...app.termMap.values()]
-        .filter(t => !t.exited && (t.agentScanKnown
-          ? getAgentKind(t.agentCommand || '', '')
-          : getAgentKind(t.agentCommand || t.command || '', tail(t.xterm))))
-        .map(t => t.projectId))];
+      const projectIds = [...new Set([...app.termMap.entries()]
+        .filter(([termId, t]) => !t.exited && detectKind(termId, t, tail(t.xterm)))
+        .map(([, t]) => t.projectId))];
       await Promise.all(projectIds.filter(id => Date.now() - (ciFetchedAt.get(id) || 0) > 30_000).map(async id => {
         ciFetchedAt.set(id, Date.now());
         const branch = app.state.projects.get(id)?.git?.branch;

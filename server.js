@@ -930,7 +930,7 @@ try {
           let cwd;
           try { cwd = IS_WIN ? toWinPath(project.path) : project.path; } catch { cwd = project.path; }
           const term = pty.spawn(shell, shellArgs, {
-            name: 'xterm-256color', cols: 120, rows: 30, cwd, env: { ...cleanEnv, COCKPIT_TERM_ID: termId },
+            name: 'xterm-256color', cols: 120, rows: 30, cwd, env: termEnv(termId),
           });
           term.onData((data) => {
             const e = terminals.get(termId);
@@ -1120,6 +1120,12 @@ const wss = new WebSocketServer({
 // Clean env for child terminals: remove CLAUDECODE to allow nested claude launches
 const cleanEnv = { ...process.env, TERM: 'xterm-256color' };
 delete cleanEnv.CLAUDECODE;
+function termEnv(termId) {
+  const env = { ...cleanEnv, COCKPIT_TERM_ID: termId };
+  // WSLENV 없이는 Windows pty 의 env 가 wsl 진입 시 사라져 hook 이벤트가 termId 를 잃음
+  if (IS_WIN) env.WSLENV = [cleanEnv.WSLENV, 'COCKPIT_TERM_ID'].filter(Boolean).join(':');
+  return env;
+}
 
 // Track active PTY processes: Map<termId, { pty, projectId, buffer, command }>
 const terminals = new Map();
@@ -1127,12 +1133,14 @@ const MAX_BUFFER = 50000;
 function terminalAgent(entry) {
   const detected = detectAgentProcess(entry.pty?.pid);
   if (detected.available) return detected.kind || '';
-  return /^(claude|codex)\b/.exec(entry.command || '')?.[1] || '';
+  // 스캔 불가 플랫폼(Windows pty 등)에서는 실행 커맨드로만 판단하고, 그 외엔
+  // null(모름)을 반환 — ''(스캔 결과 없음)와 구분해야 클라이언트 출력 휴리스틱이 살아남음
+  return /^(claude|codex)\b/.exec(entry.command || '')?.[1] ?? null;
 }
 const agentScanTimer = setInterval(() => {
   for (const [termId, entry] of terminals) {
     const agentCommand = terminalAgent(entry);
-    if (entry.agentCommand === agentCommand) continue;
+    if (agentCommand === null || entry.agentCommand === agentCommand) continue;
     entry.agentCommand = agentCommand;
     const message = JSON.stringify({ type: 'agent-status', termId, agentCommand });
     for (const client of wss.clients) { try { client.send(message); } catch { /* disconnected */ } }
@@ -1264,7 +1272,7 @@ function restoreTerminals() {
     const term = pty.spawn(shell, shellArgs, {
       name: 'xterm-256color',
       cols: 120, rows: 30, cwd,
-      env: { ...cleanEnv, COCKPIT_TERM_ID: newTermId }
+      env: termEnv(newTermId)
     });
 
     term.onData((data) => {
@@ -1379,7 +1387,7 @@ wss.on('connection', (ws) => {
           cols: msg.cols || 120,
           rows: msg.rows || 30,
           cwd,
-          env: { ...cleanEnv, COCKPIT_TERM_ID: termId }
+          env: termEnv(termId)
         });
 
         term.onData((data) => {
@@ -1507,8 +1515,10 @@ wss.on('connection', (ws) => {
   // Send list of active terminals (+ idMap if restored)
   const active = [];
   for (const [id, t] of terminals) {
-    t.agentCommand = terminalAgent(t);
-    active.push({ termId: id, projectId: t.projectId, command: t.command || '', agentCommand: t.agentCommand, buffer: bufRead(t) });
+    const agentCommand = terminalAgent(t);
+    const item = { termId: id, projectId: t.projectId, command: t.command || '', buffer: bufRead(t) };
+    if (agentCommand !== null) { t.agentCommand = agentCommand; item.agentCommand = agentCommand; }
+    active.push(item);
   }
   const msg = { type: 'terminals', active };
   if (idMap) msg.idMap = idMap;
