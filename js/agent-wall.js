@@ -171,6 +171,33 @@ function setupEvents(wall) {
   });
 }
 
+// 터미널 탭 상단 요약 스트립 — 탭 이동 없이 상태 확인 + 클릭으로 패널 포커스
+function renderStrip(agents) {
+  const strip = document.getElementById('agent-strip');
+  if (!strip) return;
+  strip.style.display = agents.length ? '' : 'none';
+  strip.innerHTML = agents.map(({ termId, term, kind, state, attention }) => {
+    const name = app.projectList.find(p => p.id === term.projectId)?.name || term.projectId;
+    return `<li><button type="button" class="agent-strip-item ${state}${termId === app.activeTermId ? ' current' : ''}"
+      data-strip-term="${esc(termId)}" title="${esc(name)} · ${kind} · ${state}">
+      <span class="agent-strip-dot" aria-hidden="true"></span>
+      <span class="agent-strip-name">${esc(name)}</span>
+      <span class="agent-strip-kind">${kind}</span>${attention ? '<span class="agent-strip-alert">needs input</span>' : ''}
+    </button></li>`;
+  }).join('');
+  if (!strip.dataset.ready) {
+    strip.dataset.ready = '1';
+    strip.addEventListener('click', e => {
+      const item = e.target.closest('[data-strip-term]');
+      if (!item || !app.termMap.has(item.dataset.stripTerm)) return;
+      app.activeTermId = item.dataset.stripTerm;
+      notify('renderLayout');
+      setTimeout(() => notify('fitAllTerminals'), 100);
+      render();
+    });
+  }
+}
+
 function render() {
   const wall = document.getElementById('agent-wall');
   const section = document.getElementById('agent-wall-section');
@@ -196,6 +223,7 @@ function render() {
     return { termId, term, kind, output, state, attention, gate, hook, branch: projectState?.git?.branch };
   }).sort((a, b) => Number(Boolean(b.attention)) - Number(Boolean(a.attention))
     || ['waiting', 'busy', 'idle', 'done'].indexOf(a.state) - ['waiting', 'busy', 'idle', 'done'].indexOf(b.state));
+  renderStrip(agents);
   section.style.display = agents.length || popout ? '' : 'none';
   const live = agents.filter(agent => agent.hook).length;
   const scanned = agents.length - live;

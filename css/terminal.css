@@ -983,3 +983,80 @@
   background: rgba(52, 211, 153, 0.15);
   color: var(--green, #34d399);
 }
+
+/* ─── Agent Strip (터미널 탭 상단 관제 요약) ─── */
+.agent-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 5px 10px;
+  list-style: none;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-glass) 92%, var(--accent) 8%);
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex-shrink: 0;
+  user-select: none;
+}
+.agent-strip li {
+  flex: 0 0 auto;
+}
+.agent-strip-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-1) 78%, transparent);
+  color: var(--text-2);
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+.agent-strip-item:hover {
+  border-color: var(--border-active);
+  color: var(--text-1);
+}
+.agent-strip-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.agent-strip-item.current {
+  border-color: var(--border-active);
+  background: var(--accent-glow);
+  color: var(--accent-bright);
+}
+.agent-strip-item.waiting {
+  border-color: color-mix(in srgb, var(--yellow) 45%, var(--border));
+}
+.agent-strip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+  flex-shrink: 0;
+}
+.agent-strip-item.busy .agent-strip-dot {
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+}
+.agent-strip-item.waiting .agent-strip-dot {
+  background: var(--yellow);
+  box-shadow: 0 0 6px var(--yellow);
+}
+.agent-strip-item.done .agent-strip-dot {
+  background: var(--blue);
+}
+.agent-strip-kind {
+  color: var(--text-3);
+}
+.agent-strip-alert {
+  font-weight: 600;
+  color: var(--yellow);
+}
+@media (max-width: 600px) {
+  .agent-strip {
+    display: none !important;
+  }
+}
