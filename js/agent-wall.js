@@ -12,6 +12,7 @@ let timer;
 let opsTimer;
 let decisions = [];
 let agentEvents = [];
+let summaries = {}; // termId → { text, at } — 서버 LLM이 요약한 "지금 뭐 하는 중"
 const ciByProject = new Map();
 const ciFetchedAt = new Map();
 const popout = new URLSearchParams(location.search).get('agent-wall') === 'popout';
@@ -75,10 +76,12 @@ function freshness(ts) {
 
 function tileHTML({ termId, term, kind, output, state, attention, gate, branch }) {
   const stateLabel = state === 'busy' ? 'Working' : state === 'waiting' ? 'Needs input' : state === 'done' ? 'Done' : 'Idle';
+  const summary = summaries[termId]?.text;
   return `<article class="agent-tile ${esc(state)}">
     <button class="agent-tile-main" data-term-id="${esc(termId)}" title="터미널로 이동">
       <span class="agent-tile-head"><span class="agent-tile-dot"></span><span class="agent-tile-name">${esc(term.label)}</span><span class="agent-tile-kind">${kind}</span><span class="agent-tile-state">${stateLabel}</span></span>
       <span class="agent-tile-meta"><span>${esc(branch || 'No branch')}</span><span>${freshness(term.lastOutputAt)}</span></span>
+      ${summary ? `<span class="agent-tile-summary">${esc(summary)}</span>` : ''}
       <pre class="agent-tile-output">${esc(output)}</pre>
     </button>
     <span class="agent-tile-signals">${attention ? `<span class="agent-signal attention">${attention.decision === 'ask' ? 'Approval needed' : 'Blocked'}</span>` : ''}<span class="agent-gate-reason">${esc(gate.reason)}</span><button class="agent-signal gate ${esc(gate.state)}" data-gate-project="${esc(term.projectId)}" data-gate-target="${esc(gate.target)}" title="${esc(gate.reason)}">${esc(gate.label)}</button></span>
@@ -224,11 +227,12 @@ function renderStrip(agents) {
   const paneOn = wallInLayout(app.layoutRoot);
   strip.innerHTML = agents.map(({ termId, term, kind, state, attention }) => {
     const name = app.projectList.find(p => p.id === term.projectId)?.name || term.projectId;
+    const task = summaries[termId]?.text;
     return `<li><button type="button" class="agent-strip-item ${state}${termId === app.activeTermId ? ' current' : ''}"
-      data-strip-term="${esc(termId)}" title="${esc(name)} · ${kind} · ${state}">
+      data-strip-term="${esc(termId)}" title="${esc(name)} · ${kind} · ${state}${task ? ` · ${esc(task)}` : ''}">
       <span class="agent-strip-dot" aria-hidden="true"></span>
       <span class="agent-strip-name">${esc(name)}</span>
-      <span class="agent-strip-kind">${kind}</span>${attention ? '<span class="agent-strip-alert">needs input</span>' : ''}
+      <span class="agent-strip-kind">${kind}</span>${task ? `<span class="agent-strip-task">${esc(task)}</span>` : ''}${attention ? '<span class="agent-strip-alert">needs input</span>' : ''}
     </button></li>`;
   }).join('') + `<li><button type="button" class="agent-strip-item pane-toggle${paneOn ? ' current' : ''}"
     data-strip-action="wall-pane" title="관제를 분할 패널로 열고 닫기">${paneOn ? '패널 닫기' : '패널로 열기'}</button></li>`;
@@ -307,6 +311,9 @@ export function updateAgentWall() {
         .catch(() => {});
       fetchJson('/api/supervisor/agents', { timeoutMs: 3000 })
         .then(data => { agentEvents = Array.isArray(data) ? data : []; render(); })
+        .catch(() => {});
+      fetchJson('/api/supervisor/summaries', { timeoutMs: 3000 })
+        .then(data => { summaries = data && typeof data === 'object' ? data : {}; render(); })
         .catch(() => {});
       const projectIds = [...new Set([...app.termMap.entries()]
         .filter(([termId, t]) => !t.exited && detectKind(termId, t, tail(t.xterm)))

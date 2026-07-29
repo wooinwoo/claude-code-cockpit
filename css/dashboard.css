@@ -61,6 +61,7 @@
 .agent-tile-kind { padding: 1px 5px; border: 1px solid rgba(129,140,248,.2); border-radius: 4px; color: var(--accent-bright); font: .58rem var(--mono); }
 .agent-tile-state { margin-left: auto; color: #85899a; text-transform: uppercase; font-size: .64rem; }
 .agent-tile-meta { display: flex; justify-content: space-between; gap: 8px; padding: 0 10px 8px 24px; color: #74798b; font: .59rem var(--mono); }
+.agent-tile-summary { display: block; margin: 0 8px 6px; padding: 0 2px; color: var(--accent-bright); font-size: .7rem; text-align: left; overflow-wrap: anywhere; }
 .agent-tile-output { min-height: 76px; margin: 0 8px 8px; padding: 9px 10px; border: 1px solid rgba(255,255,255,.06); border-radius: 6px; background: rgba(0,0,0,.16); font: .68rem/1.5 var(--mono); color: #b8bdca; white-space: pre-wrap; overflow-wrap: anywhere; }
 .agent-tile-signals { display: flex; align-items: center; gap: 5px; padding: 0 10px 9px; }
 .agent-signal { border-radius: 999px; background: rgba(255,255,255,.07); color: var(--text-2); padding: 2px 7px; font-size: .62rem; }

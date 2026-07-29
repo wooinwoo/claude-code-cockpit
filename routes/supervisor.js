@@ -1,4 +1,4 @@
-import { decide, getAgentEvents, getRecentDecisions, getPendingCount, notifyEvent } from '../lib/supervisor-service.js';
+import { decide, getAgentEvents, getRecentDecisions, getPendingCount, getSummaries, notifyEvent } from '../lib/supervisor-service.js';
 
 export function register(ctx) {
   const { addRoute, json, readBody } = ctx;
@@ -36,5 +36,9 @@ export function register(ctx) {
 
   addRoute('GET', '/api/supervisor/agents', (_req, res) => {
     json(res, getAgentEvents());
+  });
+
+  addRoute('GET', '/api/supervisor/summaries', (_req, res) => {
+    json(res, getSummaries());
   });
 }

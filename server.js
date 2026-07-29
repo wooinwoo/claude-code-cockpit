@@ -1154,6 +1154,7 @@ function bufAppend(entry, data) {
   if (data.includes('\x1b]52;')) data = data.replace(/\x1b\]52;[^\x07\x1b]*(?:\x07|\x1b\\)?/g, '');
   entry._bufArr.push(data);
   entry._bufLen += data.length;
+  entry._outCount = (entry._outCount || 0) + data.length; // 누적 출력량 — 활동 요약의 "새 출력 있음" 판정용
   while (entry._bufLen > MAX_BUFFER && entry._bufArr.length > 1) {
     entry._bufLen -= entry._bufArr.shift().length;
     entry._bufTrimmed = true; // 청크 경계는 이스케이프 시퀀스 중간일 수 있음
@@ -1168,6 +1169,25 @@ function bufRead(entry) {
   }
   return s;
 }
+
+// ─── 관제 활동 요약: 에이전트 터미널의 최근 출력 → LLM 한 줄 요약 ───
+// 새 출력이 있는 터미널만, 터미널당 최소 20초 간격으로만 호출 (summaryGate)
+function stripAnsi(s) {
+  return s.replace(/\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)?|[\r\x00-\x08\x0b\x0c\x0e-\x1f]/g, '');
+}
+const summaryTimer = setInterval(() => {
+  for (const [termId, entry] of terminals) {
+    const mark = entry._outCount || 0;
+    if (!mark || !supervisorService.summaryGate(termId, mark)) continue;
+    const text = stripAnsi(bufRead(entry)).slice(-3500);
+    if (!/\b(claude|codex)\b/i.test(`${entry.agentCommand || ''} ${text}`)) continue;
+    supervisorService.beginSummary(termId, mark);
+    supervisorLlm.summarizeActivity(text)
+      .then(summary => supervisorService.endSummary(termId, summary))
+      .catch(() => supervisorService.endSummary(termId, null));
+  }
+}, 10_000);
+summaryTimer.unref();
 
 // ── Session State Persistence (tmux-resurrect style) ──
 
@@ -1323,6 +1343,7 @@ function onShutdown(signal) {
   }
   devServers.clear();
   clearInterval(agentScanTimer);
+  clearInterval(summaryTimer);
   // Close all WebSocket connections
   for (const client of wss.clients) { try { client.close(1001, 'Server shutting down'); } catch { /* ignore */ } }
   // Stop accepting new connections

@@ -1051,6 +1051,13 @@
 .agent-strip-kind {
   color: var(--text-3);
 }
+.agent-strip-task {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+}
 .agent-strip-alert {
   font-weight: 600;
   color: var(--yellow);
