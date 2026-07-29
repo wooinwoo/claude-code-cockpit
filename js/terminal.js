@@ -1,7 +1,7 @@
 // ─── Terminal Core: WebSocket, xterm, layout tree, search, font, export, theme ───
 import { app, notify } from './state.js';
 import { copyText, esc, showToast, escapeHtml } from './utils.js';
-import { updateAgentWall } from './agent-wall.js';
+import { updateAgentWall, WALL_ID } from './agent-wall.js';
 
 // ─── Import and re-export from terminal-ui ───
 import {
@@ -84,7 +84,7 @@ export function restoreSavedLayout() {
     if (!saved) return false;
     function validate(node) {
       if (!node) return false;
-      if (node.type === 'leaf') return app.termMap.has(node.termId);
+      if (node.type === 'leaf') return node.termId === WALL_ID || app.termMap.has(node.termId);
       if (node.type === 'split') return node.children && validate(node.children[0]) && validate(node.children[1]);
       return false;
     }
@@ -509,7 +509,7 @@ function balanceNodes(nodes, dir) {
 // mode: 'grid'(2x2 등) | 'cols'(가로 일렬) | 'rows'(세로 일렬)
 export function arrangeTerminals(mode) {
   if (!app.layoutRoot) return;
-  const ids = collectLeaves(app.layoutRoot).filter(id => app.termMap.has(id));
+  const ids = collectLeaves(app.layoutRoot).filter(id => id === WALL_ID || app.termMap.has(id));
   if (ids.length < 2) { showToast('터미널이 2개 이상일 때 정리할 수 있어요'); return; }
   const leafOf = id => ({ type: 'leaf', termId: id });
   let root;

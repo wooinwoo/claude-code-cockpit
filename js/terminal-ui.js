@@ -5,6 +5,7 @@ import { app, notify } from './state.js';
 import { startArenaPick } from './arena.js';
 import { copyText, esc, showToast, escapeHtml } from './utils.js';
 import { registerClickActions, registerInputActions } from './actions.js';
+import { updateAgentWall, WALL_ID } from './agent-wall.js';
 
 // ─── Imports from terminal core (will be set via init) ───
 let _core = null;
@@ -227,6 +228,27 @@ function guardXtermPaste(t, termId) {
 }
 
 function renderNode(node, container) {
+  if (node.type === 'leaf' && node.termId === WALL_ID) {
+    // 관제 패널 leaf — 터미널 leaf 와 같은 뼈대(head 드래그, drop zone)라서
+    // 분할 리사이즈/드래그 이동이 기존 로직 그대로 적용됨
+    const leaf = document.createElement('div');
+    leaf.className = 'split-leaf agent-wall-leaf'; leaf.dataset.termId = WALL_ID;
+    leaf.style.display = 'flex'; leaf.style.flexDirection = 'column';
+    leaf.style.position = 'relative';
+    const head = document.createElement('div');
+    head.className = 'term-head'; head.draggable = true; head.dataset.termId = WALL_ID; head.style.cursor = 'grab';
+    head.innerHTML = '<span class="th-name">Agent Wall</span><span class="th-spacer"></span>' +
+      '<button class="th-close" data-action="wall-pane-close" title="Close">×</button>';
+    leaf.appendChild(head);
+    const body = document.createElement('div');
+    body.className = 'agent-wall agent-wall-pane'; body.id = 'agent-wall-pane';
+    leaf.appendChild(body);
+    const overlay = document.createElement('div'); overlay.className = 'drop-overlay';
+    ['top', 'bottom', 'left', 'right'].forEach(pos => { const zone = document.createElement('div'); zone.className = `drop-zone ${pos}`; overlay.appendChild(zone); });
+    leaf.appendChild(overlay); container.appendChild(leaf);
+    updateAgentWall();
+    return;
+  }
   if (node.type === 'leaf') {
     const t = app.termMap.get(node.termId);
     if (!t) return;
@@ -838,7 +860,8 @@ export function setupTermEventDelegation() {
     if (app.draggedTermId && targetId && app.draggedTermId !== targetId && pos) {
       _core.removeFromLayoutTree(app.draggedTermId);
       _core.splitAt(targetId, app.draggedTermId, pos);
-      app.activeTermId = app.draggedTermId;
+      // 관제 패널(WALL_ID)은 activeTermId 가 될 수 없음 — 리사이즈/키보드 로직이 termMap 을 전제
+      if (app.termMap.has(app.draggedTermId)) app.activeTermId = app.draggedTermId;
       renderLayout(); updateTermHeaders();
     }
   });

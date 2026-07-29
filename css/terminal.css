@@ -1060,3 +1060,18 @@
     display: none !important;
   }
 }
+
+/* ─── Agent Wall 분할 패널 leaf ─── */
+.agent-wall-leaf {
+  background: var(--bg-1);
+}
+.agent-wall.agent-wall-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-content: start;
+  gap: 8px;
+  padding: 8px;
+  overflow-y: auto;
+  min-height: 0;
+}
