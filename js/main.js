@@ -2,6 +2,7 @@
 import { app, subscribe } from './state.js';
 import { copyText, esc, showToast, simpleMarkdown, fetchJson, fetchText, postJson } from './utils.js';
 import { getClickAction, getChangeAction, getInputAction, registerClickActions, registerChangeActions, registerInputActions } from './actions.js';
+import { openArenaDialog, startArenaFromDialog, stopArena, startArenaPick, arenaPickDone, copyArenaResult, downloadArenaResult } from './arena.js';
 
 // ─── Dashboard module ───
 import {
@@ -894,6 +895,14 @@ registerClickActions({
   'show-mobile-connect': showMobileConnect,
   'copy-mobile-url': copyMobileUrl,
   'hard-refresh': hardRefresh,
+  // ⚔️ Arena
+  'arena-open': openArenaDialog,
+  'arena-pick': startArenaPick,
+  'arena-pick-done': arenaPickDone,
+  'arena-start': startArenaFromDialog,
+  'arena-stop': stopArena,
+  'arena-copy-result': copyArenaResult,
+  'arena-download-result': downloadArenaResult,
   // Ports
   'port-refresh': refreshPorts,
   'port-toggle-pause': togglePortPause,
@@ -994,7 +1003,9 @@ document.addEventListener('keydown', e => {
   if (mod && e.key === 'b' && !e.shiftKey) {
     if (document.getElementById('terminal-view').classList.contains('active')) { e.preventDefault(); toggleBroadcastMode(); return; }
   }
-  if (mod && e.key === 'j' && !e.shiftKey) {
+  if (mod && (e.code === 'KeyJ' || e.key === 'j') && !e.shiftKey) {
+    // 터미널 포커스 중엔 terminal.js 커스텀 키 핸들러가 이미 토글함 — 여기서 또 하면 이중 토글로 무효화됨
+    if (e.target?.closest?.('.xterm')) return;
     if (document.getElementById('terminal-view').classList.contains('active')) { e.preventDefault(); toggleQuickBar(); return; }
   }
   if (mod && e.key === 'k') { e.preventDefault(); toggleCommandPalette(); return; }

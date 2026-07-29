@@ -285,6 +285,26 @@
       <!-- Dashboard View -->
       <div class="view active" id="dashboard-view" role="tabpanel">
         <div class="smart-actions" id="smart-actions"></div>
+        <section class="agent-wall-section" id="agent-wall-section" style="display:none">
+          <div class="agent-wall-titlebar">
+            <div>
+              <div class="agent-wall-eyebrow">Live operations</div>
+              <div class="section-title">Agent Wall <span class="agent-wall-count" id="agent-wall-count"></span></div>
+            </div>
+            <div class="agent-wall-actions">
+              <button type="button" class="agent-wall-btn focus" data-agent-wall-action="focus" hidden>Focus next</button>
+              <button type="button" class="agent-wall-btn active" data-agent-wall-action="mode" data-mode="grid">Wall</button>
+              <button type="button" class="agent-wall-btn" data-agent-wall-action="mode" data-mode="kanban">Kanban</button>
+              <button type="button" class="agent-wall-btn" data-agent-wall-action="dock">Terminal</button>
+              <button type="button" class="agent-wall-btn" data-agent-wall-action="popout">Pop out</button>
+            </div>
+          </div>
+          <div class="agent-wall-summary" id="agent-wall-summary" aria-live="polite"></div>
+          <div class="agent-wall-stage" id="agent-wall-stage">
+            <div class="agent-wall" id="agent-wall"></div>
+            <div class="agent-terminal-dock" id="agent-terminal-dock"></div>
+          </div>
+        </section>
         <div class="overview-columns">
         <div class="overview-main">
         <section class="activity-log-section" id="activity-log-section" style="display:none">
@@ -415,6 +435,11 @@
           <span class="bc-icon">&#x1F4E1;</span> Broadcast <span class="bc-count">0</span> terminals
           <button class="bc-close" title="Turn off">&times;</button>
         </div>
+        <div class="arena-indicator" id="arena-indicator" style="display:none">
+          <span id="arena-status">&#x2694;&#xFE0F; Arena</span>
+          <button class="bc-close" data-action="arena-stop" title="토론 중단">&times;</button>
+        </div>
+        <div id="term-panels-home"></div>
         <div class="term-panels" id="term-panels">
           <div class="term-empty">
             <button class="btn" data-action="new-term">
@@ -1174,6 +1199,46 @@
         </div>
       </div>
     </div>
+
+    <!-- ⚔️ Arena Dialog: 세션 토론 -->
+    <dialog id="arena-dialog">
+      <div class="modal-header">
+        <h2>&#x2694;&#xFE0F; Arena — 세션끼리 토론</h2>
+        <button class="modal-close" data-action="close-dialog" data-dialog="arena-dialog">&times;</button>
+      </div>
+      <div class="modal-body">
+        <label>참가자 (2~3개 선택)</label>
+        <div id="arena-participants" class="arena-participants"></div>
+        <label>주제</label>
+        <textarea id="arena-topic" rows="3" placeholder="예: 이 레포의 알림 시스템, 폴링 유지 vs MQ 전환 — 근거 들고 싸워봐"></textarea>
+        <label>턴 수</label>
+        <select id="arena-turns">
+          <option value="4" selected>4턴</option>
+          <option value="6">6턴</option>
+          <option value="8">8턴</option>
+        </select>
+        <div class="arena-warn">&#x26A0;&#xFE0F; 참가 세션은 자기 권한 그대로 동작합니다 (토론만 하라고 지시하지만 강제는 아님). 각 세션의 기존 맥락 위에 토론이 쌓입니다.</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" data-action="close-dialog" data-dialog="arena-dialog">취소</button>
+        <button class="btn primary" data-action="arena-start">&#x2694;&#xFE0F; 개전</button>
+      </div>
+    </dialog>
+
+    <!-- 🏁 Arena Result Dialog -->
+    <dialog id="arena-result-dialog">
+      <div class="modal-header">
+        <h2>&#x1F3C1; Arena 결과</h2>
+        <button class="modal-close" data-action="close-dialog" data-dialog="arena-result-dialog">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="arena-result-meta" class="arena-result-meta"></div>
+        <div id="arena-result-log" class="arena-result-log"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn primary" data-action="close-dialog" data-dialog="arena-result-dialog">닫기</button>
+      </div>
+    </dialog>
 
     <!-- Swagger Import Dialog -->
     <dialog id="at-swagger-dialog" class="at-dialog at-swagger-dialog">

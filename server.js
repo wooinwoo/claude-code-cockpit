@@ -28,6 +28,7 @@ import { getAllStats as getMonitorStats } from './lib/monitor-service.js';
 import { initBatch } from './lib/batch-service.js';
 import { logger } from './lib/logger.js';
 import { listNotes, getNote, createNote, updateNote } from './lib/notes-service.js';
+import { detectAgentProcess } from './lib/process-agent.js';
 
 // Route modules
 import { register as regCicd } from './routes/cicd.js';
@@ -82,12 +83,16 @@ const STATE_FILE = join(DATA_DIR, 'session-state.json');
 const _execFileAsync = promisify(execFile);
 // Cache index.html in memory (reload on file change in dev)
 let _cachedHTML = null;
+let _cachedHTMLMtime = 0;
 async function getCachedHTML() {
-  if (!_cachedHTML) _cachedHTML = await readFile(join(__dirname, 'index.html'), 'utf8');
+  // fs.watch 는 에디터의 rename 쓰기에서 watcher 가 고아가 되므로 mtime 비교로 무효화
+  const { mtimeMs } = await stat(join(__dirname, 'index.html'));
+  if (!_cachedHTML || mtimeMs !== _cachedHTMLMtime) {
+    _cachedHTML = await readFile(join(__dirname, 'index.html'), 'utf8');
+    _cachedHTMLMtime = mtimeMs;
+  }
   return _cachedHTML;
 }
-// Invalidate cache when file changes (dev convenience)
-try { watch(join(__dirname, 'index.html'), () => { _cachedHTML = null; }); } catch { /* watch not supported in this env */ }
 
 // Git concurrency: serialize git ops per project to prevent lock conflicts
 const _gitLocks = new Map();
@@ -925,7 +930,7 @@ try {
           let cwd;
           try { cwd = IS_WIN ? toWinPath(project.path) : project.path; } catch { cwd = project.path; }
           const term = pty.spawn(shell, shellArgs, {
-            name: 'xterm-256color', cols: 120, rows: 30, cwd, env: cleanEnv,
+            name: 'xterm-256color', cols: 120, rows: 30, cwd, env: { ...cleanEnv, COCKPIT_TERM_ID: termId },
           });
           term.onData((data) => {
             const e = terminals.get(termId);
@@ -941,12 +946,12 @@ try {
           });
           let safeCommand = '';
           if (command && typeof command === 'string' && command.length < 500
-              && /^(claude|npm|npx|node|git|python|pip|docker|yarn|pnpm|bun|cargo|make|cmake|go|rustc|ruby|java|javac|mvn|gradle|dotnet|terraform|kubectl|helm|ansible|packer|deno|tsx|ts-node|jest|vitest|pytest|eslint|prettier|tsc)\b/.test(command)
+              && /^(claude|codex|npm|npx|node|git|python|pip|docker|yarn|pnpm|bun|cargo|make|cmake|go|rustc|ruby|java|javac|mvn|gradle|dotnet|terraform|kubectl|helm|ansible|packer|deno|tsx|ts-node|jest|vitest|pytest|eslint|prettier|tsc)\b/.test(command)
               && !/[&|<>^;`$]/.test(command)) {
             safeCommand = command;
           }
           terminals.set(termId, { pty: term, projectId, _bufArr: [], _bufLen: 0, command: safeCommand });
-          const createdMsg = JSON.stringify({ type: 'created', termId, projectId });
+          const createdMsg = JSON.stringify({ type: 'created', termId, projectId, command: safeCommand });
           for (const client of wss.clients) { try { client.send(createdMsg); } catch { /* client disconnected */ } }
           if (safeCommand) term.write(safeCommand + '\r');
           saveTerminalState();
@@ -1119,6 +1124,21 @@ delete cleanEnv.CLAUDECODE;
 // Track active PTY processes: Map<termId, { pty, projectId, buffer, command }>
 const terminals = new Map();
 const MAX_BUFFER = 50000;
+function terminalAgent(entry) {
+  const detected = detectAgentProcess(entry.pty?.pid);
+  if (detected.available) return detected.kind || '';
+  return /^(claude|codex)\b/.exec(entry.command || '')?.[1] || '';
+}
+const agentScanTimer = setInterval(() => {
+  for (const [termId, entry] of terminals) {
+    const agentCommand = terminalAgent(entry);
+    if (entry.agentCommand === agentCommand) continue;
+    entry.agentCommand = agentCommand;
+    const message = JSON.stringify({ type: 'agent-status', termId, agentCommand });
+    for (const client of wss.clients) { try { client.send(message); } catch { /* disconnected */ } }
+  }
+}, 2000);
+agentScanTimer.unref();
 // Optimized buffer: append to array, join on read
 function bufAppend(entry, data) {
   // OSC 52(클립보드 복사) 시퀀스는 리플레이 버퍼에 저장하지 않음 — 과거 복사가
@@ -1244,7 +1264,7 @@ function restoreTerminals() {
     const term = pty.spawn(shell, shellArgs, {
       name: 'xterm-256color',
       cols: 120, rows: 30, cwd,
-      env: cleanEnv
+      env: { ...cleanEnv, COCKPIT_TERM_ID: newTermId }
     });
 
     term.onData((data) => {
@@ -1294,6 +1314,7 @@ function onShutdown(signal) {
     try { killProcessTree(ds.process.pid); } catch { /* process already exited */ }
   }
   devServers.clear();
+  clearInterval(agentScanTimer);
   // Close all WebSocket connections
   for (const client of wss.clients) { try { client.close(1001, 'Server shutting down'); } catch { /* ignore */ } }
   // Stop accepting new connections
@@ -1358,7 +1379,7 @@ wss.on('connection', (ws) => {
           cols: msg.cols || 120,
           rows: msg.rows || 30,
           cwd,
-          env: cleanEnv
+          env: { ...cleanEnv, COCKPIT_TERM_ID: termId }
         });
 
         term.onData((data) => {
@@ -1381,7 +1402,7 @@ wss.on('connection', (ws) => {
         // C4: Validate command — only allow safe known prefixes
         let safeCommand = '';
         if (msg.command && typeof msg.command === 'string' && msg.command.length < 500
-            && /^(claude|npm|npx|node|git|python|pip|docker|yarn|pnpm|bun|cargo|make|cmake|go|rustc|ruby|java|javac|mvn|gradle|dotnet|terraform|kubectl|helm|ansible|packer|deno|tsx|ts-node|jest|vitest|pytest|eslint|prettier|tsc)\b/.test(msg.command)
+            && /^(claude|codex|npm|npx|node|git|python|pip|docker|yarn|pnpm|bun|cargo|make|cmake|go|rustc|ruby|java|javac|mvn|gradle|dotnet|terraform|kubectl|helm|ansible|packer|deno|tsx|ts-node|jest|vitest|pytest|eslint|prettier|tsc)\b/.test(msg.command)
             && !/[&|<>^;`$]/.test(msg.command)) {
           safeCommand = msg.command;
         }
@@ -1389,7 +1410,7 @@ wss.on('connection', (ws) => {
         terminals.set(termId, { pty: term, projectId: msg.projectId, _bufArr: [], _bufLen: 0, command: safeCommand });
         _currentTermId = termId;
 
-        const createdMsg = JSON.stringify({ type: 'created', termId, projectId: msg.projectId });
+        const createdMsg = JSON.stringify({ type: 'created', termId, projectId: msg.projectId, command: safeCommand });
         for (const client of wss.clients) {
           try { client.send(createdMsg); } catch { /* client disconnected */ }
         }
@@ -1486,7 +1507,8 @@ wss.on('connection', (ws) => {
   // Send list of active terminals (+ idMap if restored)
   const active = [];
   for (const [id, t] of terminals) {
-    active.push({ termId: id, projectId: t.projectId, buffer: bufRead(t) });
+    t.agentCommand = terminalAgent(t);
+    active.push({ termId: id, projectId: t.projectId, command: t.command || '', agentCommand: t.agentCommand, buffer: bufRead(t) });
   }
   const msg = { type: 'terminals', active };
   if (idMap) msg.idMap = idMap;

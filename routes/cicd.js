@@ -4,7 +4,7 @@ export function register(ctx) {
   const { addRoute, json, withProject, readBody } = ctx;
 
   addRoute('GET', '/api/cicd/runs/:projectId', withProject(async (req, res, project) => {
-    const runs = await getWorkflowRuns(project.path, { workflow: req.query.workflow, status: req.query.status, limit: parseInt(req.query.limit) || 30 });
+    const runs = await getWorkflowRuns(project.path, { workflow: req.query.workflow, status: req.query.status, branch: req.query.branch, limit: parseInt(req.query.limit) || 30 });
     json(res, runs);
   }, 'projectId'));
 

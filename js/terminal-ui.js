@@ -2,6 +2,7 @@
 //     selection toolbar, quick bar, presets, broadcast, command palette,
 //     file drop, event delegation ───
 import { app, notify } from './state.js';
+import { startArenaPick } from './arena.js';
 import { copyText, esc, showToast, escapeHtml } from './utils.js';
 import { registerClickActions, registerInputActions } from './actions.js';
 
@@ -14,7 +15,8 @@ export function initTermUI(core) {
 
 // ─── Layout Rendering ───
 export function renderLayout() {
-  if (isMobile()) { renderMobileLayout(); return; }
+  const docked = document.getElementById('agent-wall-stage')?.classList.contains('docked');
+  if (isMobile() || docked) { renderMobileLayout(!docked); return; }
   const container = document.getElementById('term-panels');
   for (const [, t] of app.termMap) { if (t.element.parentNode) t.element.parentNode.removeChild(t.element); }
   container.innerHTML = '';
@@ -58,7 +60,7 @@ export function renderLayout() {
 }
 
 // ─── Mobile Layout ───
-function renderMobileLayout() {
+function renderMobileLayout(showMobileControls = true) {
   const container = document.getElementById('term-panels');
   const mobTabs = document.getElementById('mob-term-tabs');
   const mobActions = document.getElementById('mob-term-actions');
@@ -80,8 +82,8 @@ function renderMobileLayout() {
   }
 
   // Show mobile elements
-  if (mobTabs) mobTabs.style.display = '';
-  if (mobActions) mobActions.style.display = '';
+  if (mobTabs) mobTabs.style.display = showMobileControls ? '' : 'none';
+  if (mobActions) mobActions.style.display = showMobileControls ? '' : 'none';
 
   // Ensure activeTermId is valid
   if (!app.activeTermId || !app.termMap.has(app.activeTermId)) {
@@ -89,7 +91,7 @@ function renderMobileLayout() {
   }
 
   // Render tab bar
-  if (mobTabs) {
+  if (mobTabs && showMobileControls) {
     let tabsHtml = '';
     for (const [id, t] of app.termMap) {
       const active = id === app.activeTermId ? ' active' : '';
@@ -512,6 +514,7 @@ export function showTermCtxMenu(e, termId) {
   html += `<div class="ctx-item" data-act="quick-bar">${_ic('cmd')}Quick Bar<span class="ctx-key">Ctrl+J</span></div>`;
   html += `<div class="ctx-item" data-act="export">${_ic('export')}Export</div>`;
   html += `<div class="ctx-item" data-act="rename">${_ic('rename')}Rename</div>`;
+  html += `<div class="ctx-item" data-act="arena">${_ic('broadcast')}Arena (세션 토론)</div>`;
   html += `<div class="ctx-item" data-act="clear-term">${_ic('clear')}Clear Scrollback</div>`;
   html += `<div class="ctx-item" data-act="copy-on-select">${_ic('select')}Copy on Select${localStorage.getItem('dl-copy-on-select') === '1' ? ' ✓' : ''}</div>`;
   html += `</div>`;
@@ -618,6 +621,7 @@ export function showTermCtxMenu(e, termId) {
       case 'copy': { const s = t.xterm.getSelection(); if (s) { copyText(s).then((ok) => { if (ok) { t.xterm.clearSelection(); showToast('Copied'); } else showToast('Copy failed', 'error'); }); } break; }
       case 'run-sel': { const s = t.xterm.getSelection(); if (s && app.ws?.readyState === 1) { app.ws.send(JSON.stringify({ type: 'input', termId, data: s.trim() + '\r' })); t.xterm.clearSelection(); } break; }
       case 'select-all': t.xterm.selectAll(); break;
+      case 'arena': startArenaPick(); break;
       case 'clear-term': t.xterm.clear(); break;
       case 'copy-on-select': {
         const on = localStorage.getItem('dl-copy-on-select') === '1';

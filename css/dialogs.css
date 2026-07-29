@@ -805,6 +805,7 @@ dialog::backdrop {
 }
 .fp-body {
   flex: 1;
+  min-height: 0;
   overflow: auto;
   padding: 0;
 }
@@ -1723,4 +1724,3 @@ dialog::backdrop {
   font-weight: 600;
   background: var(--bg-0);
 }
-

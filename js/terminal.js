@@ -1,6 +1,7 @@
 // ─── Terminal Core: WebSocket, xterm, layout tree, search, font, export, theme ───
 import { app, notify } from './state.js';
 import { copyText, esc, showToast, escapeHtml } from './utils.js';
+import { updateAgentWall } from './agent-wall.js';
 
 // ─── Import and re-export from terminal-ui ───
 import {
@@ -45,6 +46,7 @@ async function getChatView() {
 
 // ─── Write Buffer ───
 function bufferWrite(t, data, id) {
+  t.lastOutputAt = Date.now();
   if (!id) { t.xterm.write(data); return; }
   let buf = app.writeBuffers.get(id);
   if (!buf) { buf = { data: '', timer: null }; app.writeBuffers.set(id, buf); }
@@ -149,9 +151,13 @@ export function connectWS() {
         let added = false;
         msg.active.forEach(t => {
           if (!app.termMap.has(t.termId)) {
-            addTerminal(t.termId, t.projectId, false);
+            addTerminal(t.termId, t.projectId, false, t.command);
             added = true;
             if (t.buffer) { const tm = app.termMap.get(t.termId); if (tm) tm.pendingBuffer = t.buffer; }
+          }
+          if ('agentCommand' in t) {
+            app.termMap.get(t.termId).agentCommand = t.agentCommand || '';
+            app.termMap.get(t.termId).agentScanKnown = true;
           }
         });
         if (added) {
@@ -162,22 +168,31 @@ export function connectWS() {
           updateTermHeaders();
           if (msg.idMap) showToast(`Restored ${msg.active.length} terminal(s)`, 'success');
         }
+        updateAgentWall();
         break;
       }
       case 'created':
-        if (!app.termMap.has(msg.termId)) addTerminal(msg.termId, msg.projectId, true);
+        if (!app.termMap.has(msg.termId)) addTerminal(msg.termId, msg.projectId, true, msg.command);
+        updateAgentWall();
         break;
       case 'output': {
         const t = app.termMap.get(msg.termId);
-        if (t) bufferWrite(t, msg.data, msg.termId);
+        if (t) { bufferWrite(t, msg.data, msg.termId); updateAgentWall(); }
         break;
       }
       case 'exit': {
         const t = app.termMap.get(msg.termId);
         if (t) {
+          t.exited = true;
           t.xterm.write('\r\n\x1b[90m[Process exited]\x1b[0m\r\n');
           showToast(`Terminal "${t.label}" \u2014 process exited`, 'warning');
         }
+        updateAgentWall();
+        break;
+      }
+      case 'agent-status': {
+        const t = app.termMap.get(msg.termId);
+        if (t) { t.agentCommand = msg.agentCommand || ''; t.agentScanKnown = true; updateAgentWall(); }
         break;
       }
       case 'session-update': {
@@ -211,7 +226,7 @@ export function connectWS() {
 }
 
 // ─── Add Terminal ───
-export function addTerminal(termId, projectId, addToView) {
+export function addTerminal(termId, projectId, addToView, command = '') {
   if (typeof Terminal === 'undefined') { showToast('xterm.js not loaded', 'error'); return; }
   console.log('[SKIN-v2] addTerminal — new theme (#0a0b16 + JetBrains Mono) applied');
   const project = app.projectList.find(p => p.id === projectId);
@@ -322,7 +337,12 @@ export function addTerminal(termId, projectId, addToView) {
     try {
       const bytes = Uint8Array.from(atob(m[1]), ch => ch.charCodeAt(0));
       const text = new TextDecoder().decode(bytes);
-      if (text) copyText(text);
+      if (text) {
+        copyText(text);
+        // 무음 복사 금지 — 원격/악성 출력이 몰래 클립보드를 바꾸는 걸 사용자가 인지하게
+        const preview = text.length > 24 ? text.slice(0, 24) + '…' : text;
+        showToast(`터미널 앱이 클립보드에 복사: "${preview}" (${text.length}자)`, 'info', 3000);
+      }
     } catch { /* invalid base64 — ignore */ }
     return true;
   });
@@ -393,7 +413,7 @@ export function addTerminal(termId, projectId, addToView) {
   element.addEventListener('mouseup', () => {
     if (localStorage.getItem('dl-copy-on-select') !== '1') return;
     const sel = xterm.getSelection();
-    if (sel && sel.trim()) copyText(sel);
+    if (sel && sel.trim()) copyText(sel).then((ok) => { if (ok) xterm.clearSelection(); });
   });
   let _cmdBuf = '';
   xterm.onData(data => {
@@ -418,7 +438,7 @@ export function addTerminal(termId, projectId, addToView) {
       _cmdBuf += data;
     }
   });
-  app.termMap.set(termId, { xterm, fitAddon, searchAddon, projectId, element, label: name, color, opened: false, pendingBuffer: null, createdAt: Date.now() });
+  app.termMap.set(termId, { xterm, fitAddon, searchAddon, projectId, command, agentCommand: /^(claude|codex)\b/.exec(command)?.[1] || '', agentScanKnown: false, element, label: name, color, opened: false, pendingBuffer: null, createdAt: Date.now() });
   if (addToView) {
     if (_splitTarget) {
       const st = _splitTarget; _splitTarget = null;
@@ -530,6 +550,8 @@ export function fitAllTerminals() {
   if (document.hidden) return;
   for (const [termId, t] of app.termMap) {
     if (t.opened && t.element.parentNode) {
+      // 안 보이는 패널(다른 탭 활성 등)은 폭이 0으로 측정돼 pty 를 초소형으로 짜부라뜨림
+      if (t.element.clientWidth < 80 || t.element.clientHeight < 40) continue;
       try { t.fitAddon.fit(); } catch { /* addon not available */ }
       if (app.ws?.readyState === 1) app.ws.send(JSON.stringify({ type: 'resize', termId, cols: t.xterm.cols, rows: t.xterm.rows }));
     }

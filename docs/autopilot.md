@@ -81,6 +81,34 @@ Start in `attended` mode (the default). Flip to `unattended` only once you trust
 escalation set and have the Telegram bridge configured — that's what routes the hard
 calls to your phone instead of denying them.
 
+### Agent Wall status hooks (observation only)
+
+`scripts/cockpit-agent-hook.sh` reports lifecycle state without returning an approval
+decision, so it can run alongside Orca or another policy hook. Add the command to the
+events below in `~/.codex/hooks.json` for Codex, using `codex` as its argument:
+
+Codex uses `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PermissionRequest`,
+`PostToolUse`, `Stop`, `SessionEnd`, `SubagentStart`, and `SubagentStop`. Claude
+uses the common events plus `Notification`, `PostToolUseFailure`, `StopFailure`,
+and `TeammateIdle`.
+
+```json
+{"hooks":{"PermissionRequest":[{"hooks":[{"type":"command","command":"sh ~/projects/personal/claude-code-cockpit/scripts/cockpit-agent-hook.sh codex","timeout":3}]}]}}
+```
+
+Merge the event entry into the existing hook file; do not replace other hooks. For
+Claude Code, register the same events in `~/.claude/settings.json` and pass `claude`.
+
+Or use the idempotent installer. It preserves existing hooks (including Orca), writes
+`.cockpit-backup`, and atomically replaces the JSON file:
+
+```bash
+node scripts/install-agent-hook.mjs codex
+node scripts/install-agent-hook.mjs claude
+```
+
+Codex requires reviewing newly added non-managed hooks with `/hooks`.
+
 ## Safety model
 
 - **Fail-open** at the hook (server down → normal prompt), **fail-closed** at the

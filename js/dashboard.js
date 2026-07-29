@@ -2,6 +2,7 @@
 import { app, notify } from './state.js';
 import { esc, timeAgo, showToast, fmtTok, timeUntil, row, fetchJson, postJson, simpleMarkdown } from './utils.js';
 import { registerClickActions, registerChangeActions, registerInputActions } from './actions.js';
+import { restoreTerminalPanels } from './agent-wall.js';
 
 // ─── Re-export from sub-modules ───
 export {
@@ -519,11 +520,13 @@ export function switchView(name) {
   const currentView = document.querySelector('.view.active');
   const currentName = currentView?.id?.replace('-view', '');
   if (currentName === name) {
+    if (name === 'terminal') restoreTerminalPanels();
     applyViewZoom(name);
     setupNavOverflow();
     try { localStorage.setItem('dl-view', name); } catch { /* storage unavailable */ }
     return;
   }
+  if (name === 'terminal') restoreTerminalPanels();
   rememberScrollTree(currentView);
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   const viewEl = document.getElementById(`${name}-view`);
