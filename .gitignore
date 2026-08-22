@@ -8,10 +8,11 @@ dist/
 src-tauri/target/
 
 # Built binary
-praetorium.exe
+cockpit.exe
 *.app
 
 # Secrets & credentials
+.cockpit-token
 jira-config.json
 telegram-config.json
 .env

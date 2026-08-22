@@ -58,13 +58,13 @@
       "../server.js": "./",
       "../index.html": "./",
       "../package.json": "./",
-      "../js/owner-console.js": "./js/owner-console.js",
-      "../css/owner-console.css": "./css/owner-console.css",
-      "../lib/director-service.js": "./lib/director-service.js",
-      "../lib/hermes-runtime.js": "./lib/hermes-runtime.js",
-      "../lib/local-only.js": "./lib/local-only.js",
-      "../lib/praetorium-config.js": "./lib/praetorium-config.js",
-      "../routes/directors.js": "./routes/directors.js"
+      "../js/owner-console.js": "./js/",
+      "../css/owner-console.css": "./css/",
+      "../lib/director-service.js": "./lib/",
+      "../lib/hermes-runtime.js": "./lib/",
+      "../lib/local-only.js": "./lib/",
+      "../lib/praetorium-config.js": "./lib/",
+      "../routes/directors.js": "./routes/"
     }
   }
 }

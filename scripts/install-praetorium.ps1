@@ -1,9 +1,9 @@
 [CmdletBinding()]
 param(
     [string]$ProjectsRoot = 'C:\projects',
-    [string]$Repository = 'wooinwoo/praetorium',
+    [string]$Repository = 'wooinwoo/claude-code-cockpit',
     [string]$Version = 'v2.0.0',
-    [string]$SourceRoot = (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'PraetoriumData\source'),
+    [string]$SourceRoot = (Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Praetorium\source'),
     [switch]$SkipAppInstall,
     [switch]$SkipLaunch
 )
@@ -186,7 +186,9 @@ if (-not (Get-Application 'npm.cmd')) { throw 'npm.cmd is required but unavailab
 [IO.Directory]::CreateDirectory([IO.Path]::GetFullPath($ProjectsRoot)) | Out-Null
 $ProjectsRoot = [IO.Path]::GetFullPath($ProjectsRoot)
 $env:PRAETORIUM_PROJECTS_ROOT = $ProjectsRoot
+$env:COCKPIT_PROJECTS_ROOT = $ProjectsRoot
 [Environment]::SetEnvironmentVariable('PRAETORIUM_PROJECTS_ROOT', $ProjectsRoot, 'User')
+[Environment]::SetEnvironmentVariable('COCKPIT_PROJECTS_ROOT', $ProjectsRoot, 'User')
 
 Install-Codex
 $hermes = Install-Hermes

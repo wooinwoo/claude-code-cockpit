@@ -9,7 +9,7 @@ Praetorium is a local-only Owner Console for running several real Codex workstre
 - Hermes profiles and Kanban state
 - Codex app-server inference over child-process stdio
 
-Praetorium never starts a remote-control service. Its small HTTP server is forced to `127.0.0.1`; non-loopback bind settings, peers, and Host headers are rejected. Hermes gateway, dashboard, webhook, messaging, Tailscale, daemon, browser terminal, PR, and CI/CD modes are not included in the product runtime.
+Praetorium never starts a remote-control service. Its small HTTP server is forced to `127.0.0.1`; non-loopback bind settings, peers, and Host headers are rejected. Hermes gateway, dashboard, webhook, messaging, Tailscale, daemon, browser terminal, PR, CI/CD, and legacy Cockpit workflow modes are not included in the product runtime.
 
 ## Install on the company Windows PC
 
@@ -17,7 +17,7 @@ The only expected interactive step is `codex login` when the machine has not alr
 
 ```powershell
 $installer = Join-Path $env:TEMP 'install-praetorium.ps1'
-Invoke-WebRequest https://raw.githubusercontent.com/wooinwoo/praetorium/v2.0.0/scripts/install-praetorium.ps1 -OutFile $installer
+Invoke-WebRequest https://raw.githubusercontent.com/wooinwoo/claude-code-cockpit/v2.0.0/scripts/install-praetorium.ps1 -OutFile $installer
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -ProjectsRoot C:\projects
 ```
 
@@ -31,7 +31,7 @@ The installer:
 6. downloads the Windows release installer and verifies its SHA-256 file;
 7. installs and launches Praetorium, then rejects the installation if port `3847` is not loopback-only.
 
-Praetorium is a standalone product and repository. Its durable project and Director state lives in `%LOCALAPPDATA%\PraetoriumData`, outside the desktop shell installation, so reinstalling or uninstalling the shell does not erase orchestration state.
+The GitHub repository name and old `COCKPIT_*` identifiers remain accepted for upgrade compatibility. The product, data directory, and executable are named Praetorium.
 
 ## How it works
 
@@ -54,7 +54,7 @@ Open the desktop app or browse locally to `http://127.0.0.1:3847`.
 
 The single product screen contains the three project Directors, Skill Director, current worker board, Owner decision queue, and Director conversation. There are no worker tabs to manage.
 
-Project slots are populated from existing configuration. On a fresh install, Praetorium discovers up to three immediate Git repositories under `PRAETORIUM_PROJECTS_ROOT` (default `C:\projects`). The Project dialog can replace or rediscover assignments.
+Project slots are populated from existing configuration. On a fresh install, Praetorium discovers up to three immediate Git repositories under `PRAETORIUM_PROJECTS_ROOT` (legacy `COCKPIT_PROJECTS_ROOT` is accepted; default `C:\projects`). The Project dialog can replace or rediscover assignments.
 
 ## Roles and skills
 
@@ -95,8 +95,8 @@ The pinned bridge applies only to Hermes Agent `v0.20.5` and fails closed on an 
 Requirements: Node.js 22+, Rust stable, Codex CLI `0.149.0`, and the pinned Hermes installation.
 
 ```powershell
-git clone https://github.com/wooinwoo/praetorium.git
-cd praetorium
+git clone https://github.com/wooinwoo/claude-code-cockpit.git
+cd claude-code-cockpit
 npm ci
 npm test
 npm start
