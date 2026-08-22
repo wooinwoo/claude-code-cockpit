@@ -1,0 +1,52 @@
+{
+  "id": "tech-comparison",
+  "name": "기술 비교 분석",
+  "description": "기술 A vs B vs C — 각각 전담 리서치 → 비교 매트릭스 → 최종 추천",
+  "maxIterations": 1,
+  "inputs": [
+    { "key": "options", "label": "비교 대상 (예: Redis vs Dragonfly vs Valkey)", "type": "text", "required": true },
+    { "key": "context", "label": "사용 맥락 (어디에 쓸 건지, 요구사항)", "type": "textarea", "required": true },
+    { "key": "priority", "label": "우선 고려 사항", "type": "select", "options": ["성능 우선", "비용 우선", "개발 생산성 우선", "안정성 우선", "확장성 우선"], "default": "개발 생산성 우선" }
+  ],
+  "steps": [
+    {
+      "id": "researcher_1",
+      "name": "옵션 A 전문가",
+      "type": "llm",
+      "role": "기술 리서처. 첫 번째 옵션의 장점을 최대한 찾되, 약점도 솔직하게 조사한다.",
+      "provider": "gemini",
+      "model": "gemini-2.5-flash",
+      "timeout": 180000,
+      "tools": ["WebSearch", "WebFetch"],
+      "prompt": "비교 대상: {{options}}\n맥락: {{context}}\n\n위 비교 대상 중 **첫 번째 옵션**에 대해 웹에서 심층 조사해라.\n\n1. 공식 사이트/문서에서 핵심 특징\n2. 최신 벤치마크 (성능 수치)\n3. GitHub 스타, 커밋 활성도, 이슈 트렌드\n4. 대표 사용 기업/사례\n5. 커뮤니티 평가 (Reddit, HN 등)\n6. 가격/라이선스\n7. 장점 5개, 단점 5개\n\n수치와 출처를 반드시 포함해라.",
+      "outputKey": "option_a"
+    },
+    {
+      "id": "researcher_2",
+      "name": "옵션 B 전문가",
+      "type": "llm",
+      "role": "기술 리서처. 두 번째 옵션의 장점을 최대한 찾되, 약점도 솔직하게 조사한다.",
+      "provider": "gemini",
+      "model": "gemini-2.5-flash",
+      "timeout": 180000,
+      "tools": ["WebSearch", "WebFetch"],
+      "prompt": "비교 대상: {{options}}\n맥락: {{context}}\n\n위 비교 대상 중 **두 번째 옵션**에 대해 웹에서 심층 조사해라.\n\n1. 공식 사이트/문서에서 핵심 특징\n2. 최신 벤치마크 (성능 수치)\n3. GitHub 스타, 커밋 활성도, 이슈 트렌드\n4. 대표 사용 기업/사례\n5. 커뮤니티 평가 (Reddit, HN 등)\n6. 가격/라이선스\n7. 장점 5개, 단점 5개\n\n수치와 출처를 반드시 포함해라.",
+      "outputKey": "option_b"
+    },
+    {
+      "id": "comparator",
+      "name": "비교 분석가",
+      "type": "llm",
+      "role": "객관적인 기술 분석가. 두 리서치를 종합하여 공정한 비교 매트릭스를 만든다.",
+      "provider": "claude",
+      "model": "sonnet",
+      "prompt": "## 옵션 A 조사 결과\n{{option_a}}\n\n## 옵션 B 조사 결과\n{{option_b}}\n\n## 사용 맥락\n{{context}}\n\n## 우선 고려\n{{priority}}\n\n두 옵션을 객관적으로 비교해라.\n\n## 비교 매트릭스\n| 항목 | 옵션 A | 옵션 B | 승자 |\n|------|--------|--------|------|\n| 성능 | | | |\n| 비용 | | | |\n| 학습 곡선 | | | |\n| 커뮤니티/생태계 | | | |\n| 확장성 | | | |\n| 안정성 | | | |\n| 채용 용이성 | | | |\n\n## 시나리오별 추천\n- 스타트업/MVP → ?\n- 중규모 서비스 → ?\n- 대규모 엔터프라이즈 → ?\n\n## 최종 추천\n{{priority}} 기준으로 최종 추천과 근거",
+      "outputKey": "comparison"
+    }
+  ],
+  "edges": [
+    { "from": "START", "to": ["researcher_1", "researcher_2"] },
+    { "from": ["researcher_1", "researcher_2"], "to": "comparator" },
+    { "from": "comparator", "to": "END" }
+  ]
+}

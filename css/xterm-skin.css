@@ -1,0 +1,82 @@
+/* xterm DOM 렌더러 안쪽 디자인 — 텍스트/커서/선택/스크롤바 */
+
+/* 본문 셀 — 행간만 살짝 (자간은 mono 폰트 자체 spacing) */
+.split-leaf .xterm .xterm-rows {
+  line-height: 1.4 !important;
+}
+
+/* 본문 좌우 여백 (xterm-screen 자체에 padding) */
+.split-leaf .xterm .xterm-screen {
+  padding-left: 6px;
+}
+
+/* dim (흐린 텍스트) — 가독성 강화: opacity 줄이지 말고 brightBlack 톤에 의존 */
+.split-leaf .xterm .xterm-dim {
+  opacity: 0.85 !important;
+  font-weight: 500 !important;
+}
+
+/* bold 더 굵게 */
+.split-leaf .xterm .xterm-bold {
+  font-weight: 800 !important;
+  text-shadow: 0 0 1px currentColor;
+}
+
+/* underline — 두꺼운 보라 톤 */
+.split-leaf .xterm .xterm-underline {
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  text-decoration-color: rgba(126,232,251,0.6);
+}
+
+/* italic 살짝 기울임 */
+.split-leaf .xterm .xterm-italic {
+  font-style: italic;
+  opacity: 0.95;
+}
+
+/* 커서 — 진한 라일락 글로우 */
+.split-leaf .xterm-cursor-layer canvas,
+.split-leaf .xterm-cursor {
+  filter: drop-shadow(0 0 6px rgba(126,232,251,0.8)) drop-shadow(0 0 12px rgba(126,232,251,0.4));
+}
+
+/* selection 강조 — 라일락 톤, 진하게 */
+.split-leaf .xterm .composition-view,
+.split-leaf .xterm-selection-layer canvas {
+  background: rgba(126,232,251,0.32) !important;
+}
+.split-leaf .xterm-selection div {
+  background: rgba(126,232,251,0.35) !important;
+}
+
+/* 링크 호버 — 시안 글로우 */
+.split-leaf .xterm .xterm-link-layer canvas {
+  filter: drop-shadow(0 0 4px rgba(125,240,255,0.5));
+}
+
+/* 스크롤바 — 보라 톤 (살짝 두께 + 그라데이션) */
+.split-leaf .xterm-viewport {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(126,232,251,0.4) transparent;
+}
+.split-leaf .xterm-viewport::-webkit-scrollbar { width: 12px; }
+.split-leaf .xterm-viewport::-webkit-scrollbar-track {
+  background: rgba(126,232,251,0.04);
+  border-radius: 6px;
+}
+.split-leaf .xterm-viewport::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(126,232,251,0.5), rgba(140,188,255,0.4));
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+.split-leaf .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(126,232,251,0.8), rgba(140,188,255,0.7));
+  background-clip: content-box;
+}
+
+/* xterm 컨테이너 자체 배경 — 부드러운 다크 그레이 */
+.split-leaf .xterm-wrap {
+  background: #15171c;
+}

@@ -91,11 +91,11 @@ pub fn run() {
         .setup(|app| {
             // System tray
             let show = MenuItem::with_id(app, "show", "Show Window", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "Quit Praetorium", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "Quit Cockpit", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
 
             let mut builder = TrayIconBuilder::new()
-                .tooltip("Praetorium")
+                .tooltip("Cockpit")
                 .menu(&menu)
                 .on_menu_event(|app, event| {
                     match event.id.as_ref() {

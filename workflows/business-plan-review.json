@@ -1,0 +1,143 @@
+{
+  "id": "business-plan-review",
+  "name": "사업계획서 멀티 에이전트 리뷰",
+  "description": "6명 병렬 분석 → 낙관 vs 비관 논쟁 → 심판 → 최종 보고서.",
+  "maxIterations": 2,
+  "inputs": [
+    { "key": "plan", "label": "사업계획서 전문", "type": "textarea", "required": true },
+    { "key": "context", "label": "추가 맥락 (업종, 단계, 목적 등)", "type": "text", "default": "" }
+  ],
+  "steps": [
+    {
+      "id": "market",
+      "name": "시장 분석가",
+      "type": "llm",
+      "role": "10년차 시장조사 전문가. TAM/SAM/SOM 산정, 시장 트렌드, 타이밍을 냉정하게 평가한다. 웹 검색으로 최신 시장 데이터를 반드시 조사해라.",
+      "provider": "claude",
+      "model": "sonnet",
+      "timeout": 180000,
+      "tools": ["WebSearch", "WebFetch"],
+      "prompt": "## 사업계획서\n{{plan}}\n\n## 추가 맥락\n{{context}}\n\n웹에서 관련 시장 규모, 트렌드, 보고서를 검색한 뒤 다음을 분석해라:\n1. TAM/SAM/SOM 산정의 논리적 타당성 (검색 근거 포함)\n2. 시장 트렌드와 타이밍 적절성\n3. 시장 진입 장벽과 진입 전략의 현실성\n4. 고객 세그먼트 정의의 구체성\n\n각 항목에 [강점], [약점], [개선 제안]을 명시해라.",
+      "outputKey": "market_review"
+    },
+    {
+      "id": "financial",
+      "name": "재무 분석가",
+      "type": "llm",
+      "role": "VC 출신 재무 분석가. 매출 추정, 비용 구조, 손익분기점, 자금 운용 계획을 숫자로 검증한다. 낙관적 추정에 대해 가차없이 지적한다.",
+      "provider": "claude",
+      "model": "sonnet",
+      "timeout": 180000,
+      "prompt": "## 사업계획서\n{{plan}}\n\n## 추가 맥락\n{{context}}\n\n다음을 분석해라:\n1. 매출 추정의 근거와 현실성 (단가 × 고객수 로직)\n2. 비용 구조와 번레이트\n3. 손익분기점 도달 시점의 합리성\n4. 자금 조달/운용 계획의 적절성\n5. 유닛 이코노믹스 (CAC, LTV, LTV/CAC 비율)\n\n숫자가 없거나 근거가 약한 부분을 구체적으로 지적해라.\n각 항목에 [강점], [약점], [개선 제안]을 명시해라.",
+      "outputKey": "financial_review"
+    },
+    {
+      "id": "competitor",
+      "name": "경쟁사 분석가",
+      "type": "llm",
+      "role": "전략 컨설턴트. 경쟁 구도, 차별화 전략, 경쟁 우위의 지속가능성을 분석한다. '경쟁사가 없다'는 주장을 절대 액면 그대로 받아들이지 않는다. 웹 검색으로 실제 경쟁사를 찾아라.",
+      "provider": "claude",
+      "model": "sonnet",
+      "timeout": 180000,
+      "tools": ["WebSearch", "WebFetch"],
+      "prompt": "## 사업계획서\n{{plan}}\n\n## 추가 맥락\n{{context}}\n\n웹에서 동종/유사 서비스, 경쟁사를 검색한 뒤 다음을 분석해라:\n1. 경쟁사/대안재 파악의 완전성 (누락된 경쟁자는?)\n2. 차별화 요소의 실질성 (기술적 해자 vs 마케팅 주장)\n3. 경쟁 우위의 지속가능성 (모방 난이도, 전환 비용)\n4. 포지셔닝 전략의 명확성\n\n각 항목에 [강점], [약점], [개선 제안]을 명시해라.",
+      "outputKey": "competitor_review"
+    },
+    {
+      "id": "product",
+      "name": "고객/기술 심사관",
+      "type": "llm",
+      "role": "CTO 겸 UX 리서처. 고객 페인포인트, 제품-시장 적합성, 기술 스택, 개발 로드맵을 동시에 평가한다.",
+      "provider": "claude",
+      "model": "sonnet",
+      "timeout": 180000,
+      "prompt": "## 사업계획서\n{{plan}}\n\n## 추가 맥락\n{{context}}\n\n다음을 분석해라:\n[고객] 1. 고객 페인포인트 정의의 구체성\n2. 제품-시장 적합성 검증 여부\n3. 고객 획득 전략의 현실성\n4. 가격 전략과 지불 의사(WTP)\n[기술] 5. 기술 스택 선택의 적절성\n6. 개발 로드맵의 현실성\n7. MVP 정의의 적절성\n8. 확장성과 기술 아키텍처\n\n각 항목에 [강점], [약점], [개선 제안]을 명시해라.",
+      "outputKey": "product_review"
+    },
+    {
+      "id": "team_risk",
+      "name": "팀/리스크 분석가",
+      "type": "llm",
+      "role": "조직 컨설턴트 겸 리스크 매니저. 팀 역량과 사업 리스크를 교차 분석한다. 최악의 경우를 항상 먼저 생각한다.",
+      "provider": "claude",
+      "model": "sonnet",
+      "timeout": 180000,
+      "prompt": "## 사업계획서\n{{plan}}\n\n## 추가 맥락\n{{context}}\n\n다음을 분석해라:\n[팀] 1. 핵심 팀원의 도메인 전문성\n2. 역할 분담과 역량 갭\n3. 실행 이력과 관련 경험\n4. 채용 계획의 현실성\n[리스크] 5. 핵심 리스크 식별 (시장, 기술, 규제, 팀, 자금)\n6. 각 리스크의 발생 확률 × 영향도\n7. 누락된 리스크 요인\n8. 최악의 시나리오와 Exit 전략\n\n각 항목에 [강점/리스크], [현재 대응], [개선 제안]을 명시해라.",
+      "outputKey": "team_risk_review"
+    },
+    {
+      "id": "investor",
+      "name": "투자자 시뮬레이터",
+      "type": "llm",
+      "role": "시드~시리즈A 전문 VC 심사역. 투자 매력도를 평가하고, 실제 IR 미팅에서 나올 질문을 던진다.",
+      "provider": "claude",
+      "model": "sonnet",
+      "timeout": 180000,
+      "prompt": "## 사업계획서\n{{plan}}\n\n## 추가 맥락\n{{context}}\n\n다음을 수행해라:\n1. 투자 매력도 평가 (1-10점, 근거 포함)\n2. IR 미팅에서 반드시 나올 까다로운 질문 5개\n3. 각 질문에 대한 현재 사업계획서의 답변 가능 여부 평가\n4. 투자 결정을 위해 추가로 필요한 정보/자료\n\n최종적으로 INVEST / PASS / CONDITIONAL 중 하나로 판정해라.",
+      "outputKey": "investor_review"
+    },
+    {
+      "id": "summary",
+      "name": "1차 종합",
+      "type": "llm",
+      "role": "전략 컨설턴트. 6명의 분석을 요약 정리한다. 핵심 쟁점과 의견 차이를 도출한다.",
+      "provider": "claude",
+      "model": "sonnet",
+      "timeout": 180000,
+      "prompt": "## 원본 사업계획서\n{{plan}}\n\n## 시장 분석\n{{market_review}}\n\n## 재무 분석\n{{financial_review}}\n\n## 경쟁사 분석\n{{competitor_review}}\n\n## 고객/기술\n{{product_review}}\n\n## 팀/리스크\n{{team_risk_review}}\n\n## 투자자 관점\n{{investor_review}}\n\n6명의 분석을 종합해라:\n1. 전문가 간 공통된 강점 3가지\n2. 전문가 간 공통된 약점 3가지\n3. 의견이 갈리는 핵심 쟁점 3가지 (누가 어떤 입장인지 명시)\n4. 투자자 판정 요약\n\n이 종합을 바탕으로 낙관론자와 비관론자가 논쟁할 예정이다.",
+      "outputKey": "first_summary"
+    },
+    {
+      "id": "optimist",
+      "name": "낙관론자",
+      "type": "llm",
+      "role": "열정적인 사업 옹호자. 이 사업의 잠재력과 강점을 최대한 부각하고, 비관론자의 우려를 논리적으로 반박한다. 단, 근거 없는 낙관은 금물.",
+      "provider": "claude",
+      "model": "sonnet",
+      "timeout": 180000,
+      "prompt": "## 사업계획서\n{{plan}}\n\n## 6명 전문가 종합\n{{first_summary}}\n\n{{pessimist_arg}}\n\n## 지시사항\n이 사업의 **성공 가능성** 관점에서 논거를 펼쳐라.\n\n1. 핵심 강점과 기회 3가지를 번호를 매겨 제시해라. 각각 구체적 근거나 사례를 포함.\n2. 위에 비관론이 있다면, 각각 반박해라.\n3. 이 사업이 성공할 수 있는 이유를 한 문단으로 결론.\n\n반드시 실제 논거를 직접 작성해라. '논거가 없다' 같은 말은 하지 마라.",
+      "outputKey": "optimist_arg"
+    },
+    {
+      "id": "pessimist",
+      "name": "비관론자",
+      "type": "llm",
+      "role": "냉철한 Devil's Advocate. 사업의 치명적 결함과 실패 시나리오를 가차없이 지적한다. 낙관론자의 논거를 날카롭게 반박한다.",
+      "provider": "claude",
+      "model": "sonnet",
+      "timeout": 180000,
+      "prompt": "## 사업계획서\n{{plan}}\n\n## 6명 전문가 종합\n{{first_summary}}\n\n## 낙관론자 주장\n{{optimist_arg}}\n\n## 지시사항\n이 사업의 **실패 리스크** 관점에서 논거를 펼쳐라.\n\n1. 낙관론자의 각 논거를 구체적으로 반박해라.\n2. 치명적 약점과 리스크 3가지를 번호를 매겨 제시해라. 각각 최악 시나리오 포함.\n3. 이 사업이 실패할 수 있는 이유를 한 문단으로 결론.\n\n반드시 실제 논거를 직접 작성해라.",
+      "outputKey": "pessimist_arg"
+    },
+    {
+      "id": "judge",
+      "name": "심판",
+      "type": "llm",
+      "role": "공정한 심판. 낙관/비관 양측의 논거를 객관적으로 평가하고, 핵심 쟁점이 충분히 다뤄졌는지 판정한다. 판정은 반드시 VERDICT:RESOLVED 또는 VERDICT:CONTINUE 중 하나로 끝내야 한다.",
+      "provider": "claude",
+      "model": "sonnet",
+      "timeout": 180000,
+      "prompt": "## 전문가 종합\n{{first_summary}}\n\n## 낙관론자\n{{optimist_arg}}\n\n## 비관론자\n{{pessimist_arg}}\n\n## 지시사항\n양측의 논거를 분석해라.\n\n1. 각 측의 가장 설득력 있는 논거를 평가해라.\n2. 각 측의 가장 약한 논거를 지적해라.\n3. 추가 논쟁이 필요한 미해결 쟁점이 있는지 판단해라.\n\n마지막 줄에 반드시 다음 중 하나를 써라:\n- VERDICT:RESOLVED — 충분히 논의되었고 결론 도출 가능\n- VERDICT:CONTINUE — 핵심 쟁점이 남아 있어 추가 논쟁 필요",
+      "outputKey": "debate_judgment"
+    },
+    {
+      "id": "final",
+      "name": "최종 보고서",
+      "type": "llm",
+      "role": "맥킨지 출신 전략 컨설턴트. 모든 분석과 논쟁을 종합해서 편향 없는 최종 보고서를 도출한다.",
+      "provider": "claude",
+      "model": "opus",
+      "timeout": 300000,
+      "prompt": "## 원본 사업계획서\n{{plan}}\n\n## 6명 전문가 종합\n{{first_summary}}\n\n## 낙관론자 최종 입장\n{{optimist_arg}}\n\n## 비관론자 최종 입장\n{{pessimist_arg}}\n\n## 심판 판정\n{{debate_judgment}}\n\n---\n\n위 모든 분석과 논쟁을 종합해서 다음 구조로 최종 보고서를 작성해라:\n\n### 1. 종합 평가 (한 문단)\n\n### 2. 핵심 강점 Top 5\n어떤 전문가/논쟁에서 나온 것인지 출처 표시.\n\n### 3. 치명적 약점 Top 5\n즉시 보완하지 않으면 사업/투자 유치에 타격을 줄 수 있는 것들. 비관론자의 지적 중 유효한 것 포함.\n\n### 4. 개선 액션 플랜 (우선순위순)\n| 순위 | 항목 | 담당 영역 | 난이도 | 기대 효과 |\n\n### 5. 찬반 논쟁 핵심 정리\n낙관/비관 양측의 핵심 대립점과 결론.\n\n### 6. 사업계획서 보완 시 추가해야 할 섹션/데이터\n\n### 7. 최종 등급\nA (투자 준비 완료) / B (보완 후 투자 가능) / C (근본적 재설계 필요)\n근거와 함께 판정.",
+      "outputKey": "final_report"
+    }
+  ],
+  "edges": [
+    { "from": "START", "to": ["market", "financial", "competitor", "product", "team_risk", "investor"] },
+    { "from": ["market", "financial", "competitor", "product", "team_risk", "investor"], "to": "summary" },
+    { "from": "summary", "to": ["optimist", "pessimist"] },
+    { "from": ["optimist", "pessimist"], "to": "judge" },
+    { "from": "judge", "condition": { "pattern": "VERDICT:\\s*RESOLVED", "true": "final", "false": ["optimist", "pessimist"] } },
+    { "from": "final", "to": "END" }
+  ]
+}

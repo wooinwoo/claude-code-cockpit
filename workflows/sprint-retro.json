@@ -1,0 +1,48 @@
+{
+  "id": "sprint-retro",
+  "name": "스프린트 회고 준비",
+  "description": "Git 로그 + Jira 데이터 → 코드/이슈 병렬 분석 → 인사이트 도출 → 회고 자료",
+  "maxIterations": 1,
+  "inputs": [
+    { "key": "commits", "label": "Git log (최근 스프린트)", "type": "textarea", "required": true },
+    { "key": "issues", "label": "Jira 이슈 목록 (완료/미완료)", "type": "textarea", "required": true },
+    { "key": "team_notes", "label": "팀 메모 (슬랙, 회의 등에서 나온 이슈들)", "type": "textarea", "default": "" }
+  ],
+  "steps": [
+    {
+      "id": "code_analyst",
+      "name": "코드 활동 분석가",
+      "type": "llm",
+      "role": "데이터 분석가. Git 로그에서 스프린트 개발 패턴을 분석한다.",
+      "provider": "claude",
+      "model": "haiku",
+      "prompt": "## Git Log\n{{commits}}\n\n이 스프린트의 코드 활동을 분석해라.\n\n1. **커밋 패턴** — 일별 분포, 집중 시기\n2. **변경 범위** — 어떤 영역이 가장 많이 변경됐는가\n3. **핫스팟** — 반복 수정된 파일 (불안정 신호)\n4. **리팩토링 비율** — fix/refactor vs feat 비율\n5. **코드 리뷰 패턴** — PR 크기, 리뷰 속도 (추론 가능하면)\n6. **기술 부채 신호** — 급한 핫픽스, 되돌리기 커밋 등",
+      "outputKey": "code_analysis"
+    },
+    {
+      "id": "issue_analyst",
+      "name": "이슈 트래커 분석가",
+      "type": "llm",
+      "role": "프로젝트 분석가. Jira 데이터에서 스프린트 건강도를 분석한다.",
+      "provider": "claude",
+      "model": "haiku",
+      "prompt": "## Jira 이슈\n{{issues}}\n\n이 스프린트의 이슈 패턴을 분석해라.\n\n1. **완료율** — 계획 대비 실제 완료\n2. **이월 이슈** — 완료 못한 것들과 패턴\n3. **블로커 패턴** — 자주 막힌 원인\n4. **추정 정확도** — 스토리 포인트 vs 실제 (추론 가능하면)\n5. **우선순위 변경** — 스프린트 중 추가/변경된 이슈\n6. **버그 비율** — 신규 버그 발생률",
+      "outputKey": "issue_analysis"
+    },
+    {
+      "id": "facilitator",
+      "name": "회고 퍼실리테이터",
+      "type": "llm",
+      "role": "애자일 코치. 분석 결과를 실행 가능한 회고 자료로 종합한다.",
+      "provider": "claude",
+      "model": "sonnet",
+      "prompt": "## 코드 활동 분석\n{{code_analysis}}\n\n## 이슈 분석\n{{issue_analysis}}\n\n## 팀 메모\n{{team_notes}}\n\n스프린트 회고 자료를 준비해라.\n\n### 📊 스프린트 대시보드\n핵심 수치 요약 (완료율, 커밋 수, 버그 수 등)\n\n### ✅ 잘한 것 (Keep)\n데이터 기반으로 3-5개\n\n### 🔧 개선할 것 (Problem)\n데이터 기반으로 3-5개\n\n### 💡 시도할 것 (Try)\n구체적인 액션 아이템 3-5개\n\n### ⚠️ 주의 신호\n기술 부채, 번아웃, 프로세스 병목 등\n\n### 토론 질문\n팀이 함께 논의할 질문 3개\n\n데이터에 기반하되, 비난이 아닌 개선에 초점.",
+      "outputKey": "retro"
+    }
+  ],
+  "edges": [
+    { "from": "START", "to": ["code_analyst", "issue_analyst"] },
+    { "from": ["code_analyst", "issue_analyst"], "to": "facilitator" },
+    { "from": "facilitator", "to": "END" }
+  ]
+}

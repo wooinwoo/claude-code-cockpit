@@ -298,6 +298,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "cockpit"
+version = "1.6.1"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+]
+
+[[package]]
 name = "combine"
 version = "4.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2269,14 +2279,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9"
 dependencies = [
  "zerocopy",
-]
-
-[[package]]
-name = "praetorium"
-version = "2.0.0"
-dependencies = [
- "tauri",
- "tauri-build",
 ]
 
 [[package]]

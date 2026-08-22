@@ -1,0 +1,87 @@
+{
+  "id": "deep-research",
+  "name": "딥 리서치 보고서",
+  "description": "질문 분해 → 병렬 웹 리서치 → 종합 → 팩트체크 순환 → 최종 리포트",
+  "maxIterations": 2,
+  "inputs": [
+    { "key": "topic", "label": "리서치 주제 (구체적일수록 좋음)", "type": "textarea", "required": true },
+    { "key": "depth", "label": "깊이", "type": "select", "options": ["brief (핵심만)", "detailed (상세)", "comprehensive (종합)"], "default": "detailed (상세)" },
+    { "key": "audience", "label": "대상 독자", "type": "select", "options": ["개발팀", "경영진", "클라이언트", "일반"], "default": "개발팀" }
+  ],
+  "steps": [
+    {
+      "id": "planner",
+      "name": "리서치 설계자",
+      "type": "llm",
+      "role": "리서치 디렉터. 복잡한 질문을 3-5개 하위 질문으로 분해하고 리서치 전략을 수립한다.",
+      "provider": "claude",
+      "model": "haiku",
+      "prompt": "주제: {{topic}}\n깊이: {{depth}}\n대상: {{audience}}\n\n이 주제를 조사하기 위한 리서치 계획을 수립해라.\n\n1. **핵심 질문** — 이 주제의 본질적 질문 1개\n2. **하위 질문 3-5개** — 병렬로 조사할 세부 주제\n3. **검색 키워드** — 각 하위 질문별 효과적인 검색어\n4. **신뢰할 소스** — 이 주제에서 참조할 만한 소스 유형",
+      "outputKey": "plan"
+    },
+    {
+      "id": "researcher_a",
+      "name": "리서처 A (트렌드/현황)",
+      "type": "llm",
+      "role": "기술 리서처. 현재 트렌드, 시장 현황, 최신 동향을 웹에서 조사한다.",
+      "provider": "gemini",
+      "model": "gemini-2.5-flash",
+      "timeout": 180000,
+      "tools": ["WebSearch", "WebFetch"],
+      "prompt": "## 리서치 계획\n{{plan}}\n\n위 계획에서 **트렌드, 현황, 최신 동향** 관련 하위 질문을 웹 검색으로 조사해라.\n\n각 발견에 대해:\n- 핵심 내용\n- 출처 URL\n- 신뢰도 (높음/보통/낮음)\n- 우리 주제와의 관련성",
+      "outputKey": "research_a"
+    },
+    {
+      "id": "researcher_b",
+      "name": "리서처 B (기술/데이터)",
+      "type": "llm",
+      "role": "데이터 리서처. 벤치마크, 비교 데이터, 기술적 분석, 사례 연구를 조사한다.",
+      "provider": "gemini",
+      "model": "gemini-2.5-flash",
+      "timeout": 180000,
+      "tools": ["WebSearch", "WebFetch"],
+      "prompt": "## 리서치 계획\n{{plan}}\n\n위 계획에서 **데이터, 벤치마크, 기술 비교, 사례** 관련 하위 질문을 웹 검색으로 조사해라.\n\n각 발견에 대해:\n- 핵심 데이터/수치\n- 출처 URL\n- 데이터 시점 (언제 기준인지)\n- 비교 맥락",
+      "outputKey": "research_b"
+    },
+    {
+      "id": "fact_checker",
+      "name": "팩트체커",
+      "type": "llm",
+      "role": "엄격한 팩트체커. 리서치 결과의 정확성, 일관성, 편향을 검증한다.",
+      "provider": "claude",
+      "model": "haiku",
+      "prompt": "## 리서치 A (트렌드)\n{{research_a}}\n\n## 리서치 B (데이터)\n{{research_b}}\n\n## 보완 조사 (있으면)\n{{additional}}\n\n위 리서치 결과를 교차 검증해라.\n\n1. **모순되는 정보** — A와 B에서 상충하는 내용\n2. **근거 부족** — 출처가 약하거나 없는 주장\n3. **편향 의심** — 특정 방향으로 치우친 분석\n4. **누락된 관점** — 중요하지만 조사되지 않은 부분\n\n전체 신뢰도가 충분하면 CONFIDENCE:HIGH\n보완이 필요하면 CONFIDENCE:LOW + 추가 조사할 내용 명시",
+      "outputKey": "fact_check"
+    },
+    {
+      "id": "deep_dive",
+      "name": "심층 보완 조사",
+      "type": "llm",
+      "role": "심층 조사관. 팩트체크에서 지적된 부족한 부분을 집중 보완한다.",
+      "provider": "gemini",
+      "model": "gemini-2.5-flash",
+      "timeout": 180000,
+      "tools": ["WebSearch", "WebFetch"],
+      "prompt": "## 팩트체크 결과\n{{fact_check}}\n\n## 기존 리서치\nA: {{research_a}}\nB: {{research_b}}\n\n팩트체크에서 지적된 부족한 부분을 웹 검색으로 보완해라. 특히 모순되는 부분과 근거가 약한 부분을 집중 조사해라.",
+      "outputKey": "additional"
+    },
+    {
+      "id": "writer",
+      "name": "리포트 작성자",
+      "type": "llm",
+      "role": "테크니컬 라이터. 검증된 리서치를 대상 독자에 맞는 보고서로 작성한다.",
+      "provider": "claude",
+      "model": "sonnet",
+      "prompt": "## 리서치 A\n{{research_a}}\n\n## 리서치 B\n{{research_b}}\n\n## 보완 조사 (있으면)\n{{additional}}\n\n## 팩트체크\n{{fact_check}}\n\n## 대상 독자\n{{audience}}\n\n위 리서치를 종합하여 {{depth}} 수준의 리포트를 작성해라.\n\n## 형식\n1. **요약** (Executive Summary) — 3줄\n2. **배경** — 왜 이 주제가 중요한가\n3. **핵심 발견** — 주요 인사이트 (데이터 포함)\n4. **분석** — 의미와 시사점\n5. **권장 사항** — 구체적 액션\n6. **참고 자료** — URL 목록\n\n대상이 {{audience}}이므로 그에 맞는 깊이와 용어를 사용해라.",
+      "outputKey": "report"
+    }
+  ],
+  "edges": [
+    { "from": "START", "to": "planner" },
+    { "from": "planner", "to": ["researcher_a", "researcher_b"] },
+    { "from": ["researcher_a", "researcher_b"], "to": "fact_checker" },
+    { "from": "fact_checker", "condition": { "pattern": "CONFIDENCE:\\s*HIGH", "true": "writer", "false": "deep_dive" } },
+    { "from": "deep_dive", "to": "fact_checker" },
+    { "from": "writer", "to": "END" }
+  ]
+}

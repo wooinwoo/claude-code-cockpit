@@ -1,0 +1,74 @@
+{
+  "id": "prd-tech-decision",
+  "name": "PRD → 기술스택 결정",
+  "description": "러프한 아이디어 → PRD 구조화 → 찬성/반대 아키텍트 토론 → 심판 → 최종 기술 결정서",
+  "maxIterations": 3,
+  "inputs": [
+    { "key": "idea", "label": "프로젝트 설명 (러프하게 OK)", "type": "textarea", "required": true },
+    { "key": "constraints", "label": "제약사항 (예산, 기존 인프라, 필수 기술 등)", "type": "textarea", "default": "" },
+    { "key": "team_size", "label": "팀 규모", "type": "select", "options": ["1인 (솔로)", "2-5명 (소규모)", "6-15명 (중규모)", "15명+ (대규모)"], "default": "2-5명 (소규모)" }
+  ],
+  "steps": [
+    {
+      "id": "prd_analyst",
+      "name": "PRD 분석가",
+      "type": "llm",
+      "role": "10년차 프로덕트 매니저. 러프한 아이디어를 체계적인 PRD로 구조화한다. 빠진 부분은 합리적인 가정으로 채우되, 가정임을 명시한다.",
+      "provider": "claude",
+      "model": "sonnet",
+      "prompt": "다음 프로젝트 아이디어를 구조화된 PRD로 정리해라.\n\n## 입력\n{{idea}}\n\n## 제약사항\n{{constraints}}\n\n## 팀 규모\n{{team_size}}\n\n## 출력 형식\n1. **프로젝트 개요** — 한 문단\n2. **핵심 문제 정의** — 해결하려는 문제\n3. **타겟 사용자** — 누가 쓰는가\n4. **MVP 기능 목록** — 필수 기능 5-10개 (우선순위 포함)\n5. **비기능 요구사항** — 성능, 보안, 확장성, 가용성 기준\n6. **기술적 제약사항** — 반드시 지켜야 할 것\n7. **규모 추정** — 예상 사용자 수, 동시 접속, 데이터 규모\n8. **가정 사항** — [가정] 태그로 명시\n\n빠진 정보는 합리적으로 추정하되 반드시 [가정]으로 표시해라.",
+      "outputKey": "prd"
+    },
+    {
+      "id": "pro_architect",
+      "name": "찬성 아키텍트",
+      "type": "llm",
+      "role": "실용주의 시니어 아키텍트. 검증된 기술을 선호하고, 빠른 개발과 안정성을 중시한다. 구체적인 기술명과 버전까지 제시한다.",
+      "provider": "claude",
+      "model": "sonnet",
+      "timeout": 180000,
+      "tools": ["WebSearch"],
+      "prompt": "## PRD\n{{prd}}\n\n## 팀 규모\n{{team_size}}\n\n## 반대 측 주장 (있으면)\n{{con_proposal}}\n\n웹에서 최신 기술 트렌드와 벤치마크를 검색한 뒤, 이 PRD에 최적인 기술스택과 인프라를 제안해라.\n\n반대 측 주장이 있으면 반드시 반박해라.\n\n## 제안 형식\n1. **Frontend** — 프레임워크, 상태관리, UI 라이브러리 (근거 포함)\n2. **Backend** — 언어, 프레임워크, API 방식 (근거 포함)\n3. **Database** — 메인 DB, 캐시, 검색엔진 (근거 포함)\n4. **Infrastructure** — 클라우드, 컨테이너, CI/CD (근거 포함)\n5. **핵심 근거** — 왜 이 조합인지 3가지\n6. **리스크** — 이 선택의 약점 (솔직하게)\n7. **예상 개발 기간** — MVP 기준\n\n검색 근거를 반드시 포함해라.",
+      "outputKey": "pro_proposal"
+    },
+    {
+      "id": "con_architect",
+      "name": "반대 아키텍트",
+      "type": "llm",
+      "role": "혁신적이고 도전적인 아키텍트. 새로운 기술과 비전통적 접근을 선호한다. 찬성 측의 허점을 날카롭게 파고든다.",
+      "provider": "claude",
+      "model": "sonnet",
+      "timeout": 180000,
+      "tools": ["WebSearch"],
+      "prompt": "## PRD\n{{prd}}\n\n## 팀 규모\n{{team_size}}\n\n## 찬성 측 제안\n{{pro_proposal}}\n\n찬성 측의 기술스택 제안을 분석하고:\n\n1. **찬성 측 약점 공격** — 각 선택의 문제점을 구체적으로 지적해라\n2. **대안 제안** — 더 나은 대안 기술스택을 제시해라 (웹 검색으로 근거 포함)\n   - Frontend, Backend, Database, Infrastructure 각각\n3. **비용 비교** — 찬성 vs 반대 안의 운영 비용 추정\n4. **확장성 비교** — 사용자 10배 증가 시 어느 쪽이 유리한가\n5. **채용 관점** — 해당 기술 인력 수급은 어떤가\n6. **결론** — 왜 내 제안이 더 나은지\n\n반드시 실제 데이터와 사례를 검색해서 근거를 대라.",
+      "outputKey": "con_proposal"
+    },
+    {
+      "id": "judge",
+      "name": "기술 심판",
+      "type": "llm",
+      "role": "CTO급 기술 의사결정자. 양측의 주장을 객관적으로 평가하고, 핵심 쟁점이 충분히 다뤄졌는지 판정한다.",
+      "provider": "claude",
+      "model": "sonnet",
+      "prompt": "## PRD\n{{prd}}\n\n## 찬성 측 (실용파)\n{{pro_proposal}}\n\n## 반대 측 (혁신파)\n{{con_proposal}}\n\n양측의 기술스택 제안을 평가해라.\n\n1. **각 영역별 승자** — Frontend, Backend, DB, Infra 각각 어느 쪽이 더 설득력 있는가\n2. **미해결 쟁점** — 추가 논쟁이 필요한 부분\n3. **리스크 평가** — 각 안의 실패 가능성\n4. **최종 판정**\n\n충분히 논의되었으면 마지막 줄에 VERDICT:RESOLVED\n추가 논쟁이 필요하면 VERDICT:CONTINUE (구체적으로 뭘 더 논의해야 하는지 명시)",
+      "outputKey": "judgment"
+    },
+    {
+      "id": "synthesizer",
+      "name": "기술 결정서 작성자",
+      "type": "llm",
+      "role": "테크니컬 라이터 겸 아키텍트. 토론 결과를 실행 가능한 기술 결정 문서로 정리한다.",
+      "provider": "claude",
+      "model": "sonnet",
+      "prompt": "## PRD\n{{prd}}\n\n## 찬성 측\n{{pro_proposal}}\n\n## 반대 측\n{{con_proposal}}\n\n## 심판 판정\n{{judgment}}\n\n토론 결과를 바탕으로 최종 기술 결정서를 작성해라.\n\n## 형식\n### 1. 최종 기술스택\n| 영역 | 선택 | 차선 대안 | 선택 근거 |\n\n### 2. 아키텍처 개요\n시스템 구성도 (텍스트로 설명)\n\n### 3. 인프라 구성\n클라우드/서버/네트워크 구성\n\n### 4. 개발 로드맵\nPhase 1 (MVP) → Phase 2 → Phase 3 타임라인\n\n### 5. 예상 비용\n월간 인프라 비용 추정\n\n### 6. 리스크 & 대응\n주요 기술 리스크와 대응 전략\n\n### 7. 채택하지 않은 대안\n왜 기각했는지 간단히",
+      "outputKey": "decision"
+    }
+  ],
+  "edges": [
+    { "from": "START", "to": "prd_analyst" },
+    { "from": "prd_analyst", "to": ["pro_architect", "con_architect"] },
+    { "from": ["pro_architect", "con_architect"], "to": "judge" },
+    { "from": "judge", "condition": { "pattern": "VERDICT:\\s*RESOLVED", "true": "synthesizer", "false": ["pro_architect", "con_architect"] } },
+    { "from": "synthesizer", "to": "END" }
+  ]
+}

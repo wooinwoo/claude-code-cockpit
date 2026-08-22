@@ -1,0 +1,17 @@
+{
+  "name": "Cockpit - Claude Code Dashboard",
+  "short_name": "Cockpit",
+  "description": "Multi-project Claude Code session dashboard",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0b10",
+  "theme_color": "#818cf8",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' fill='%23818cf8'/><path d='M35 50L45 60L65 40' stroke='white' stroke-width='8' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
