@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Default capabilities for Cockpit",
+  "description": "Default capabilities for Praetorium",
   "windows": ["*"],
   "permissions": [
     "core:default",

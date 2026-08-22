@@ -42,7 +42,8 @@ Thumbs.db
 Desktop.ini
 
 # Test/debug files
-test-*
+/test-*
+.tmp-*/
 *.png
 *.jpg
 *.jpeg
