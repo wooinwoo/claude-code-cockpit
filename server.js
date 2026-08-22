@@ -1,5 +1,5 @@
 import { createServer } from 'node:http';
-import { copyFileSync, existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { dirname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -74,11 +74,7 @@ function sameOrigin(req) {
   catch { return false; }
 }
 
-const legacyDirectors = join(process.env.LOCALAPPDATA || process.env.APPDATA || '', 'cockpit', 'directors.json');
 const directorState = join(DATA_DIR, 'directors.json');
-if (!existsSync(directorState) && existsSync(legacyDirectors)) {
-  try { copyFileSync(legacyDirectors, directorState); } catch { /* migration is best-effort */ }
-}
 
 const directorService = new DirectorService({
   runtime: new HermesRuntime(),
@@ -179,7 +175,7 @@ const server = createServer(async (req, res) => {
   }
 });
 
-if (isIgnoredBindRequest(process.env.COCKPIT_BIND || process.env.PRAETORIUM_BIND)) {
+if (isIgnoredBindRequest(process.env.PRAETORIUM_BIND)) {
   console.warn('[Praetorium] Ignored non-loopback bind override.');
 }
 
