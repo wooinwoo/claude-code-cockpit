@@ -1,63 +1,869 @@
 // ─── Terminal UI: context menu, headers, layout rendering, mobile, drag/drop,
 //     selection toolbar, quick bar, presets, broadcast, command palette,
 //     file drop, event delegation ───
-import { app, notify } from './state.js';
+import {
+  app, getOrderedTerminalEntries, getOrderedTerminalIds, getTerminalPair, getTerminalPairs, notify,
+  pairTerminals, setTerminalGroupLayout, setTerminalOrder, unpairTerminal,
+} from './state.js';
 import { startArenaPick } from './arena.js';
 import { copyText, esc, showToast, escapeHtml } from './utils.js';
 import { registerClickActions, registerInputActions } from './actions.js';
 import { updateAgentWall, WALL_ID } from './agent-wall.js';
+import { terminalGroupLayoutLabel, terminalGroupLayoutOptions, terminalGroupRects } from './terminal-group-layout.js';
+import {
+  createCanvasBoardFrame, createCanvasBoardItem, deleteCanvasBoardItem,
+  ensureCanvasBoardItem, updateCanvasBoard,
+} from './canvas-board.js';
+import { patchXtermImeComposition } from './xterm-ime-guard.js';
 
 // ─── Imports from terminal core (will be set via init) ───
 let _core = null;
+
+const CANVAS_KEY = 'dl-terminal-canvas';
+const PAIR_TONE_COUNT = 4;
+const canvas = loadCanvasState();
+let canvasGesture = null;
+let canvasSpaceDown = false;
+let initialCanvasFocusPending = true;
+
+function pairToneClass(termId) {
+  const index = getTerminalPairs().findIndex(pair => pair.termIds.includes(termId));
+  return index < 0 ? '' : ` pair-tone-${index % PAIR_TONE_COUNT}`;
+}
+
+function loadCanvasState() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(CANVAS_KEY) || '{}');
+    const rawTools = saved.tools && typeof saved.tools === 'object' ? saved.tools : {};
+    const tools = {};
+    for (const [savedId, value] of Object.entries(rawTools)) {
+      const boardId = savedId === 'note' ? 'N-0001' : savedId === 'checklist' ? 'C-0001' : value?.boardId || savedId;
+      const type = value?.type || (boardId.startsWith('N-') ? 'note' : boardId.startsWith('C-') ? 'checklist' : '');
+      if (!['note', 'checklist'].includes(type)) continue;
+      if (type === 'note' ? !/^N-\d{4,}$/.test(boardId) : !/^C-\d{4,}$/.test(boardId)) continue;
+      tools[boardId] = { ...value, type, boardId };
+    }
+    const activeItem = saved.activeItem === 'board:note' ? 'board:N-0001'
+      : saved.activeItem === 'board:checklist' ? 'board:C-0001'
+        : typeof saved.activeItem === 'string' ? saved.activeItem : '';
+    return {
+      enabled: saved.enabled !== false,
+      zoom: Math.max(0.3, Math.min(1.5, Number(saved.zoom) || 0.7)),
+      panX: Number(saved.panX) || 24,
+      panY: Number(saved.panY) || 24,
+      frames: saved.frames && typeof saved.frames === 'object' ? saved.frames : {},
+      tools,
+      toolsInitialized: saved.toolsInitialized === true,
+      activeItem,
+      boardCollapsed: saved.boardCollapsed === true,
+    };
+  } catch {
+    return { enabled: true, zoom: 0.7, panX: 24, panY: 24, frames: {}, tools: {}, toolsInitialized: false, activeItem: '', boardCollapsed: false };
+  }
+}
+
+function saveCanvasState() {
+  try { localStorage.setItem(CANVAS_KEY, JSON.stringify(canvas)); } catch { /* storage unavailable */ }
+}
 
 export function initTermUI(core) {
   _core = core;
 }
 
+function forceRestoredTerminalRedraw(termId, term) {
+  if (document.hidden || !term.agentCommand || app.ws?.readyState !== 1) return;
+  const cols = term.xterm.cols;
+  const rows = term.xterm.rows;
+  if (!cols || !rows) return;
+  const bumpedCols = cols < 1000 ? cols + 1 : cols - 1;
+  app.ws.send(JSON.stringify({ type: 'resize', termId, cols: bumpedCols, rows }));
+  setTimeout(() => {
+    if (app.termMap.get(termId) !== term || app.ws?.readyState !== 1) return;
+    app.ws.send(JSON.stringify({ type: 'resize', termId, cols, rows }));
+  }, 40);
+}
+
+function mountTerminal(termId, term) {
+  if (term.opened || !term.element.parentNode) return;
+  term.xterm.open(term.element);
+  patchXtermImeComposition(term.xterm);
+  // WebGL renderer: GPU 글리프 래스터라이즈로 한글 폴백 폰트의 셀 폭 어긋남(글자 겹침/씹힘)과
+  // 대량 출력 시 DOM 렌더링 병목(opencode TUI 스크롤 끊김)을 해결.
+  // 캔버스보드(줌 transform)에서는 텍스처가 깨져 DOM 렌더러 유지 — 기존 제약 그대로.
+  term.renderer = 'dom';
+  if (!canvas.enabled && window.WebglAddon) {
+    try {
+      const webgl = new WebglAddon.WebglAddon();
+      webgl.onContextLoss(() => {
+        // GPU 절전/드라이버 리셋 등으로 컨텍스트가 죽으면 CPU 렌더러로 전환 —
+        // 방치하면 터미널이 검은 화면으로 먹통이 되는 사고를 막는다.
+        term.renderer = 'dom';
+        try { webgl.dispose(); } catch { /* already disposed */ }
+        try { term.xterm.refresh(0, term.xterm.rows - 1); } catch { /* terminal gone */ }
+        showToast('터미널 GPU 렌더러가 초기화됨 — CPU 렌더러로 전환했습니다', 'warning', 4000);
+      });
+      term.xterm.loadAddon(webgl);
+      term.renderer = 'webgl';
+    } catch { /* no WebGL context — DOM fallback */ }
+  }
+  try { term.xterm.loadAddon(new ImageAddon.ImageAddon()); } catch { /* addon not available */ }
+  term.opened = true;
+  guardXtermPaste(term, termId);
+
+  // Fit the final frame before replay. Replaying a TUI at xterm's default 80 columns
+  // and fitting afterwards reflows ANSI cell backgrounds into large broken blocks.
+  _core.fitTerminal(termId, 0);
+  const pending = term.pendingBuffer;
+  term.pendingBuffer = null;
+  if (!pending) return;
+  term._replaying = true;
+  term.xterm.write(pending, () => {
+    term._replaying = false;
+    try {
+      term.xterm.scrollToBottom();
+      term.xterm.refresh(0, Math.max(0, term.xterm.rows - 1));
+    } catch { /* terminal was disposed during replay */ }
+    // Raw PTY history can begin mid-TUI update after the server buffer is trimmed.
+    // A harmless resize bounce asks live Claude/Codex UIs for a clean full redraw.
+    forceRestoredTerminalRedraw(termId, term);
+  });
+}
+
 // ─── Layout Rendering ───
 export function renderLayout() {
+  syncCanvasToggle();
   const docked = document.getElementById('agent-wall-stage')?.classList.contains('docked');
   if (isMobile() || docked) { renderMobileLayout(!docked); return; }
   const container = document.getElementById('term-panels');
   for (const [, t] of app.termMap) { if (t.element.parentNode) t.element.parentNode.removeChild(t.element); }
   container.innerHTML = '';
-  // Hide mobile elements on desktop
+  // The compact session strip is shared by desktop and mobile.
   const mobTabs = document.getElementById('mob-term-tabs');
   const mobActions = document.getElementById('mob-term-actions');
-  if (mobTabs) mobTabs.style.display = 'none';
+  renderSessionTabs(mobTabs);
+  if (mobTabs) mobTabs.style.display = '';
   if (mobActions) mobActions.style.display = 'none';
-  if (!app.layoutRoot) {
-    container.innerHTML = `<div class="term-empty">
-        <div class="term-empty-icon">&#x2756;</div>
-        <button class="btn primary" data-action="new-home-term">+ 빈 터미널 (홈)</button>
-        <button class="btn" data-action="new-term">+ New Terminal (프로젝트)</button>
-        <div class="term-empty-hint">Ctrl+T</div>
-        <div class="term-empty-features">
-          <span class="term-ef">&#x2194;&#xFE0F; Split</span>
-          <span class="term-ef">&#x1F50D; Search</span>
-          <span class="term-ef">&#x1F4E1; Broadcast</span>
-          <span class="term-ef">&#x1F4BE; Export</span>
-        </div>
-      </div>`;
+  if (canvas.enabled) {
+    if (app.termMap.size || Object.keys(canvas.tools).length) renderCanvasLayout(container);
+    else renderEmptyState(container);
     return;
   }
-  renderNode(app.layoutRoot, container);
+  const visibleLayout = app.terminalFocusMode && app.activeTermId
+    ? { type: 'leaf', termId: app.activeTermId }
+    : app.layoutRoot;
+  if (!visibleLayout) {
+    renderEmptyState(container);
+    return;
+  }
+  renderNode(visibleLayout, container);
   app._headCache.clear();
   updateTermHeaders();
   requestAnimationFrame(() => {
-    for (const [_termId, t] of app.termMap) {
-      if (!t.opened && t.element.parentNode) {
-        t.xterm.open(t.element);
-        if (!window.chrome?.webview) { try { t.xterm.loadAddon(new WebglAddon.WebglAddon()); } catch { /* addon not available */ } }
-        try { t.xterm.loadAddon(new ImageAddon.ImageAddon()); } catch { /* addon not available */ }
-        t.opened = true;
-        if (t.pendingBuffer) { t._replaying = true; t.xterm.write(t.pendingBuffer, () => { t._replaying = false; }); t.pendingBuffer = null; }
-        guardXtermPaste(t);
-      }
-    }
+    for (const [termId, term] of app.termMap) mountTerminal(termId, term);
     setTimeout(() => _core.fitAllTerminals(), 120);
   });
   _core.saveLayout();
+}
+
+function syncCanvasToggle() {
+  const button = document.querySelector('[data-action="toggle-canvas-view"]');
+  if (!button) return;
+  button.classList.toggle('active', canvas.enabled);
+  button.setAttribute('aria-pressed', String(canvas.enabled));
+  button.title = canvas.enabled ? 'Show canvas overview' : 'Open terminal canvas';
+}
+
+function toggleCanvasView() {
+  if (isMobile()) return;
+  if (!app.termMap.size && !Object.keys(canvas.tools).length) return _core.openNewTermModal();
+  if (!app.activeTermId) app.activeTermId = getOrderedTerminalIds()[0];
+  if (canvas.enabled) {
+    fitCanvas();
+    showToast('Canvas overview');
+    return;
+  }
+  const webglCount = [...app.termMap.values()].filter(t => t.renderer === 'webgl').length;
+  canvas.enabled = true;
+  app.terminalFocusMode = true;
+  if (webglCount) {
+    // 기존 제약: GPU 렌더러 터미널은 줌 transform 아래에서 텍스처가 깨질 수 있음.
+    // 런타임 렌더러 교체는 불가하므로 사용자에게 인지시킨다.
+    showToast(`확대/축소 중 GPU 렌더러 터미널 ${webglCount}개가 깨져 보일 수 있음 — 100% 축소 시 회복됩니다`, 'warning', 5000);
+  }
+  saveCanvasState();
+  renderLayout();
+  setTimeout(() => { fitCanvas(); _core.fitAllTerminals(); }, 120);
+}
+
+function ensureCanvasFrames() {
+  let toolsAdded = false;
+  const ids = getOrderedTerminalIds();
+  const live = new Set(ids);
+  for (const id of Object.keys(canvas.frames)) if (!live.has(id)) delete canvas.frames[id];
+  const cols = Math.max(1, Math.ceil(Math.sqrt(ids.length)));
+  ids.forEach((id, index) => {
+    const saved = canvas.frames[id];
+    if (saved && [saved.x, saved.y, saved.w, saved.h].every(Number.isFinite)) return;
+    canvas.frames[id] = {
+      x: 32 + (index % cols) * 712,
+      y: 32 + Math.floor(index / cols) * 432,
+      w: 680,
+      h: 400,
+      tab: 'terminal',
+    };
+  });
+  for (const [boardId, frame] of Object.entries(canvas.tools)) {
+    if (!['note', 'checklist'].includes(frame?.type) || ![frame?.x, frame?.y, frame?.w, frame?.h].every(Number.isFinite)) {
+      delete canvas.tools[boardId];
+      continue;
+    }
+    if (!ensureCanvasBoardItem(frame.type, boardId)) delete canvas.tools[boardId];
+  }
+  if (!canvas.toolsInitialized) {
+    const right = Math.max(32, ...Object.values(canvas.frames).map(frame => frame.x + frame.w + 32));
+    canvas.tools['N-0001'] = { type: 'note', boardId: 'N-0001', x: right, y: 32, w: 440, h: 320 };
+    canvas.tools['C-0001'] = { type: 'checklist', boardId: 'C-0001', x: right, y: 384, w: 520, h: 460 };
+    ensureCanvasBoardItem('note', 'N-0001');
+    ensureCanvasBoardItem('checklist', 'C-0001');
+    canvas.toolsInitialized = true;
+    toolsAdded = true;
+  }
+  return toolsAdded;
+}
+
+function canvasItemEntries() {
+  return [
+    ...Object.entries(canvas.frames),
+    ...Object.entries(canvas.tools).map(([boardId, frame]) => [`board:${boardId}`, frame]),
+  ];
+}
+
+function getCanvasItem(itemId) {
+  return itemId.startsWith('board:') ? canvas.tools[itemId.slice(6)] : canvas.frames[itemId];
+}
+
+function terminalTopicHTML(termId, topic, className) {
+  const value = typeof topic === 'string' ? topic.trim() : '';
+  const hint = value ? `${value} · 더블클릭 또는 Enter로 주제 편집` : '더블클릭 또는 Enter로 작업 주제 추가';
+  return `<button type="button" class="${className}${value ? '' : ' empty'}" data-terminal-topic="${esc(termId)}" title="${esc(hint)}" aria-label="${esc(hint)}" aria-keyshortcuts="Enter F2">${esc(value || '주제 추가')}</button>`;
+}
+
+function createTerminalTopicButton(termId, topic, className) {
+  const holder = document.createElement('div');
+  holder.innerHTML = terminalTopicHTML(termId, topic, className);
+  return holder.firstElementChild;
+}
+
+export function startEditTerminalTopic(termId, topicElement) {
+  const term = app.termMap.get(termId);
+  if (!term || !topicElement || topicElement.matches('input')) return;
+  const className = topicElement.classList.contains('canvas-frame-topic') ? 'canvas-frame-topic' : 'th-topic';
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'terminal-topic-input';
+  input.value = term.topic || '';
+  input.placeholder = '예: 로그인';
+  input.maxLength = 48;
+  input.setAttribute('aria-label', `${term.label} 작업 주제`);
+  let settled = false;
+  const finish = (commit) => {
+    if (settled) return;
+    settled = true;
+    if (commit) term.topic = input.value.trim().replace(/\s+/g, ' ').slice(0, 48);
+    input.replaceWith(createTerminalTopicButton(termId, term.topic, className));
+    app._headCache.delete(termId);
+    updateTermHeaders();
+    _core.saveLayout();
+    if (commit) showToast(term.topic ? `작업 주제 · ${term.topic}` : '작업 주제 삭제됨');
+  };
+  input.addEventListener('keydown', event => {
+    if (event.key === 'Enter') { event.preventDefault(); finish(true); }
+    else if (event.key === 'Escape') { event.preventDefault(); finish(false); }
+    event.stopPropagation();
+  });
+  input.addEventListener('blur', () => finish(true));
+  input.addEventListener('dblclick', event => event.stopPropagation());
+  topicElement.replaceWith(input);
+  input.focus();
+  input.select();
+}
+
+function canvasFrameHTML(termId, term, frame) {
+  const active = termId === app.activeTermId ? ' active' : '';
+  const pair = getTerminalPair(termId);
+  const tab = frame.tab === 'context' ? 'context' : 'terminal';
+  const state = app.state.projects.get(term.projectId)?.session?.state || 'idle';
+  const article = document.createElement('article');
+  article.className = `terminal-canvas-frame${active}${canvas.activeItem === termId ? ' selected' : ''}${pair ? ` paired${pairToneClass(termId)}` : ''}`;
+  article.dataset.canvasFrame = termId;
+  article.dataset.canvasItem = termId;
+  if (pair) article.dataset.pairDirection = pair.layout;
+  article.tabIndex = 0;
+  article.setAttribute('aria-label', `${term.label} terminal frame`);
+  article.setAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight Alt+Shift+ArrowUp Alt+Shift+ArrowDown Alt+Shift+ArrowLeft Alt+Shift+ArrowRight');
+  article.title = 'Alt + arrow: move · Alt + Shift + arrow: resize';
+  article.style.cssText = `left:${frame.x}px;top:${frame.y}px;width:${frame.w}px;height:${frame.h}px;z-index:${canvas.activeItem === termId ? 4 : active ? 2 : 1}`;
+  article.innerHTML = `<header class="canvas-frame-head" data-canvas-drag-item="${esc(termId)}">
+    <span class="canvas-frame-signal ${esc(state)}" aria-hidden="true"></span>
+    <span class="canvas-frame-name">${esc(term.label)}</span>
+    ${term.account ? `<span class="term-account-tag ${esc(term.account.provider)}">${esc(term.account.name)}</span>` : ''}
+    ${terminalTopicHTML(termId, term.topic, 'canvas-frame-topic')}
+    <span class="canvas-frame-tabs" role="tablist" aria-label="${esc(term.label)} view">
+      <button role="tab" aria-selected="${tab === 'terminal'}" class="canvas-frame-tab${tab === 'terminal' ? ' active' : ''}" data-action="canvas-tab" data-termid="${esc(termId)}" data-tab="terminal">Terminal</button>
+      <button role="tab" aria-selected="${tab === 'context'}" class="canvas-frame-tab${tab === 'context' ? ' active' : ''}" data-action="canvas-tab" data-termid="${esc(termId)}" data-tab="context">Context</button>
+    </span>
+    <button class="canvas-frame-focus" data-action="canvas-focus" data-termid="${esc(termId)}" title="Focus terminal" aria-label="Focus ${esc(term.label)} terminal">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 3H3v5M16 3h5v5M8 21H3v-5M16 21h5v-5"/></svg>
+    </button>
+    <button class="canvas-frame-close" data-action="canvas-terminal-close" data-termid="${esc(termId)}" title="Close terminal session" aria-label="Close ${esc(term.label)} terminal session">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>
+      <span>Close</span>
+    </button>
+  </header>`;
+  const body = document.createElement('div');
+  body.className = 'canvas-frame-body';
+  if (tab === 'context') {
+    body.innerHTML = `<div class="canvas-context" data-canvas-context="${esc(termId)}">
+      <div class="canvas-context-status" data-context-status>상태 수집 중</div>
+      <section><h3>Goal</h3><p data-context-goal>첫 사용자 지시를 기다리는 중</p></section>
+      <section><h3>Now</h3><p data-context-task>현재 작업을 분석하는 중</p></section>
+      <footer>Agent hook · live context</footer>
+    </div>`;
+  } else {
+    term.element.style.flex = '1';
+    body.appendChild(term.element);
+  }
+  article.appendChild(body);
+  const resize = document.createElement('span');
+  resize.className = 'canvas-frame-resize';
+  resize.dataset.canvasResizeItem = termId;
+  resize.setAttribute('aria-hidden', 'true');
+  article.appendChild(resize);
+  return article;
+}
+
+function setCanvasFrameTabContent(termId, tab) {
+  const frameEl = [...document.querySelectorAll('[data-canvas-frame]')]
+    .find(element => element.dataset.canvasFrame === termId);
+  const body = frameEl?.querySelector('.canvas-frame-body');
+  const term = app.termMap.get(termId);
+  if (!frameEl || !body || !term) return false;
+  frameEl.querySelectorAll('[data-action="canvas-tab"]').forEach(button => {
+    const active = button.dataset.tab === tab;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  });
+  if (tab === 'context') {
+    body.innerHTML = `<div class="canvas-context" data-canvas-context="${esc(termId)}">
+      <div class="canvas-context-status" data-context-status>상태 수집 중</div>
+      <section><h3>Goal</h3><p data-context-goal>첫 사용자 지시를 기다리는 중</p></section>
+      <section><h3>Now</h3><p data-context-task>현재 작업을 분석하는 중</p></section>
+      <footer>Agent hook · live context</footer>
+    </div>`;
+    updateAgentWall();
+    return true;
+  }
+  const buffer = term.xterm?.buffer?.active;
+  const distanceFromBottom = buffer ? Math.max(0, buffer.baseY - buffer.viewportY) : 0;
+  body.replaceChildren(term.element);
+  term.element.style.flex = '1';
+  requestAnimationFrame(() => _core.fitTerminal(termId, distanceFromBottom));
+  return true;
+}
+
+function renderCanvasLayout(container) {
+  const fresh = !Object.keys(canvas.frames).length;
+  const toolsAdded = ensureCanvasFrames();
+  const viewport = document.createElement('div');
+  viewport.className = 'terminal-canvas';
+  const layer = document.createElement('div');
+  layer.className = 'terminal-canvas-layer';
+  for (const [termId, term] of app.termMap) layer.appendChild(canvasFrameHTML(termId, term, canvas.frames[termId]));
+  for (const [boardId, frame] of Object.entries(canvas.tools)) {
+    const tool = createCanvasBoardFrame(frame.type, boardId, frame);
+    if (!tool) continue;
+    tool.classList.toggle('selected', canvas.activeItem === `board:${boardId}`);
+    tool.style.zIndex = canvas.activeItem === `board:${boardId}` ? '4' : '1';
+    layer.appendChild(tool);
+  }
+  viewport.appendChild(layer);
+  viewport.insertAdjacentHTML('beforeend', `<div class="canvas-side-rail"><aside class="canvas-session-board${canvas.boardCollapsed ? ' collapsed' : ''}" aria-label="Session status">
+    <header>
+      <span class="canvas-session-board-title">Session status</span>
+      <span class="canvas-session-count" data-canvas-session-count>${app.termMap.size}</span>
+      <button class="canvas-session-group-edit" data-action="canvas-group-edit" type="button" aria-pressed="false" title="Select several terminals as one group">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8H7a4 4 0 0 0 0 8h2M15 8h2a4 4 0 0 1 0 8h-2M8 12h8"/></svg><span>Group</span>
+      </button>
+      <button data-action="canvas-board-toggle" aria-expanded="${!canvas.boardCollapsed}" title="${canvas.boardCollapsed ? 'Show session status' : 'Hide session status'}" aria-label="Toggle session status">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
+      </button>
+    </header>
+    <div class="canvas-session-list" data-canvas-session-list><p>Collecting session status…</p></div>
+  </aside></div>`);
+  viewport.insertAdjacentHTML('beforeend', `<div class="canvas-toolbar" role="toolbar" aria-label="Canvas zoom">
+    <button data-action="canvas-zoom-out" title="Zoom out" aria-label="Zoom out"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 12h12"/></svg></button>
+    <button class="canvas-zoom-value" data-action="canvas-reset-zoom" title="Reset zoom">${Math.round(canvas.zoom * 100)}%</button>
+    <button data-action="canvas-zoom-in" title="Zoom in" aria-label="Zoom in"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 6v12M6 12h12"/></svg></button>
+    <span class="canvas-toolbar-rule"></span>
+    <button class="canvas-fit" data-action="canvas-fit">Fit</button>
+    <button class="canvas-fill" data-action="canvas-fill-active" title="Expand the active terminal from its current position into open space">Fill space</button>
+    <span class="canvas-group-controls" data-canvas-group-controls hidden>
+      <span class="canvas-group-label">Group</span>
+      <button class="canvas-group-layout-trigger" data-action="canvas-group-layout-toggle" aria-haspopup="menu" aria-controls="canvas-group-layout-menu" aria-expanded="false">
+        <span data-canvas-group-layout-label>Group layout</span>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 10 4 4 4-4"/></svg>
+      </button>
+      <button class="canvas-group-remove" data-action="canvas-group-remove" title="Remove the active terminal from this group">Ungroup</button>
+    </span>
+    <span class="canvas-toolbar-rule"></span>
+    <button class="canvas-tool-add" data-action="canvas-board-window-add" data-boardtype="note" title="Add another memo">+ Memo</button>
+    <button class="canvas-tool-add" data-action="canvas-board-window-add" data-boardtype="checklist" title="Add another checklist">+ Checklist</button>
+    <span class="canvas-toolbar-rule"></span>
+    <button class="canvas-keys" data-action="show-shortcut-help" aria-haspopup="dialog" aria-controls="shortcut-overlay" aria-keyshortcuts="?" title="Terminal and canvas keyboard shortcuts">Keys</button>
+  </div>`);
+  viewport.insertAdjacentHTML('beforeend', '<div class="canvas-group-layout-menu" id="canvas-group-layout-menu" data-canvas-group-layout-menu role="menu" aria-label="Terminal group layout" hidden></div>');
+  container.appendChild(viewport);
+  applyCanvasTransform();
+  syncCanvasPairUI();
+  requestAnimationFrame(() => {
+    for (const [termId, term] of app.termMap) {
+      mountTerminal(termId, term);
+    }
+    if (fresh || toolsAdded) fitCanvas();
+    if (initialCanvasFocusPending && app.activeTermId) {
+      initialCanvasFocusPending = false;
+      setTimeout(() => jumpToCanvasFrame(app.activeTermId), 100);
+    }
+    setTimeout(() => _core.fitAllTerminals(), 100);
+  });
+  updateAgentWall();
+  updateCanvasBoard();
+  saveCanvasState();
+}
+
+function applyCanvasTransform() {
+  const layer = document.querySelector('.terminal-canvas-layer');
+  if (layer) layer.style.transform = `translate(${canvas.panX}px, ${canvas.panY}px) scale(${canvas.zoom})`;
+  const value = document.querySelector('.canvas-zoom-value');
+  if (value) value.textContent = `${Math.round(canvas.zoom * 100)}%`;
+}
+
+function setCanvasZoom(next, clientX, clientY) {
+  const viewport = document.querySelector('.terminal-canvas');
+  if (!viewport) return;
+  const rect = viewport.getBoundingClientRect();
+  const x = (clientX ?? rect.left + rect.width / 2) - rect.left;
+  const y = (clientY ?? rect.top + rect.height / 2) - rect.top;
+  const old = canvas.zoom;
+  const zoom = Math.max(0.3, Math.min(1.5, next));
+  canvas.panX = x - ((x - canvas.panX) / old) * zoom;
+  canvas.panY = y - ((y - canvas.panY) / old) * zoom;
+  canvas.zoom = zoom;
+  applyCanvasTransform();
+  saveCanvasState();
+}
+
+function fitCanvas() {
+  const viewport = document.querySelector('.terminal-canvas');
+  const frames = canvasItemEntries().map(([, frame]) => frame);
+  if (!viewport || !frames.length) return;
+  const rect = viewport.getBoundingClientRect();
+  const minX = Math.min(...frames.map(frame => frame.x));
+  const minY = Math.min(...frames.map(frame => frame.y));
+  const maxX = Math.max(...frames.map(frame => frame.x + frame.w));
+  const maxY = Math.max(...frames.map(frame => frame.y + frame.h));
+  const zoom = Math.max(0.3, Math.min(1, Math.min((rect.width - 56) / (maxX - minX), (rect.height - 72) / (maxY - minY))));
+  canvas.zoom = zoom;
+  canvas.panX = (rect.width - (maxX - minX) * zoom) / 2 - minX * zoom;
+  canvas.panY = (rect.height - (maxY - minY) * zoom) / 2 - minY * zoom;
+  applyCanvasTransform();
+  saveCanvasState();
+}
+
+function getCanvasUsableBounds(viewport) {
+  const viewportRect = viewport.getBoundingClientRect();
+  const sideRect = document.querySelector('.canvas-side-rail')?.getBoundingClientRect();
+  const toolbarRect = document.querySelector('.canvas-toolbar')?.getBoundingClientRect();
+  const margin = 16;
+  const gap = 12;
+  const sideIsTop = sideRect?.width > viewportRect.width * 0.7;
+  return {
+    left: margin,
+    top: Math.max(margin, sideIsTop ? sideRect.bottom - viewportRect.top + gap : margin),
+    right: Math.max(margin + 1, sideRect?.width && !sideIsTop ? sideRect.left - viewportRect.left - gap : viewportRect.width - margin),
+    bottom: Math.max(margin + 1, toolbarRect?.height ? toolbarRect.top - viewportRect.top - gap : viewportRect.height - margin),
+  };
+}
+
+function syncCanvasGroupControl() {
+  const controls = document.querySelector('[data-canvas-group-controls]');
+  const trigger = controls?.querySelector('[data-action="canvas-group-layout-toggle"]');
+  const label = trigger?.querySelector('[data-canvas-group-layout-label]');
+  const menu = document.querySelector('[data-canvas-group-layout-menu]');
+  const group = getTerminalPair(app.activeTermId);
+  if (!controls || !trigger || !label || !menu) return;
+  controls.hidden = !group;
+  if (!group) {
+    closeCanvasGroupLayoutMenu();
+    return;
+  }
+  const options = terminalGroupLayoutOptions(group.termIds.length);
+  const key = options.map(option => option.join(':')).join('|');
+  if (menu.dataset.optionsKey !== key) {
+    menu.innerHTML = options.map(([value, optionLabel]) => `<button type="button" role="menuitemradio" data-action="canvas-group-layout" data-layout="${value}">${optionLabel}</button>`).join('');
+    menu.dataset.optionsKey = key;
+  }
+  label.textContent = terminalGroupLayoutLabel(group);
+  menu.querySelectorAll('[data-layout]').forEach(button => {
+    const active = button.dataset.layout === group.layout;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-checked', String(active));
+  });
+}
+
+function closeCanvasGroupLayoutMenu(restoreFocus = false) {
+  const menu = document.querySelector('[data-canvas-group-layout-menu]');
+  const trigger = document.querySelector('[data-action="canvas-group-layout-toggle"]');
+  if (menu) menu.hidden = true;
+  trigger?.setAttribute('aria-expanded', 'false');
+  if (restoreFocus) trigger?.focus({ preventScroll: true });
+}
+
+function toggleCanvasGroupLayoutMenu() {
+  const menu = document.querySelector('[data-canvas-group-layout-menu]');
+  const trigger = document.querySelector('[data-action="canvas-group-layout-toggle"]');
+  if (!menu || !trigger) return;
+  const opening = menu.hidden;
+  menu.hidden = !opening;
+  trigger.setAttribute('aria-expanded', String(opening));
+  if (opening) requestAnimationFrame(() => menu.querySelector('.active')?.focus({ preventScroll: true }));
+}
+
+function syncCanvasPairUI() {
+  document.querySelectorAll('[data-canvas-frame]').forEach(element => {
+    const pair = getTerminalPair(element.dataset.canvasFrame);
+    for (let index = 0; index < PAIR_TONE_COUNT; index++) element.classList.remove(`pair-tone-${index}`);
+    element.classList.toggle('paired', Boolean(pair));
+    if (pair) {
+      element.dataset.pairDirection = pair.layout;
+      element.classList.add(pairToneClass(element.dataset.canvasFrame).trim());
+    }
+    else delete element.dataset.pairDirection;
+  });
+  const editButton = document.querySelector('[data-action="canvas-group-edit"]');
+  if (editButton) {
+    const group = getTerminalPair(app.pairSourceTermId);
+    const editing = Boolean(app.pairSourceTermId);
+    editButton.classList.toggle('active', editing);
+    editButton.setAttribute('aria-pressed', String(editing));
+    const label = editButton.querySelector('span');
+    if (label) label.textContent = editing ? `Done · ${group?.termIds.length || 1}` : 'Group';
+  }
+  syncCanvasGroupControl();
+  renderSessionTabs(document.getElementById('mob-term-tabs'));
+  updateAgentWall();
+  saveCanvasState();
+}
+
+function preferredPairDirection() {
+  const viewport = document.querySelector('.terminal-canvas');
+  if (!viewport) return 'h';
+  const bounds = getCanvasUsableBounds(viewport);
+  return bounds.right - bounds.left >= (bounds.bottom - bounds.top) * 1.15 ? 'h' : 'v';
+}
+
+function completeCanvasPair(firstId, secondId) {
+  const sourceGroup = getTerminalPair(firstId);
+  if (sourceGroup?.termIds.includes(secondId)) {
+    app.pairSourceTermId = '';
+    syncCanvasPairUI();
+    showToast('Those terminals are already in the same group');
+    return false;
+  }
+  const pair = pairTerminals(firstId, secondId, preferredPairDirection());
+  if (!pair) {
+    app.pairSourceTermId = '';
+    syncCanvasPairUI();
+    showToast('Could not create terminal group');
+    return false;
+  }
+  app.pairSourceTermId = firstId;
+  syncCanvasPairUI();
+  showToast(`Terminal group · ${pair.termIds.length} · choose another terminal or press Esc to finish`);
+  return true;
+}
+
+function finishCanvasGroupEdit() {
+  const sourceId = app.pairSourceTermId;
+  if (!sourceId) return false;
+  const group = getTerminalPair(sourceId);
+  if (group) {
+    const ordered = getOrderedTerminalIds();
+    const firstIndex = Math.min(...group.termIds.map(id => ordered.indexOf(id)).filter(index => index >= 0));
+    const grouped = ordered.filter(id => !group.termIds.includes(id));
+    grouped.splice(firstIndex, 0, ...group.termIds);
+    setTerminalOrder(grouped);
+  }
+  app.pairSourceTermId = '';
+  syncCanvasPairUI();
+  if (group) jumpToCanvasFrame(sourceId);
+  showToast(group ? `Group complete · ${group.termIds.length} terminals` : 'Group selection cancelled');
+  return true;
+}
+
+function toggleCanvasPair(termId) {
+  if (!app.termMap.has(termId)) return;
+  if (!app.pairSourceTermId) {
+    app.pairSourceTermId = termId;
+    syncCanvasPairUI();
+    showToast(`${getTerminalPair(termId) ? 'Add to group' : 'Group mode'} · choose another terminal or press Alt+number`);
+    return;
+  }
+  if (app.pairSourceTermId === termId) {
+    const sourceGroup = getTerminalPair(termId);
+    if (!sourceGroup) return finishCanvasGroupEdit();
+    const nextSource = sourceGroup.termIds.find(id => id !== termId);
+    unpairTerminal(termId);
+    app.pairSourceTermId = nextSource || '';
+    syncCanvasPairUI();
+    showToast('Terminal removed from group');
+    return;
+  }
+  const sourceGroup = getTerminalPair(app.pairSourceTermId);
+  if (sourceGroup?.termIds.includes(termId)) {
+    unpairTerminal(termId);
+    syncCanvasPairUI();
+    showToast('Terminal removed from group');
+    return;
+  }
+  completeCanvasPair(app.pairSourceTermId, termId);
+}
+
+function toggleCanvasGroupEdit() {
+  if (app.pairSourceTermId) return finishCanvasGroupEdit();
+  const termId = app.activeTermId || getOrderedTerminalIds()[0];
+  if (!termId) return showToast('Open a terminal first');
+  toggleCanvasPair(termId);
+}
+
+function setCanvasGroupLayout(termId, layout) {
+  const next = setTerminalGroupLayout(termId, layout);
+  if (!next) return showToast('Group this terminal first');
+  syncCanvasPairUI();
+  closeCanvasGroupLayoutMenu(true);
+  jumpToCanvasFrame(termId);
+  showToast(`Group layout · ${terminalGroupLayoutLabel(next)}`);
+}
+
+function cycleCanvasGroupLayout(termId) {
+  const group = getTerminalPair(termId);
+  if (!group) return showToast('Group this terminal first');
+  const options = terminalGroupLayoutOptions(group.termIds.length);
+  const current = Math.max(0, options.findIndex(([value]) => value === group.layout));
+  setCanvasGroupLayout(termId, options[(current + 1) % options.length][0]);
+}
+
+function removeCanvasGroupMember(termId) {
+  if (!unpairTerminal(termId)) return showToast('This terminal is not grouped');
+  app.pairSourceTermId = '';
+  syncCanvasPairUI();
+  jumpToCanvasFrame(termId);
+  showToast('Terminal removed from group');
+}
+
+function fillActiveCanvasFrame() {
+  const viewport = document.querySelector('.terminal-canvas');
+  const termId = app.activeTermId;
+  const target = termId && canvas.frames[termId];
+  if (!viewport || !target) return;
+  const bounds = getCanvasUsableBounds(viewport);
+  const usableWidth = bounds.right - bounds.left;
+  const usableHeight = bounds.bottom - bounds.top;
+  const zoom = canvas.zoom;
+  const laneGap = 24 / zoom;
+  const term = app.termMap.get(termId);
+  const buffer = term?.xterm?.buffer?.active;
+  const distanceFromBottom = buffer ? Math.max(0, buffer.baseY - buffer.viewportY) : 0;
+  const screenLeft = canvas.panX + target.x * zoom;
+  const screenTop = canvas.panY + target.y * zoom;
+  const left = Math.max(bounds.left, Math.min(screenLeft, bounds.right - Math.min(usableWidth, 420 * zoom)));
+  const top = Math.max(bounds.top, Math.min(screenTop, bounds.bottom - Math.min(usableHeight, 280 * zoom)));
+
+  Object.assign(target, {
+    x: (left - canvas.panX) / zoom,
+    y: (top - canvas.panY) / zoom,
+    w: (bounds.right - left) / zoom,
+    h: (bounds.bottom - top) / zoom,
+  });
+
+  const overlaps = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  const others = canvasItemEntries().filter(([otherId]) => otherId !== termId);
+  const moved = others.filter(([, frame]) => overlaps(frame, target)).sort((a, b) => a[1].y - b[1].y);
+  const placed = others.filter(([, frame]) => !overlaps(frame, target)).map(([, frame]) => frame);
+  const laneX = target.x + target.w + 48 / zoom;
+  for (const [, frame] of moved) {
+    frame.x = laneX;
+    frame.y = Math.max(target.y, frame.y);
+    let collision;
+    while ((collision = placed.find(other => overlaps(frame, other)))) frame.y = collision.y + collision.h + laneGap;
+    placed.push(frame);
+  }
+
+  applyCanvasTransform();
+  document.querySelectorAll('[data-canvas-item]').forEach(element => {
+    const frame = getCanvasItem(element.dataset.canvasItem);
+    if (!frame) return;
+    element.style.left = `${frame.x}px`;
+    element.style.top = `${frame.y}px`;
+    element.style.width = `${frame.w}px`;
+    element.style.height = `${frame.h}px`;
+  });
+  saveCanvasState();
+  requestAnimationFrame(() => _core.fitTerminal(termId, distanceFromBottom));
+  showToast(`Active terminal fit · ${moved.length} collision${moved.length === 1 ? '' : 's'} moved`);
+}
+
+function focusCanvasTerminal(termId) {
+  if (!app.termMap.has(termId)) return;
+  app.activeTermId = termId;
+  if (canvas.enabled) {
+    jumpToCanvasFrame(termId);
+    return;
+  }
+  canvas.enabled = true;
+  app.terminalFocusMode = true;
+  saveCanvasState();
+  renderLayout();
+  setTimeout(() => jumpToCanvasFrame(termId), 140);
+}
+
+function setCanvasTab(termId, tab) {
+  if (!canvas.frames[termId] || !['terminal', 'context'].includes(tab)) return;
+  selectCanvasFrame(termId);
+  canvas.frames[termId].tab = tab;
+  saveCanvasState();
+  setCanvasFrameTabContent(termId, tab);
+}
+
+export function remapCanvasIds(idMap) {
+  for (const [oldId, newId] of Object.entries(idMap || {})) {
+    if (canvas.frames[oldId]) canvas.frames[newId] = canvas.frames[oldId];
+    delete canvas.frames[oldId];
+  }
+  saveCanvasState();
+}
+
+export function isCanvasMode() {
+  return canvas.enabled && !isMobile();
+}
+
+export function routeCanvasTerminalWheel(e, xterm) {
+  if (!isCanvasMode()) return false;
+  if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
+    if (!xterm || !e.deltaY) return false;
+    // Full-screen TUIs own wheel input in the alternate buffer (Codex/Claude menus,
+    // history, etc). Let xterm translate the native event for the application.
+    if (xterm.buffer.active.type === 'alternate') return false;
+    const unit = e.deltaMode === 1 ? 1 : e.deltaMode === 2 ? xterm.rows : 1 / 40;
+    const lines = Math.min(xterm.rows, Math.max(1, Math.ceil(Math.abs(e.deltaY) * unit))) * (e.altKey ? 5 : 1);
+    e.preventDefault();
+    e.stopPropagation();
+    xterm.scrollLines(Math.sign(e.deltaY) * lines);
+    return true;
+  }
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.ctrlKey || e.metaKey) {
+    setCanvasZoom(canvas.zoom * Math.exp(-e.deltaY * 0.002), e.clientX, e.clientY);
+  } else {
+    canvas.panX -= e.deltaY || e.deltaX;
+    applyCanvasTransform();
+    saveCanvasState();
+  }
+  return true;
+}
+
+function renderSessionTabs(container) {
+  if (!container) return;
+  const scrollLeft = container.scrollLeft;
+  const focusedTermId = document.activeElement?.closest('[data-termid]')?.dataset.termid;
+  const structureKey = getOrderedTerminalEntries().map(([id, term]) => {
+    const pair = getTerminalPair(id);
+    return [id, term.label, pair?.layout || '', pair?.termIds.join(':') || ''].join('|');
+  }).join('::');
+  let html = '<span class="session-strip-label">Sessions</span>';
+  let index = 0;
+  for (const [id, t] of getOrderedTerminalEntries()) {
+    index++;
+    const pair = getTerminalPair(id);
+    const groupNames = pair?.termIds.filter(termId => termId !== id).map(termId => app.termMap.get(termId)?.label || 'terminal') || [];
+    const active = id === app.activeTermId ? ' active' : '';
+    const state = app.state.projects.get(t.projectId)?.session?.state;
+    const stateLabel = state === 'busy' ? 'running' : state === 'waiting' ? 'attention' : state === 'idle' ? 'idle' : '';
+    const signal = stateLabel
+      ? `<span class="mob-tab-signal ${state}" title="${stateLabel}" aria-hidden="true"></span>`
+      : '';
+    const pairLabel = pair ? `, grouped with ${groupNames.join(', ')}, ${terminalGroupLayoutLabel(pair)}` : '';
+    const ariaLabel = `Session ${index}: ${t.label}${stateLabel ? `, ${stateLabel}` : ''}${pairLabel}`;
+    const pairMark = pair ? `<span class="mob-tab-pair ${['rows', 'main-top', 'main-bottom'].includes(pair.layout) ? 'vertical' : 'horizontal'}" title="Group of ${pair.termIds.length} · ${esc(terminalGroupLayoutLabel(pair))}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 8H7a4 4 0 0 0 0 8h2M15 8h2a4 4 0 0 1 0 8h-2M8 12h8"/></svg></span>` : '';
+    html += `<button class="mob-tab${active}${pair ? ` paired${pairToneClass(id)}` : ''}" role="tab" aria-label="${esc(ariaLabel)}" aria-selected="${id === app.activeTermId}" data-tid="${id}" data-action="mob-switch" data-termid="${id}">` +
+      `<span class="mob-tab-index">${String(index).padStart(2, '0')}</span>` +
+      `<span class="mob-tab-name">${esc(t.label)}</span>${pairMark}${signal}</button>`;
+  }
+  html += `<button class="mob-tab mob-tab-add" data-action="new-term" title="New terminal" aria-label="New terminal">+</button>`;
+  if (container._cockpitStructureKey === structureKey) {
+    syncSessionTabSelection(container);
+    return;
+  }
+  container.innerHTML = html;
+  container._cockpitStructureKey = structureKey;
+  container.scrollLeft = scrollLeft;
+  if (focusedTermId) container.querySelector(`[data-termid="${CSS.escape(focusedTermId)}"]`)?.focus({ preventScroll: true });
+}
+
+function syncSessionTabSelection(container) {
+  if (!container) return;
+  container.querySelectorAll('[data-termid]').forEach((tab, index) => {
+    const active = tab.dataset.termid === app.activeTermId;
+    tab.classList.toggle('active', active);
+    if (tab.getAttribute('aria-selected') !== String(active)) tab.setAttribute('aria-selected', String(active));
+    const term = app.termMap.get(tab.dataset.termid);
+    const state = app.state.projects.get(term?.projectId)?.session?.state;
+    const stateLabel = state === 'busy' ? 'running' : state === 'waiting' ? 'attention' : state === 'idle' ? 'idle' : '';
+    const pair = getTerminalPair(tab.dataset.termid);
+    const groupNames = pair?.termIds.filter(termId => termId !== tab.dataset.termid).map(termId => app.termMap.get(termId)?.label || 'terminal') || [];
+    const pairLabel = pair ? `, grouped with ${groupNames.join(', ')}, ${terminalGroupLayoutLabel(pair)}` : '';
+    const ariaLabel = `Session ${index + 1}: ${term?.label || 'terminal'}${stateLabel ? `, ${stateLabel}` : ''}${pairLabel}`;
+    if (tab.getAttribute('aria-label') !== ariaLabel) tab.setAttribute('aria-label', ariaLabel);
+    let signal = tab.querySelector('.mob-tab-signal');
+    if (['busy', 'waiting', 'idle'].includes(state)) {
+      if (!signal) {
+        signal = document.createElement('span');
+        signal.setAttribute('aria-hidden', 'true');
+        tab.appendChild(signal);
+      }
+      const className = `mob-tab-signal ${state}`;
+      const title = stateLabel;
+      if (signal.className !== className) signal.className = className;
+      if (signal.title !== title) signal.title = title;
+    } else signal?.remove();
+  });
+}
+
+function renderEmptyState(container) {
+  const boardActions = isMobile() ? '' : `<button class="btn" data-action="canvas-board-window-add" data-boardtype="note">New memo</button>
+        <button class="btn" data-action="canvas-board-window-add" data-boardtype="checklist">New checklist</button>`;
+  container.innerHTML = `<div class="term-empty">
+      <svg class="term-empty-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 5 5-5 5M14 17h4"/></svg>
+      <div class="term-empty-title">Start a workspace terminal</div>
+      <div class="term-empty-copy">Open a project session or a clean shell. Canvas keeps every session spatially organized.</div>
+      <div class="term-empty-actions">
+        <button class="btn primary" data-action="new-term">New project terminal</button>
+        <button class="btn" data-action="new-home-term">Open clean shell</button>
+        ${boardActions}
+      </div>
+      <div class="term-empty-hint">Ctrl+T · canvas, search, broadcast, export</div>
+    </div>`;
 }
 
 // ─── Mobile Layout ───
@@ -71,13 +877,9 @@ function renderMobileLayout(showMobileControls = true) {
   container.innerHTML = '';
 
   if (app.termMap.size === 0) {
-    container.innerHTML = `<div class="term-empty">
-        <div class="term-empty-icon">&#x2756;</div>
-        <button class="btn primary" data-action="new-home-term">+ 빈 터미널 (홈)</button>
-        <button class="btn" data-action="new-term">+ New Terminal (프로젝트)</button>
-        <div class="term-empty-hint">Ctrl+T</div>
-      </div>`;
-    if (mobTabs) mobTabs.style.display = 'none';
+    renderEmptyState(container);
+    renderSessionTabs(mobTabs);
+    if (mobTabs) mobTabs.style.display = showMobileControls ? '' : 'none';
     if (mobActions) mobActions.style.display = 'none';
     return;
   }
@@ -88,27 +890,20 @@ function renderMobileLayout(showMobileControls = true) {
 
   // Ensure activeTermId is valid
   if (!app.activeTermId || !app.termMap.has(app.activeTermId)) {
-    app.activeTermId = app.termMap.keys().next().value;
+    app.activeTermId = getOrderedTerminalIds()[0];
   }
 
   // Render tab bar
   if (mobTabs && showMobileControls) {
-    let tabsHtml = '';
-    for (const [id, t] of app.termMap) {
-      const active = id === app.activeTermId ? ' active' : '';
-      tabsHtml += `<button class="mob-tab${active}" data-tid="${id}" data-action="mob-switch" data-termid="${id}">` +
-        `<span class="mob-tab-dot" style="background:${t.color}"></span>` +
-        `<span class="mob-tab-name">${esc(t.label)}</span></button>`;
-    }
-    tabsHtml += `<button class="mob-tab mob-tab-add" data-action="new-term">+</button>`;
-    mobTabs.innerHTML = tabsHtml;
+    renderSessionTabs(mobTabs);
     // Auto-scroll to active tab
     const activeTab = mobTabs.querySelector('.mob-tab.active');
     if (activeTab) activeTab.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
   }
 
   // Render only the active terminal — chat-view 포함된 split-leaf wrapper 안에
-  const activeT = app.termMap.get(app.activeTermId);
+  const activeTermId = app.activeTermId;
+  const activeT = app.termMap.get(activeTermId);
   if (activeT) {
     const leaf = document.createElement('div');
     leaf.className = 'split-leaf active mobile-leaf';
@@ -123,16 +918,8 @@ function renderMobileLayout(showMobileControls = true) {
     leaf.appendChild(activeT.element);
     container.appendChild(leaf);
     requestAnimationFrame(() => {
-      if (!activeT.opened) {
-        activeT.xterm.open(activeT.element);
-        if (!window.chrome?.webview) { try { activeT.xterm.loadAddon(new WebglAddon.WebglAddon()); } catch { /* addon not available */ } }
-        try { activeT.xterm.loadAddon(new ImageAddon.ImageAddon()); } catch { /* addon not available */ }
-        activeT.opened = true;
-        if (activeT.pendingBuffer) { activeT._replaying = true; activeT.xterm.write(activeT.pendingBuffer, () => { activeT._replaying = false; }); activeT.pendingBuffer = null; }
-        guardXtermPaste(activeT);
-      }
-      setTimeout(() => { try { activeT.fitAddon.fit(); } catch { /* addon not available */ } }, 80);
-      if (app.ws?.readyState === 1 && !document.hidden) app.ws.send(JSON.stringify({ type: 'resize', termId: app.activeTermId, cols: activeT.xterm.cols, rows: activeT.xterm.rows }));
+      mountTerminal(activeTermId, activeT);
+      setTimeout(() => _core.fitTerminal(activeTermId), 80);
     });
   }
   _core.saveLayout();
@@ -141,12 +928,525 @@ function renderMobileLayout(showMobileControls = true) {
 export function mobileSwitchTerm(termId) {
   if (!app.termMap.has(termId)) return;
   app.activeTermId = termId;
-  renderMobileLayout();
+  if (isMobile()) {
+    renderMobileLayout();
+    return;
+  }
+  if (canvas.enabled) { focusCanvasTerminal(termId); return; }
+  app.terminalFocusMode = true;
+  renderLayout();
+  const term = app.termMap.get(termId);
+  term?.xterm?.focus();
+}
+
+function selectCanvasFrame(termId) {
+  if (!app.termMap.has(termId)) return;
+  app.activeTermId = termId;
+  document.querySelectorAll('[data-canvas-frame]').forEach(frame => {
+    const active = frame.dataset.canvasFrame === termId;
+    frame.classList.toggle('active', active);
+  });
+  selectCanvasItem(termId);
+  syncSessionTabSelection(document.getElementById('mob-term-tabs'));
+  syncCanvasGroupControl();
+  updateAgentWall();
+  _core.saveLayout();
+}
+
+function focusCanvasFrameInput(termId) {
+  const term = app.termMap.get(termId);
+  // Older saved canvas frames have no `tab`; the renderer treats those as terminal.
+  if (!term || canvas.frames[termId]?.tab === 'context') return false;
+  try {
+    term.xterm.focus();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function selectCanvasItem(itemId) {
+  if (!getCanvasItem(itemId)) return;
+  canvas.activeItem = itemId;
+  document.querySelectorAll('[data-canvas-item]').forEach(element => {
+    const selected = element.dataset.canvasItem === itemId;
+    element.classList.toggle('selected', selected);
+    element.style.zIndex = selected ? '4' : element.classList.contains('active') ? '2' : '1';
+  });
+  saveCanvasState();
+}
+
+function startCanvasGesture(e) {
+  if (!canvas.enabled || isMobile() || !e.target.closest('.terminal-canvas')) return;
+  if (e.target.closest('[data-canvas-group-layout-menu]')) return;
+  const overCanvasItem = e.target.closest('[data-canvas-item], .canvas-side-rail, .canvas-toolbar');
+  const horizontalPan = e.shiftKey && e.button === 0 && !overCanvasItem;
+  const blankPan = e.button === 0 && !overCanvasItem;
+  const pan = e.button === 1 || (canvasSpaceDown && e.button === 0) || horizontalPan || blankPan;
+  if (pan) {
+    e.preventDefault();
+    e.stopPropagation();
+    canvasGesture = { type: 'pan', started: false, horizontal: horizontalPan, startX: e.clientX, startY: e.clientY, panX: canvas.panX, panY: canvas.panY };
+    return;
+  }
+  const frameEl = e.target.closest('[data-canvas-item]');
+  if (frameEl && e.button === 0) {
+    if (frameEl.dataset.canvasFrame) selectCanvasFrame(frameEl.dataset.canvasFrame);
+    else selectCanvasItem(frameEl.dataset.canvasItem);
+  }
+  const resize = e.target.closest('[data-canvas-resize-item]');
+  if (resize && e.button === 0) {
+    e.preventDefault();
+    const itemId = resize.dataset.canvasResizeItem;
+    const frame = getCanvasItem(itemId);
+    const term = app.termMap.get(itemId);
+    const buffer = term?.xterm?.buffer?.active;
+    const distanceFromBottom = buffer ? Math.max(0, buffer.baseY - buffer.viewportY) : 0;
+    const boardType = itemId.startsWith('board:') ? frame.type : '';
+    canvasGesture = {
+      type: 'resize', started: false, itemId, frameEl, startX: e.clientX, startY: e.clientY,
+      w: frame.w, h: frame.h, minW: boardType === 'note' ? 320 : boardType === 'checklist' ? 380 : 420,
+      minH: boardType === 'note' ? 220 : 280, distanceFromBottom,
+    };
+    return;
+  }
+  const head = e.target.closest('[data-canvas-drag-item]');
+  if (head && e.button === 0 && !e.target.closest('button, input, textarea, select, [contenteditable="true"]')) {
+    e.preventDefault();
+    const itemId = head.dataset.canvasDragItem;
+    const group = app.termMap.has(itemId) ? getTerminalPair(itemId) : null;
+    const moveItems = (group?.termIds || [itemId]).map(id => {
+      const frame = getCanvasItem(id);
+      const element = [...document.querySelectorAll('[data-canvas-item]')]
+        .find(item => item.dataset.canvasItem === id);
+      return frame && element ? { frame, element, x: frame.x, y: frame.y } : null;
+    }).filter(Boolean);
+    try { head.setPointerCapture(e.pointerId); } catch { /* synthetic pointer or unsupported capture */ }
+    canvasGesture = {
+      type: 'move', started: false, itemId, frameEl, moveItems, captureEl: head, pointerId: e.pointerId,
+      startX: e.clientX, startY: e.clientY,
+    };
+  }
+}
+
+function moveCanvasGesture(e) {
+  if (!canvasGesture) return;
+  const screenDx = e.clientX - canvasGesture.startX;
+  const screenDy = e.clientY - canvasGesture.startY;
+  if (!canvasGesture.started) {
+    if (Math.hypot(screenDx, screenDy) < 5) return;
+    canvasGesture.started = true;
+    const activeClass = { pan: 'canvas-panning', move: 'canvas-moving', resize: 'canvas-resizing' }[canvasGesture.type];
+    document.body.classList.add(activeClass);
+  }
+  e.preventDefault();
+  const dx = screenDx / (canvasGesture.type === 'pan' ? 1 : canvas.zoom);
+  const dy = screenDy / (canvasGesture.type === 'pan' ? 1 : canvas.zoom);
+  if (canvasGesture.type === 'pan') {
+    canvas.panX = canvasGesture.panX + dx;
+    canvas.panY = canvasGesture.horizontal ? canvasGesture.panY : canvasGesture.panY + dy;
+    applyCanvasTransform();
+    return;
+  }
+  const frame = getCanvasItem(canvasGesture.itemId);
+  if (!frame) return;
+  if (canvasGesture.type === 'move') {
+    for (const item of canvasGesture.moveItems) {
+      item.frame.x = item.x + dx;
+      item.frame.y = item.y + dy;
+      item.element.style.left = `${item.frame.x}px`;
+      item.element.style.top = `${item.frame.y}px`;
+    }
+  } else {
+    frame.w = Math.max(canvasGesture.minW, canvasGesture.w + dx);
+    frame.h = Math.max(canvasGesture.minH, canvasGesture.h + dy);
+    canvasGesture.frameEl.style.width = `${frame.w}px`;
+    canvasGesture.frameEl.style.height = `${frame.h}px`;
+  }
+}
+
+function endCanvasGesture() {
+  if (!canvasGesture) return;
+  const finished = canvasGesture;
+  canvasGesture = null;
+  try {
+    if (finished.captureEl?.hasPointerCapture?.(finished.pointerId)) finished.captureEl.releasePointerCapture(finished.pointerId);
+  } catch { /* pointer capture already ended */ }
+  document.body.classList.remove('canvas-panning', 'canvas-moving', 'canvas-resizing');
+  if (!finished.started) return;
+  saveCanvasState();
+  if (finished.type === 'resize' && app.termMap.has(finished.itemId)) _core.fitTerminal(finished.itemId, finished.distanceFromBottom);
+}
+
+function handleCanvasWheel(e) {
+  if (!canvas.enabled || !e.target.closest('.terminal-canvas')) return;
+  if (e.target.closest('[data-canvas-group-layout-menu]')) return;
+  if (e.target.closest('.xterm, .xterm-wrap') && !e.shiftKey && !e.ctrlKey && !e.metaKey) return;
+  if (e.target.closest('.canvas-context') && !e.ctrlKey && !e.metaKey) return;
+  if (e.target.closest('.canvas-session-list') && !e.ctrlKey && !e.metaKey && !e.shiftKey) return;
+  if (e.target.closest('.canvas-board-window') && !e.ctrlKey && !e.metaKey && !e.shiftKey) return;
+  if (e.target.closest('.canvas-side-rail') && !e.ctrlKey && !e.metaKey && !e.shiftKey) return;
+  e.preventDefault();
+  if (e.ctrlKey || e.metaKey) {
+    setCanvasZoom(canvas.zoom * Math.exp(-e.deltaY * 0.002), e.clientX, e.clientY);
+  } else if (e.shiftKey) {
+    canvas.panX -= e.deltaY || e.deltaX;
+    applyCanvasTransform();
+    saveCanvasState();
+  } else {
+    canvas.panX -= e.deltaX;
+    canvas.panY -= e.deltaY;
+    applyCanvasTransform();
+    saveCanvasState();
+  }
+}
+
+function fitCanvasFocusGroupAt100(termId, pair, bounds) {
+  const termIds = pair?.termIds || [termId];
+  const frames = termIds.map(id => canvas.frames[id]);
+  if (frames.some(frame => !frame)) return null;
+  const scrollDistances = new Map(termIds.map(id => {
+    const buffer = app.termMap.get(id)?.xterm?.buffer?.active;
+    return [id, buffer ? Math.max(0, buffer.baseY - buffer.viewportY) : 0];
+  }));
+  const usableWidth = bounds.right - bounds.left;
+  const usableHeight = bounds.bottom - bounds.top;
+  const gap = 16;
+  const groupWidth = usableWidth;
+  const groupHeight = usableHeight;
+  const rects = terminalGroupRects(termIds.length, pair?.layout || 'cols', groupWidth, groupHeight, gap);
+  let originX = Math.min(...frames.map(frame => frame.x));
+  let originY = Math.min(...frames.map(frame => frame.y));
+  const others = canvasItemEntries().filter(([id]) => !termIds.includes(id));
+  const overlaps = (frame, group) => frame.x < group.x + group.w && frame.x + frame.w > group.x
+    && frame.y < group.y + group.h && frame.y + frame.h > group.y;
+  if (others.some(([, frame]) => overlaps(frame, { x: originX, y: originY, w: groupWidth, h: groupHeight }))) {
+    originX = Math.max(32, ...others.map(([, frame]) => frame.x + frame.w + 48));
+    originY = 32;
+  }
+  frames.forEach((frame, index) => Object.assign(frame, {
+    x: originX + rects[index].x,
+    y: originY + rects[index].y,
+    w: rects[index].w,
+    h: rects[index].h,
+  }));
+  canvas.zoom = 1;
+  canvas.panX = (bounds.left + bounds.right) / 2 - (originX + groupWidth / 2);
+  canvas.panY = (bounds.top + bounds.bottom) / 2 - (originY + groupHeight / 2);
+  document.querySelectorAll('[data-canvas-item]').forEach(element => {
+    const frame = getCanvasItem(element.dataset.canvasItem);
+    if (!frame) return;
+    element.style.left = `${frame.x}px`;
+    element.style.top = `${frame.y}px`;
+    element.style.width = `${frame.w}px`;
+    element.style.height = `${frame.h}px`;
+  });
+  applyCanvasTransform();
+  saveCanvasState();
+  requestAnimationFrame(() => termIds.forEach(id => _core.fitTerminal(id, scrollDistances.get(id))));
+  return frames;
+}
+
+function jumpToCanvasFrame(termId) {
+  const viewport = document.querySelector('.terminal-canvas');
+  const pair = getTerminalPair(termId);
+  const termIds = pair?.termIds || [termId];
+  if (!viewport || termIds.some(id => !canvas.frames[id]) || !app.termMap.has(termId)) return;
+  selectCanvasFrame(termId);
+  const switchedTabs = termIds.filter(id => canvas.frames[id].tab !== 'terminal');
+  for (const id of switchedTabs) {
+    canvas.frames[id].tab = 'terminal';
+    setCanvasFrameTabContent(id, 'terminal');
+  }
+  // Keyboard/session-board switches must hand input to xterm synchronously. The
+  // delayed pass below is still needed after fitting, but is too late for fast typists.
+  focusCanvasFrameInput(termId);
+  const revealPrompt = () => {
+    const currentViewport = document.querySelector('.terminal-canvas');
+    const term = app.termMap.get(termId);
+    if (!currentViewport || !term) return;
+    const bounds = getCanvasUsableBounds(currentViewport);
+    if (!fitCanvasFocusGroupAt100(termId, pair, bounds)) return;
+    const scrollPromptIntoView = () => {
+      term.xterm.scrollToBottom();
+      const terminalViewport = term.element.querySelector('.xterm-viewport');
+      if (terminalViewport) terminalViewport.scrollTop = terminalViewport.scrollHeight;
+    };
+    scrollPromptIntoView();
+    focusCanvasFrameInput(termId);
+    requestAnimationFrame(scrollPromptIntoView);
+    setTimeout(scrollPromptIntoView, 180);
+  };
+  setTimeout(revealPrompt, switchedTabs.length ? 140 : 0);
+}
+
+function toggleCanvasBoard(el) {
+  canvas.boardCollapsed = !canvas.boardCollapsed;
+  const board = el.closest('.canvas-session-board');
+  board?.classList.toggle('collapsed', canvas.boardCollapsed);
+  el.setAttribute('aria-expanded', String(!canvas.boardCollapsed));
+  el.title = canvas.boardCollapsed ? 'Show session status' : 'Hide session status';
+  saveCanvasState();
+}
+
+function syncCanvasToolButtons() {
+  document.querySelectorAll('[data-action="canvas-board-window-add"]').forEach(button => {
+    const label = button.dataset.boardtype === 'note' ? 'memo' : 'checklist';
+    const count = Object.values(canvas.tools).filter(frame => frame.type === button.dataset.boardtype).length;
+    button.classList.remove('active');
+    button.title = `Add another ${label} · ${count} open`;
+  });
+}
+
+function addCanvasBoardWindow(type) {
+  if (!['note', 'checklist'].includes(type)) return;
+  const item = createCanvasBoardItem(type);
+  if (!item) return;
+  const boardId = item.id;
+  const itemId = `board:${boardId}`;
+  const sameTypeCount = Object.values(canvas.tools).filter(frame => frame.type === type).length;
+  const cascade = (sameTypeCount % 7) * 28;
+  const viewport = document.querySelector('.terminal-canvas');
+  const layer = viewport?.querySelector('.terminal-canvas-layer');
+  if (!viewport || !layer) {
+    canvas.enabled = true;
+    canvas.toolsInitialized = true;
+    canvas.tools[boardId] = {
+      type, boardId, x: 32 + cascade, y: 32 + cascade,
+      ...(type === 'note' ? { w: 440, h: 320 } : { w: 520, h: 460 }),
+    };
+    canvas.activeItem = itemId;
+    saveCanvasState();
+    renderLayout();
+    requestAnimationFrame(() => document.querySelector(`[data-canvas-board-id="${boardId}"]`)?.focus());
+    return;
+  }
+  const bounds = getCanvasUsableBounds(viewport);
+  const size = type === 'note' ? { w: 440, h: 320 } : { w: 520, h: 460 };
+  const centerX = ((bounds.left + bounds.right) / 2 - canvas.panX) / canvas.zoom;
+  const centerY = ((bounds.top + bounds.bottom) / 2 - canvas.panY) / canvas.zoom;
+  const frame = {
+    type,
+    boardId,
+    x: centerX - size.w / 2 + cascade,
+    y: centerY - size.h / 2 + cascade,
+    ...size,
+  };
+  canvas.tools[boardId] = frame;
+  const element = createCanvasBoardFrame(type, boardId, frame);
+  layer.appendChild(element);
+  selectCanvasItem(itemId);
+  syncCanvasToolButtons();
+  updateCanvasBoard();
+  showToast(`${type === 'note' ? 'Memo' : 'Checklist'} added to canvas`);
+}
+
+function removeCanvasBoardWindow(el) {
+  const type = el.dataset.boardtype;
+  const boardId = el.dataset.boardid;
+  if (!canvas.tools[boardId]) return;
+  const label = type === 'note' ? 'Memo' : 'Checklist';
+  const suffix = type === 'checklist' ? ' and all of its tasks' : '';
+  if (!window.confirm(`Delete ${label} ${boardId}${suffix}? This cannot be undone.`)) return;
+  const addButton = document.querySelector(`[data-action="canvas-board-window-add"][data-boardtype="${type}"]`);
+  const root = el.closest('[data-canvas-board-frame]');
+  delete canvas.tools[boardId];
+  root?.remove();
+  deleteCanvasBoardItem(type, boardId);
+  if (canvas.activeItem === `board:${boardId}`) canvas.activeItem = app.activeTermId || '';
+  selectCanvasItem(canvas.activeItem);
+  syncCanvasToolButtons();
+  saveCanvasState();
+  requestAnimationFrame(() => addButton?.focus());
+  showToast(`${label} ${boardId} deleted`);
+}
+
+export function requestCloseTerminal(termId) {
+  const term = app.termMap.get(termId);
+  if (!term || !window.confirm(`Close ${term.label} terminal session? Running work in this terminal will stop.`)) return false;
+  _core.closeTerminal(termId);
+  requestAnimationFrame(() => {
+    const activeFrame = [...document.querySelectorAll('[data-canvas-frame]')]
+      .find(frame => frame.dataset.canvasFrame === app.activeTermId);
+    (activeFrame || document.querySelector('[data-canvas-board-frame]') || document.querySelector('[data-action="new-term"]'))?.focus();
+  });
+  return true;
+}
+
+function closeCanvasTerminal(el) {
+  requestCloseTerminal(el.dataset.termid);
+}
+
+let sessionOrderDragId = '';
+
+function refreshSessionOrderUI(focusId = '') {
+  renderSessionTabs(document.getElementById('mob-term-tabs'));
+  const list = document.querySelector('[data-canvas-session-list]');
+  if (focusId && list) {
+    list.dataset.orderFocusId = focusId;
+    list.dataset.orderFocusUntil = String(Date.now() + 800);
+    setTimeout(() => {
+      if (list.dataset.orderFocusId !== focusId || Number(list.dataset.orderFocusUntil) > Date.now()) return;
+      delete list.dataset.orderFocusId;
+      delete list.dataset.orderFocusUntil;
+    }, 850);
+  }
+  updateAgentWall();
+  if (!focusId) return;
+  requestAnimationFrame(() => {
+    const handle = [...document.querySelectorAll('[data-session-order-id]')]
+      .find(item => item.dataset.sessionOrderId === focusId);
+    handle?.focus();
+  });
+}
+
+function reorderCanvasSession(sourceId, targetId, after = false) {
+  if (!sourceId || !targetId || sourceId === targetId) return false;
+  const ordered = getOrderedTerminalIds();
+  const movingIds = getTerminalPair(sourceId)?.termIds || [sourceId];
+  if (movingIds.includes(targetId)) return false;
+  const targetIds = getTerminalPair(targetId)?.termIds || [targetId];
+  const ids = ordered.filter(id => !movingIds.includes(id));
+  const targetIndexes = targetIds.map(id => ids.indexOf(id)).filter(index => index >= 0);
+  if (!targetIndexes.length) return false;
+  const targetIndex = after ? Math.max(...targetIndexes) + 1 : Math.min(...targetIndexes);
+  if (targetIndex < 0) return false;
+  ids.splice(targetIndex, 0, ...movingIds);
+  setTerminalOrder(ids);
+  refreshSessionOrderUI(sourceId);
+  showToast('Session order updated');
+  return true;
+}
+
+function clearSessionOrderDrag() {
+  sessionOrderDragId = '';
+  document.querySelectorAll('.canvas-session-row.dragging, .canvas-session-row.drop-before, .canvas-session-row.drop-after')
+    .forEach(row => row.classList.remove('dragging', 'drop-before', 'drop-after'));
+}
+
+function startSessionOrderDrag(e) {
+  const handle = e.target.closest('[data-session-order-id]');
+  if (!handle) return;
+  sessionOrderDragId = handle.dataset.sessionOrderId;
+  const movingIds = getTerminalPair(sessionOrderDragId)?.termIds || [sessionOrderDragId];
+  document.querySelectorAll('[data-session-order-row]').forEach(row => {
+    if (movingIds.includes(row.dataset.sessionOrderRow)) row.classList.add('dragging');
+  });
+  e.dataTransfer?.setData('text/plain', sessionOrderDragId);
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+}
+
+function overSessionOrderDrag(e) {
+  const row = e.target.closest('[data-session-order-row]');
+  const movingIds = getTerminalPair(sessionOrderDragId)?.termIds || [sessionOrderDragId];
+  if (!sessionOrderDragId || !row || movingIds.includes(row.dataset.sessionOrderRow)) return;
+  e.preventDefault();
+  document.querySelectorAll('.canvas-session-row.drop-before, .canvas-session-row.drop-after')
+    .forEach(item => item.classList.remove('drop-before', 'drop-after'));
+  row.classList.add(e.clientY >= row.getBoundingClientRect().top + row.offsetHeight / 2 ? 'drop-after' : 'drop-before');
+}
+
+function dropSessionOrder(e) {
+  const row = e.target.closest('[data-session-order-row]');
+  if (!sessionOrderDragId || !row) return clearSessionOrderDrag();
+  e.preventDefault();
+  const after = row.classList.contains('drop-after');
+  const sourceId = sessionOrderDragId;
+  const targetId = row.dataset.sessionOrderRow;
+  clearSessionOrderDrag();
+  reorderCanvasSession(sourceId, targetId, after);
+}
+
+function handleSessionOrderKey(e) {
+  const handle = e.target.closest('[data-session-order-id]');
+  if (!handle || !e.altKey || e.ctrlKey || e.metaKey || !['ArrowUp', 'ArrowDown'].includes(e.key)) return;
+  const ids = getOrderedTerminalIds();
+  const termId = handle.dataset.sessionOrderId;
+  const movingIds = getTerminalPair(termId)?.termIds || [termId];
+  const indexes = movingIds.map(id => ids.indexOf(id)).filter(index => index >= 0);
+  const targetIndex = e.key === 'ArrowUp' ? Math.min(...indexes) - 1 : Math.max(...indexes) + 1;
+  if (targetIndex < 0 || targetIndex >= ids.length) return;
+  e.preventDefault();
+  reorderCanvasSession(termId, ids[targetIndex], e.key === 'ArrowDown');
+}
+
+export function getCanvasSessionShortcutTermId(e) {
+  if (e.isComposing || e.key === 'Process' || e.keyCode === 229) return false;
+  if (isMobile() || !document.getElementById('terminal-view')?.classList.contains('active')) return false;
+  if (!e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return false;
+  const ids = getOrderedTerminalIds();
+  if (/^Digit[1-9]$/.test(e.code)) return ids[Number(e.code.slice(-1)) - 1] || false;
+  if (e.code !== 'KeyQ' && e.code !== 'KeyW') return false;
+  const current = Math.max(0, ids.indexOf(app.activeTermId));
+  const direction = e.code === 'KeyQ' ? -1 : 1;
+  return ids[(current + direction + ids.length) % ids.length] || false;
+}
+
+export function isCanvasPairShortcut(e) {
+  return !e.isComposing && e.key !== 'Process' && e.keyCode !== 229
+    && !isMobile()
+    && document.getElementById('terminal-view')?.classList.contains('active')
+    && e.altKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyG';
+}
+
+function handleCanvasPairShortcut(e) {
+  if (!isCanvasPairShortcut(e) || !app.activeTermId) return false;
+  e.preventDefault();
+  e.stopPropagation();
+  if (e.shiftKey) cycleCanvasGroupLayout(app.activeTermId);
+  else toggleCanvasPair(app.activeTermId);
+  return true;
+}
+
+function handleCanvasSessionShortcut(e) {
+  const termId = getCanvasSessionShortcutTermId(e);
+  if (!termId) return false;
+  e.preventDefault();
+  e.stopPropagation();
+  if (app.pairSourceTermId && /^Digit[1-9]$/.test(e.code)) {
+    if (termId === app.pairSourceTermId) {
+      showToast('Choose a different terminal for the pair');
+      return true;
+    }
+    completeCanvasPair(app.pairSourceTermId, termId);
+    return true;
+  }
+  focusCanvasTerminal(termId);
+  return true;
+}
+
+function handleCanvasFrameKey(e) {
+  if (!canvas.enabled || !e.altKey || !['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) return false;
+  const frameEl = e.target.closest('[data-canvas-item]');
+  if (e.target !== frameEl) return false;
+  const itemId = frameEl?.dataset.canvasItem;
+  const frame = itemId && getCanvasItem(itemId);
+  if (!frame) return false;
+  e.preventDefault();
+  if (app.termMap.has(itemId)) selectCanvasFrame(itemId);
+  else selectCanvasItem(itemId);
+  const step = 24 / canvas.zoom;
+  const x = e.key === 'ArrowLeft' ? -step : e.key === 'ArrowRight' ? step : 0;
+  const y = e.key === 'ArrowUp' ? -step : e.key === 'ArrowDown' ? step : 0;
+  if (e.shiftKey) {
+    const type = itemId.startsWith('board:') ? frame.type : '';
+    frame.w = Math.max(type === 'note' ? 320 : type === 'checklist' ? 380 : 420, frame.w + x);
+    frame.h = Math.max(type === 'note' ? 220 : 280, frame.h + y);
+    frameEl.style.width = `${frame.w}px`;
+    frameEl.style.height = `${frame.h}px`;
+    if (app.termMap.has(itemId)) _core.fitTerminal(itemId);
+  } else {
+    frame.x += x;
+    frame.y += y;
+    frameEl.style.left = `${frame.x}px`;
+    frameEl.style.top = `${frame.y}px`;
+  }
+  saveCanvasState();
+  return true;
 }
 
 export function mobileCloseTerm(termId) {
-  _core.closeTerminal(termId);
-  renderMobileLayout();
+  requestCloseTerminal(termId);
 }
 
 // xterm 의 helper textarea 가 native paste 받는 경로 차단 (우클릭 붙여넣기 등)
@@ -352,7 +1652,7 @@ export function updateTermHeaders() {
     const bufUsed = t.xterm.buffer.active.length;
     const bufPct = Math.round(bufUsed / _core.getScrollback() * 100);
     const timerStr = t.createdAt ? fmtDuration(Date.now() - t.createdAt) : '';
-    const cacheKey = `${t.label}|${t.color}|${g.branch || ''}|${g.uncommittedCount || 0}|${model}|${nv}|${wt.length}|${tid === app.activeTermId}|${bufPct}|${timerStr}|${leaf.classList.contains('chat-active') ? 'c' : 's'}`;
+    const cacheKey = `${t.label}|${t.topic || ''}|${t.account?.id || ''}|${t.color}|${g.branch || ''}|${g.uncommittedCount || 0}|${model}|${nv}|${wt.length}|${tid === app.activeTermId}|${bufPct}|${timerStr}|${leaf.classList.contains('chat-active') ? 'c' : 's'}`;
     if (app._headCache.get(tid) === cacheKey) return;
     app._headCache.set(tid, cacheKey);
     const p = app.projectList.find(pp => pp.id === t.projectId);
@@ -368,6 +1668,8 @@ export function updateTermHeaders() {
     head.title = projectPath;
     head.innerHTML = `<span class="th-dot" style="background:${t.color}"></span>` +
       `<span class="th-name">${esc(t.label)}</span>` +
+      (t.account ? `<span class="th-tag th-account ${esc(t.account.provider)}">${esc(t.account.name)}</span>` : '') +
+      terminalTopicHTML(tid, t.topic, 'th-topic') +
       (g.branch ? `<span class="th-tag th-branch">${esc(g.branch)}</span>` : '') + wtTag +
       (g.uncommittedCount ? `<span class="th-tag th-changes" data-pid="${t.projectId}">\u00B1${g.uncommittedCount}</span>` : '') +
       (model ? `<span class="th-tag th-model">${esc(model)}</span>` : '') +
@@ -385,7 +1687,7 @@ export function updateTermHeaders() {
       });
     }
     head.onclick = e => {
-      if (e.target.dataset.action === 'close') { e.stopPropagation(); _core.closeTerminal(tid); return; }
+      if (e.target.dataset.action === 'close') { e.stopPropagation(); requestCloseTerminal(tid); return; }
       if (e.target.dataset.action === 'clear-buf') { e.stopPropagation(); const tt = app.termMap.get(tid); if (tt?.xterm) { tt.xterm.clear(); showToast('Buffer cleared'); updateTermHeaders(); } return; }
       if (e.target.dataset.cvMode) {
         e.stopPropagation();
@@ -394,8 +1696,7 @@ export function updateTermHeaders() {
         if (leaf2) {
           leaf2.dataset.mode = newMode;
           import('./chat-view.js').then((cv) => cv.setChatMode?.(tid, newMode)).catch(() => {});
-          const tt = app.termMap.get(tid);
-          setTimeout(() => { try { tt?.fitAddon?.fit(); } catch {} }, 50);
+          setTimeout(() => _core.fitTerminal(tid), 50);
           updateTermHeaders();
         }
         return;
@@ -405,17 +1706,14 @@ export function updateTermHeaders() {
     head.ondblclick = e => {
       if (e.target.dataset.action === 'close') return;
       e.stopPropagation();
+      const topic = e.target.closest('[data-terminal-topic]');
+      if (topic) { startEditTerminalTopic(tid, topic); return; }
       if (e.target.classList.contains('th-name')) { startRenameHeader(tid, head); return; }
-      // Maximize / restore toggle
-      if (app._savedLayout) {
-        app.layoutRoot = app._savedLayout; app._savedLayout = null;
-        showToast('Layout restored');
-      } else if (app.layoutRoot?.type === 'split') {
-        app._savedLayout = JSON.parse(JSON.stringify(app.layoutRoot));
-        app.layoutRoot = { type: 'leaf', termId: tid };
-        showToast('Maximized');
-      }
-      app.activeTermId = tid; updateTermHeaders(); renderLayout();
+      app.activeTermId = tid;
+      canvas.enabled = true;
+      saveCanvasState();
+      showToast('Canvas view');
+      updateTermHeaders(); renderLayout();
     };
   });
 }
@@ -467,6 +1765,8 @@ export function showTermCtxMenu(e, termId) {
   const t = app.termMap.get(termId);
   if (!t) return;
   if (_ctxDismiss) _ctxDismiss();
+  const trigger = document.activeElement;
+  if (trigger?.getAttribute?.('aria-haspopup') === 'menu') trigger.setAttribute('aria-expanded', 'true');
   const g = app.state.projects.get(t.projectId)?.git || {};
   const sel = t.xterm.getSelection();
   const _pName = app.projectList.find(p => p.id === t.projectId)?.name || '';
@@ -557,6 +1857,16 @@ export function showTermCtxMenu(e, termId) {
   if (termCount > 1) html += `<div class="ctx-item ctx-danger" data-act="close">${_ic('close')}Close</div>`;
 
   menu.innerHTML = html;
+  menu.setAttribute('role', 'menu');
+  menu.querySelectorAll('.ctx-item').forEach(item => {
+    item.setAttribute('role', 'menuitem');
+    item.tabIndex = 0;
+  });
+  menu.querySelectorAll('.ctx-toggle').forEach(item => {
+    item.setAttribute('aria-haspopup', 'menu');
+    item.setAttribute('aria-expanded', 'false');
+  });
+  menu.querySelectorAll('.ctx-panel').forEach(panel => panel.setAttribute('role', 'menu'));
 
   // ── Submenu toggle ──
   menu.querySelectorAll('.ctx-toggle').forEach(toggle => {
@@ -571,13 +1881,14 @@ export function showTermCtxMenu(e, termId) {
       if (!isOpen) {
         panel.style.display = 'block';
         toggle.classList.add('ctx-active');
+        toggle.setAttribute('aria-expanded', 'true');
         // Style sub-items
         panel.querySelectorAll('.ctx-item').forEach(el => {
           el.style.cssText = 'display:flex;align-items:center;gap:8px;padding:4px 10px;font-size:.76rem;color:#7982a9;cursor:pointer;white-space:nowrap;border-radius:4px;margin:0 2px;';
           el.onmouseenter = () => { el.style.background = 'rgba(99,102,241,.1)'; el.style.color = '#c0caf5'; };
           el.onmouseleave = () => { el.style.background = ''; el.style.color = '#7982a9'; };
         });
-      }
+      } else toggle.setAttribute('aria-expanded', 'false');
       requestAnimationFrame(() => {
         const mr = menu.getBoundingClientRect();
         if (mr.bottom > window.innerHeight - 8) menu.style.top = Math.max(8, window.innerHeight - mr.height - 8) + 'px';
@@ -594,16 +1905,16 @@ export function showTermCtxMenu(e, termId) {
   `;
   // Apply item styles
   menu.querySelectorAll('.ctx-item').forEach(el => {
-    el.style.cssText = `display:flex;align-items:center;gap:8px;padding:5px 10px;font-size:.8rem;color:#a9b1d6;cursor:pointer;white-space:nowrap;border-radius:6px;`;
-    el.onmouseenter = () => { el.style.background = '#24283b'; el.style.color = '#c0caf5'; };
-    el.onmouseleave = () => { el.style.background = ''; el.style.color = el.classList.contains('ctx-danger') ? '#f7768e' : '#a9b1d6'; };
-    if (el.classList.contains('ctx-danger')) el.style.color = '#f7768e';
+    el.style.cssText = `display:flex;align-items:center;gap:8px;padding:6px 10px;font-size:.76rem;color:var(--text-2);cursor:pointer;white-space:nowrap;border-radius:3px;`;
+    el.onmouseenter = () => { el.style.background = 'var(--bg-3)'; el.style.color = 'var(--text-0)'; };
+    el.onmouseleave = () => { el.style.background = ''; el.style.color = el.classList.contains('ctx-danger') ? 'var(--red)' : 'var(--text-2)'; };
+    if (el.classList.contains('ctx-danger')) el.style.color = 'var(--red)';
   });
-  menu.querySelectorAll('.ctx-sep').forEach(el => { el.style.cssText = 'height:1px;background:#2a2b3d;margin:3px 8px;opacity:.5;'; });
-  menu.querySelectorAll('.ctx-label').forEach(el => { el.style.cssText = 'padding:5px 10px 2px;font-size:.62rem;color:#565f89;text-transform:uppercase;letter-spacing:.07em;font-weight:600;'; });
-  menu.querySelectorAll('.ctx-panel').forEach(el => { el.style.cssText = 'display:none;overflow:hidden;margin:2px 4px 2px 10px;padding:2px 0;border-left:2px solid rgba(99,102,241,.3);border-radius:0 4px 4px 0;background:rgba(99,102,241,.04);'; });
-  menu.querySelectorAll('.ctx-key').forEach(el => { el.style.cssText = 'margin-left:auto;font-size:.62rem;color:#565f89;font-family:monospace;padding:1px 5px;background:#16161e;border-radius:3px;border:1px solid #2a2b3d;line-height:1.2;'; });
-  menu.querySelectorAll('.ctx-badge').forEach(el => { el.style.cssText = 'margin-left:auto;padding:1px 7px;border-radius:8px;font-size:.62rem;font-weight:700;background:#7aa2f7;color:#fff;'; });
+  menu.querySelectorAll('.ctx-sep').forEach(el => { el.style.cssText = 'height:1px;background:var(--border);margin:3px 8px;'; });
+  menu.querySelectorAll('.ctx-label').forEach(el => { el.style.cssText = 'padding:6px 10px 3px;font-size:.58rem;color:var(--text-3);text-transform:uppercase;letter-spacing:.09em;font-weight:650;'; });
+  menu.querySelectorAll('.ctx-panel').forEach(el => { el.style.cssText = 'display:none;overflow:hidden;margin:2px 4px 2px 10px;padding:2px;border:1px solid var(--border);border-radius:3px;background:var(--bg-1);'; });
+  menu.querySelectorAll('.ctx-key').forEach(el => { el.style.cssText = 'margin-left:auto;font-size:.58rem;color:var(--text-3);font-family:var(--mono);padding:1px 5px;background:var(--bg-1);border-radius:3px;border:1px solid var(--border);line-height:1.2;'; });
+  menu.querySelectorAll('.ctx-badge').forEach(el => { el.style.cssText = 'margin-left:auto;padding:1px 7px;border-radius:8px;font-size:.58rem;font-weight:700;background:var(--accent-dim);color:var(--text-0);'; });
   menu.querySelectorAll('.ctx-chevron').forEach(el => { el.style.cssText = 'margin-left:auto;width:10px;height:10px;opacity:.4;display:inline-flex;'; });
   menu.querySelectorAll('.ctx-ic').forEach(el => { el.style.cssText = 'width:13px;height:13px;flex-shrink:0;opacity:.45;display:inline-flex;align-items:center;'; });
 
@@ -621,8 +1932,11 @@ export function showTermCtxMenu(e, termId) {
     menu.style.display = 'none';
     menu.classList.remove('show');
     menu.onclick = null;
+    menu.onkeydown = null;
     document.removeEventListener('mousedown', onOutside);
     document.removeEventListener('keydown', onEsc);
+    if (trigger?.getAttribute?.('aria-haspopup') === 'menu') trigger.setAttribute('aria-expanded', 'false');
+    trigger?.focus?.();
     _ctxDismiss = null;
   }
   function onOutside(ev) { if (!menu.contains(ev.target)) dismiss(); }
@@ -669,13 +1983,29 @@ export function showTermCtxMenu(e, termId) {
       case 'rename': { const hdr = t.element.closest('.term-panel')?.querySelector('.term-header[data-id="' + termId + '"]'); if (hdr) startRenameHeader(termId, hdr); break; }
       case 'diff': showDiffForProject(t.projectId); break;
       case 'clear': t.xterm.clear(); break;
-      case 'close': _core.closeTerminal(termId); break;
+      case 'close': requestCloseTerminal(termId); break;
     }
+  };
+  menu.onkeydown = ev => {
+    const item = ev.target.closest('[role="menuitem"]');
+    if (!item) return;
+    if (ev.key === 'Enter' || ev.key === ' ') {
+      ev.preventDefault();
+      item.click();
+      return;
+    }
+    if (ev.key !== 'ArrowDown' && ev.key !== 'ArrowUp') return;
+    ev.preventDefault();
+    const items = [...menu.querySelectorAll('[role="menuitem"]')].filter(el => el.offsetParent !== null);
+    const current = items.indexOf(item);
+    const delta = ev.key === 'ArrowDown' ? 1 : -1;
+    items[(current + delta + items.length) % items.length]?.focus();
   };
 
   setTimeout(() => {
     document.addEventListener('mousedown', onOutside);
     document.addEventListener('keydown', onEsc);
+    menu.querySelector('[role="menuitem"]')?.focus();
   }, 50);
 }
 
@@ -795,6 +2125,11 @@ export function setupTermEventDelegation() {
         case 'mob-switch': mobileSwitchTerm(el.dataset.termid); break;
       }
     });
+    _termView.addEventListener('dragstart', startSessionOrderDrag);
+    _termView.addEventListener('dragover', overSessionOrderDrag);
+    _termView.addEventListener('drop', dropSessionOrder);
+    _termView.addEventListener('dragend', clearSessionOrderDrag);
+    _termView.addEventListener('keydown', handleSessionOrderKey);
   }
   const _ntModal = document.getElementById('new-term-modal');
   if (_ntModal) {
@@ -812,6 +2147,61 @@ export function setupTermEventDelegation() {
     });
   }
   const _termPanels = document.getElementById('term-panels');
+  _termPanels.addEventListener('pointerdown', startCanvasGesture, true);
+  _termPanels.addEventListener('wheel', handleCanvasWheel, { passive: false });
+  _termPanels.addEventListener('keydown', e => {
+    const topic = e.target.closest('[data-terminal-topic]');
+    if (topic && (e.key === 'Enter' || e.key === ' ' || e.key === 'F2')) {
+      e.preventDefault();
+      e.stopPropagation();
+      startEditTerminalTopic(topic.dataset.terminalTopic, topic);
+      return;
+    }
+    if (handleCanvasFrameKey(e)) return;
+    if (canvas.enabled && e.target.matches('[data-canvas-frame]') && e.key === 'Enter') {
+      e.preventDefault();
+      focusCanvasTerminal(e.target.dataset.canvasFrame);
+    }
+  });
+  document.addEventListener('pointermove', moveCanvasGesture);
+  document.addEventListener('pointerup', endCanvasGesture);
+  document.addEventListener('pointercancel', endCanvasGesture);
+  document.addEventListener('pointerdown', e => {
+    if (!e.target.closest('[data-action="canvas-group-layout-toggle"], [data-canvas-group-layout-menu]')) closeCanvasGroupLayoutMenu();
+  });
+  document.addEventListener('keydown', e => {
+    if (e.isComposing || e.key === 'Process' || e.keyCode === 229) return;
+    const groupMenu = document.querySelector('[data-canvas-group-layout-menu]');
+    if (e.key === 'Escape' && !groupMenu?.hidden) {
+      e.preventDefault();
+      closeCanvasGroupLayoutMenu(true);
+      return;
+    }
+    if (e.key === 'Escape' && app.pairSourceTermId) {
+      e.preventDefault();
+      finishCanvasGroupEdit();
+      return;
+    }
+    if (!groupMenu?.hidden && groupMenu.contains(e.target) && ['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) {
+      const items = [...groupMenu.querySelectorAll('[role="menuitemradio"]')];
+      const current = Math.max(0, items.indexOf(document.activeElement));
+      const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1
+        : (current + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+      e.preventDefault();
+      items[next]?.focus({ preventScroll: true });
+      return;
+    }
+    if (handleCanvasPairShortcut(e)) return;
+    if (handleCanvasSessionShortcut(e)) return;
+    if (e.code !== 'Space' || !canvas.enabled || e.target.closest('input, textarea, [contenteditable="true"]')) return;
+    canvasSpaceDown = true;
+    document.body.classList.add('canvas-space-ready');
+    if (document.getElementById('terminal-view')?.classList.contains('active')) e.preventDefault();
+  });
+  document.addEventListener('keyup', e => {
+    if (e.code === 'Space') { canvasSpaceDown = false; document.body.classList.remove('canvas-space-ready'); }
+  });
+  window.addEventListener('blur', () => { canvasSpaceDown = false; endCanvasGesture(); });
   _termPanels.addEventListener('mousedown', e => {
     const leaf = e.target.closest('.split-leaf');
     if (leaf) {
@@ -830,6 +2220,19 @@ export function setupTermEventDelegation() {
     if (leaf) { e.preventDefault(); e.stopPropagation(); showTermCtxMenu(e, leaf.dataset.termId); }
   }, true);
   _termPanels.addEventListener('dblclick', e => {
+    const topic = e.target.closest('[data-terminal-topic]');
+    if (topic) {
+      e.preventDefault();
+      e.stopPropagation();
+      startEditTerminalTopic(topic.dataset.terminalTopic, topic);
+      return;
+    }
+    const canvasHead = e.target.closest('.canvas-frame-head');
+    if (canvas.enabled && canvasHead && !e.target.closest('button')) {
+      e.preventDefault();
+      focusCanvasTerminal(canvasHead.dataset.canvasDrag);
+      return;
+    }
     const name = e.target.closest('.th-name'); if (!name) return;
     const head = name.closest('.term-head'); if (!head) return;
     const tid = head.dataset.termId; if (tid) startRenameHeader(tid, head);
@@ -971,7 +2374,7 @@ export function setupMobileSwipe() {
     const dy = touch.clientY - startY;
     // Only horizontal swipe, minimum 60px, must be more horizontal than vertical
     if (Math.abs(dx) < 60 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
-    const ids = [...app.termMap.keys()];
+    const ids = getOrderedTerminalIds();
     const idx = ids.indexOf(app.activeTermId);
     if (idx < 0) return;
     if (dx < 0 && idx < ids.length - 1) mobileSwitchTerm(ids[idx + 1]); // swipe left → next
@@ -1462,12 +2865,19 @@ function hideScrollIndicator() {
   if (btn) btn.style.display = 'none';
 }
 
-function scrollToBottom() {
-  if (!app.activeTermId) return;
-  const t = app.termMap.get(app.activeTermId);
+export function scrollToBottom(termId = app.activeTermId) {
+  if (!termId) return;
+  const t = app.termMap.get(termId);
   if (!t) return;
-  t.xterm.scrollToBottom();
-  const ss = getScrollState(app.activeTermId);
+  delete t._resizeScrollAnchor;
+  t._focusBottomUntil = Date.now() + 1000;
+  if (t.xterm.buffer.active.type === 'alternate' && app.ws?.readyState === 1) {
+    const data = t.xterm.modes.applicationCursorKeysMode ? '\x1bOF' : '\x1b[F';
+    app.ws.send(JSON.stringify({ type: 'input', termId, data, cols: t.xterm.cols, rows: t.xterm.rows }));
+  } else {
+    t.xterm.scrollToBottom();
+  }
+  const ss = getScrollState(termId);
   ss.scrolledUp = false;
   ss.newLines = 0;
   hideScrollIndicator();
@@ -1542,7 +2952,32 @@ registerClickActions({
   'font-size-down': () => _core.changeTermFontSize(-1),
   'font-size-up': () => _core.changeTermFontSize(1),
   'export-terminal': () => _core.exportTerminal(),
-  'term-scroll-bottom': scrollToBottom,
+  'term-scroll-bottom': () => scrollToBottom(),
+  'toggle-canvas-view': toggleCanvasView,
+  'canvas-tab': (el) => setCanvasTab(el.dataset.termid, el.dataset.tab),
+  'canvas-jump': (el) => jumpToCanvasFrame(el.dataset.termid),
+  'canvas-focus': (el) => focusCanvasTerminal(el.dataset.termid),
+  'canvas-pair-toggle': (el) => toggleCanvasPair(el.dataset.termid),
+  'canvas-group-edit': toggleCanvasGroupEdit,
+  'canvas-pair-direction': (el) => cycleCanvasGroupLayout(el.dataset.termid),
+  'canvas-group-layout-toggle': toggleCanvasGroupLayoutMenu,
+  'canvas-group-layout': (el) => setCanvasGroupLayout(app.activeTermId, el.dataset.layout),
+  'canvas-group-remove': (el) => removeCanvasGroupMember(el.dataset.termid || app.activeTermId),
+  'canvas-board-toggle': toggleCanvasBoard,
+  'canvas-board-window-add': (el) => addCanvasBoardWindow(el.dataset.boardtype),
+  'canvas-board-window-remove': removeCanvasBoardWindow,
+  'canvas-terminal-close': closeCanvasTerminal,
+  'canvas-zoom-out': () => setCanvasZoom(canvas.zoom - 0.1),
+  'canvas-zoom-in': () => setCanvasZoom(canvas.zoom + 0.1),
+  'canvas-reset-zoom': () => setCanvasZoom(1),
+  'canvas-fit': fitCanvas,
+  'canvas-fill-active': fillActiveCanvasFrame,
+  'open-term-search': () => app.activeTermId ? _core.toggleTermSearch() : showToast('No active terminal', 'error'),
+  'mobile-term-tools': (el) => {
+    if (!app.activeTermId) return showToast('No active terminal', 'error');
+    const rect = el.getBoundingClientRect();
+    showTermCtxMenu({ clientX: rect.left, clientY: Math.max(8, rect.top - 8) }, app.activeTermId);
+  },
   'qb-toggle': toggleQuickBar,
   'qb-add-cmd': addQuickCmd,
   'qb-run': (el) => runQuickCmd(el.dataset.cmd),

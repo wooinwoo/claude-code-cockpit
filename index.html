@@ -4,17 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Cockpit</title>
-    <meta name="theme-color" content="#818cf8" />
+    <meta name="theme-color" content="#090b0c" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link rel="manifest" href="/manifest.json" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link rel="preconnect" href="https://generativelanguage.googleapis.com" />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
-      rel="stylesheet"
-    />
     <style>
       @font-face {
         font-family: 'Pretendard Variable';
@@ -48,9 +42,10 @@
     <link rel="stylesheet" href="/vendor/xterm.min.css" />
     <script src="/vendor/xterm.min.js"></script>
     <script src="/vendor/addon-fit.min.js"></script>
-    <script src="/vendor/addon-web-links.min.js"></script>
     <script src="/vendor/addon-webgl.min.js"></script>
+    <script src="/vendor/addon-web-links.min.js"></script>
     <script src="/vendor/addon-search.min.js"></script>
+    <script src="/vendor/addon-unicode11.min.js"></script>
     <script src="/vendor/addon-image.min.js"></script>
     <link rel="stylesheet" href="/css/base.css" />
     <link rel="stylesheet" href="/css/dashboard.css" />
@@ -62,11 +57,22 @@
     <link rel="stylesheet" href="/css/cicd.css" />
     <link rel="stylesheet" href="/css/ports.css" />
     <link rel="stylesheet" href="/css/autopilot.css" />
+    <link rel="stylesheet" href="/css/ai-accounts.css" />
     <link rel="stylesheet" href="/css/mobile.css" />
     <link rel="stylesheet" href="/css/workflows.css" />
     <link rel="stylesheet" href="/css/xterm-skin.css" />
+    <link rel="stylesheet" href="/css/cockpit.css" />
   </head>
-  <body>
+  <body class="terminal-first-shell">
+    <!--
+    THESIS: Cockpit is a terminal multiplexer with nearby operations, not a dashboard with a terminal tab.
+    OWN-WORLD: A precise electronic instrument bench built from matte surfaces, engraved labels, hairline divisions, and restrained signal lights.
+    STORY: Enter the local workspace, choose a session, work in xterm, and reach secondary operations without leaving the bench.
+    FIRST VIEWPORT: A slim activity rail and status strip frame a maximum-size terminal canvas with one compact session row.
+    FORM: Direction seed 3fb1aa61; flat instrument controls, steel-blue focus, green connection, amber attention.
+    FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md.
+    -->
+    <a class="skip-link" href="#terminal-view">Skip to terminal</a>
     <header>
       <div class="logo">
         <svg
@@ -93,10 +99,10 @@
             opacity=".4"
           />
         </svg>
-        Cockpit
+        <span class="logo-word">Cockpit</span>
       </div>
       <div class="nav-tabs" role="tablist" aria-label="Dashboard navigation">
-        <button class="nav-tab active" role="tab" aria-selected="true" aria-controls="dashboard-view" title="Overview (Ctrl+1)" data-action="switch-view" data-view="dashboard">
+        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="dashboard-view" title="Overview (Ctrl+1)" data-action="switch-view" data-view="dashboard">
           <svg viewBox="0 0 24 24">
             <rect x="3" y="3" width="7" height="7" rx="1" />
             <rect x="14" y="3" width="7" height="7" rx="1" />
@@ -105,7 +111,7 @@
           </svg>
           Overview
         </button>
-        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="terminal-view" title="Terminal (Ctrl+2)" data-action="switch-view" data-view="terminal">
+        <button class="nav-tab active" role="tab" aria-selected="true" aria-controls="terminal-view" title="Terminal (Ctrl+2)" data-action="switch-view" data-view="terminal">
           <svg viewBox="0 0 24 24">
             <polyline points="4 17 10 11 4 5" />
             <line x1="12" y1="19" x2="20" y2="19" />
@@ -155,6 +161,13 @@
           </svg>
           <span class="tab-label">README</span>
         </button>
+        <button class="nav-tab" role="tab" aria-selected="false" aria-controls="ai-accounts-view" title="AI 계정" data-action="switch-view" data-view="ai-accounts">
+          <svg viewBox="0 0 24 24">
+            <circle cx="8" cy="8" r="3"/><circle cx="17" cy="7" r="2.5"/>
+            <path d="M3 19c.6-3.4 2.3-5 5-5s4.4 1.6 5 5M14 13c2.7-.5 5 .9 6 4"/>
+          </svg>
+          <span class="tab-label">AI 계정</span>
+        </button>
         <div class="nav-more-wrap" id="nav-more-wrap">
           <button class="nav-tab nav-more-btn" id="nav-more-btn" data-action="toggle-nav-more" title="More tabs">
             <svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.5" fill="currentColor" stroke="none"/></svg>
@@ -164,6 +177,24 @@
         </div>
       </div>
       <div class="header-right">
+        <div class="workspace-identity shrink-0" aria-label="Local workspace">
+          <span class="workspace-label">WORKSPACE</span>
+          <span class="workspace-name">Local</span>
+        </div>
+        <div class="terminal-global-actions flex items-center" aria-label="Terminal actions">
+          <button class="deck-action primary" data-action="new-term" title="New terminal (Ctrl+T)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+            <span>New terminal</span>
+          </button>
+          <button class="deck-action" data-action="toggle-canvas-view" aria-pressed="true" title="Show terminal canvas">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="6" rx="1"/><rect x="13" y="4" width="8" height="8" rx="1"/><rect x="5" y="13" width="9" height="8" rx="1"/></svg>
+            <span>Canvas</span>
+          </button>
+          <button class="deck-action" data-action="open-term-search" title="Search terminal (Ctrl+F)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+            <span>Search</span>
+          </button>
+        </div>
         <span class="header-clock" id="header-clock"></span>
         <div class="stat-badge">
           <span>Output</span><span class="value" id="today-output">0</span>
@@ -184,13 +215,12 @@
           class="btn"
           id="notify-toggle"
           data-action="toggle-notifications"
-          style="font-size: 0.72rem; padding: 3px 8px"
           title="Toggle notifications"
           data-contextaction="open-notif-settings"
         >
           On
         </button>
-        <button class="btn" data-action="open-notif-settings" style="font-size:0.68rem;padding:2px 5px;opacity:.6" title="Notification settings per project">&#x2699;</button>
+        <button class="btn" data-action="open-notif-settings" title="Notification settings per project">&#x2699;</button>
         <button
           class="header-btn"
           data-action="open-error-log"
@@ -260,7 +290,8 @@
             <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/>
           </svg>
         </button>
-        <span class="conn-dot" id="conn-dot"></span>
+        <span class="conn-dot off" id="conn-dot"></span>
+        <span class="connection-label" id="connection-status" role="status" aria-live="polite">Connecting</span>
         <button
           class="header-btn"
           data-action="open-settings"
@@ -283,7 +314,7 @@
 
     <div class="app">
       <!-- Dashboard View -->
-      <div class="view active" id="dashboard-view" role="tabpanel">
+      <div class="view" id="dashboard-view" role="tabpanel">
         <div class="smart-actions" id="smart-actions"></div>
         <section class="agent-wall-section" id="agent-wall-section" style="display:none">
           <div class="agent-wall-titlebar">
@@ -428,24 +459,32 @@
       </div>
 
       <!-- Terminal View -->
-      <div class="view" id="terminal-view" role="tabpanel">
+      <div class="view active" id="terminal-view" role="tabpanel" tabindex="-1">
         <!-- Mobile terminal tab bar -->
-        <div class="mob-term-tabs" id="mob-term-tabs"></div>
+        <div class="mob-term-tabs" id="mob-term-tabs" role="tablist" aria-label="Terminal sessions">
+          <span class="session-strip-label">Sessions</span>
+          <button class="mob-tab mob-tab-add" data-action="new-term" title="New terminal" aria-label="New terminal">+</button>
+        </div>
         <div class="broadcast-indicator" id="broadcast-indicator" style="display:none" data-action="toggle-broadcast">
-          <span class="bc-icon">&#x1F4E1;</span> Broadcast <span class="bc-count">0</span> terminals
+          <svg class="bc-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8.5 15.5a5 5 0 0 1 0-7M5.5 18.5a9 9 0 0 1 0-13M12 12h.01M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13"/></svg>
+          Broadcast <span class="bc-count">0</span> terminals
           <button class="bc-close" title="Turn off">&times;</button>
         </div>
         <div class="arena-indicator" id="arena-indicator" style="display:none">
           <span id="arena-status">&#x2694;&#xFE0F; Arena</span>
           <button class="bc-close" data-action="arena-stop" title="토론 중단">&times;</button>
         </div>
-        <ul class="agent-strip" id="agent-strip" style="display:none"></ul>
         <div id="term-panels-home"></div>
         <div class="term-panels" id="term-panels">
           <div class="term-empty">
-            <button class="btn" data-action="new-term">
-              + New Terminal
-            </button>
+            <svg class="term-empty-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m7 7 5 5-5 5M14 17h4"/></svg>
+            <div class="term-empty-title">Start a workspace terminal</div>
+            <div class="term-empty-copy">Open a project session or a clean shell. Canvas keeps every session spatially organized.</div>
+            <div class="term-empty-actions">
+              <button class="btn primary" data-action="new-term">New project terminal</button>
+              <button class="btn" data-action="new-home-term">Open clean shell</button>
+            </div>
+            <div class="term-empty-hint">Ctrl+T · canvas, search, broadcast, export</div>
           </div>
         </div>
         <!-- Selection Floating Toolbar -->
@@ -473,6 +512,7 @@
         </div>
         <!-- Mobile quick action bar -->
         <div class="mob-term-actions" id="mob-term-actions">
+          <button class="mob-tools" data-action="mobile-term-tools" aria-haspopup="menu" aria-controls="term-ctx-menu" aria-expanded="false" title="Terminal actions">Tools</button>
           <button data-key="escape">Esc</button>
           <button data-key="tab">Tab</button>
           <button data-key="ctrl-c">^C</button>
@@ -555,6 +595,26 @@
             </button>
           </div>
         </div>
+      </div>
+
+      <!-- AI Accounts View -->
+      <div class="view" id="ai-accounts-view" role="tabpanel" tabindex="-1">
+        <section class="ai-accounts-shell" aria-labelledby="ai-accounts-title">
+          <header class="ai-accounts-head">
+            <div>
+              <h1 id="ai-accounts-title">AI 계정</h1>
+              <p>계정과 작업 위치를 선택해 독립된 Claude·Codex 터미널을 엽니다.</p>
+            </div>
+            <div class="ai-accounts-tools">
+              <label for="ai-account-project">작업 위치</label>
+              <select id="ai-account-project" aria-label="AI 계정 터미널 작업 위치"></select>
+              <button class="btn" data-action="refresh-ai-accounts" type="button">새로고침</button>
+            </div>
+          </header>
+          <div class="ai-accounts-status" id="ai-accounts-status" role="status">계정 정보를 불러오는 중…</div>
+          <div class="ai-account-list" id="ai-account-list" aria-live="polite"></div>
+          <p class="ai-accounts-footnote">계정 전환은 새 터미널에만 적용됩니다. 기존 터미널과 전역 로그인은 바뀌지 않습니다.</p>
+        </section>
       </div>
 
       <!-- Diff View -->
@@ -1343,6 +1403,8 @@
           <option value="claude --continue">claude --continue</option>
           <option value="claude --model opus">claude --model opus</option>
           <option value="claude --model sonnet">claude --model sonnet</option>
+          <option value="codex">codex</option>
+          <option value="opencode">opencode</option>
         </select>
         <div id="nt-branch-section" style="display: none">
           <label
@@ -1520,7 +1582,7 @@
     </dialog>
 
     <!-- Terminal Context Menu -->
-    <div class="ctx-menu" id="term-ctx-menu"></div>
+    <div class="ctx-menu" id="term-ctx-menu" role="menu" aria-label="Terminal actions"></div>
 
     <!-- Diff Dialog -->
     <dialog id="diff-dialog" style="max-width: 900px; width: 95%">
@@ -1801,6 +1863,16 @@
         </div>
         <div class="settings-project-list" id="settings-project-list"></div>
 
+        <div class="settings-section-divider"></div>
+        <h3 class="settings-section-title">터미널 세션</h3>
+        <div class="settings-server-row">
+          <div>
+            <div class="settings-server-label">안전 재시작</div>
+            <div class="settings-server-status" id="settings-server-status" role="status">확인 중…</div>
+          </div>
+          <button class="btn btn-sm" id="settings-server-restart" data-action="restart-cockpit" disabled>재시작</button>
+        </div>
+
         <!-- API Keys Section -->
         <div class="settings-section-divider"></div>
         <h3 class="settings-section-title">API Keys</h3>
@@ -1896,104 +1968,92 @@
       class="shortcut-overlay hidden"
       id="shortcut-overlay"
       data-action="close-shortcut-overlay"
+      role="dialog"
+      aria-labelledby="shortcut-title"
+      aria-describedby="shortcut-description"
     >
-      <div class="shortcut-card">
-        <h2>
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-          >
-            <rect x="2" y="4" width="20" height="16" rx="2" />
-            <path
-              d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"
-            />
-          </svg>
-          Keyboard Shortcuts
-        </h2>
-        <table>
-          <tr class="sc-section">
-            <td colspan="2">Navigation</td>
-          </tr>
-          <tr>
-            <td>Ctrl + 1</td>
-            <td>Overview</td>
-          </tr>
-          <tr>
-            <td>Ctrl + 2</td>
-            <td>Terminal</td>
-          </tr>
-          <tr>
-            <td>Ctrl + 3</td>
-            <td>Changes</td>
-          </tr>
-          <tr>
-            <td>Ctrl + 4</td>
-            <td>Jira</td>
-          </tr>
-          <tr>
-            <td>Ctrl + 5</td>
-            <td>CI/CD</td>
-          </tr>
-          <tr>
-            <td>Ctrl + `</td>
-            <td>Agent</td>
-          </tr>
-          <tr class="sc-section">
-            <td colspan="2">Terminal</td>
-          </tr>
-          <tr>
-            <td>Ctrl + T</td>
-            <td>New terminal</td>
-          </tr>
-          <tr>
-            <td>Ctrl + W</td>
-            <td>Close terminal</td>
-          </tr>
-          <tr>
-            <td>Ctrl + F</td>
-            <td>Search in terminal</td>
-          </tr>
-          <tr>
-            <td>Ctrl + Tab</td>
-            <td>Next terminal</td>
-          </tr>
-          <tr>
-            <td>Ctrl + Shift + Tab</td>
-            <td>Previous terminal</td>
-          </tr>
-          <tr>
-            <td>Double-click tab</td>
-            <td>Rename terminal</td>
-          </tr>
-          <tr class="sc-section">
-            <td colspan="2">Changes</td>
-          </tr>
-          <tr>
-            <td>E</td>
-            <td>Expand all diffs</td>
-          </tr>
-          <tr>
-            <td>C</td>
-            <td>Collapse all diffs</td>
-          </tr>
-          <tr class="sc-section">
-            <td colspan="2">General</td>
-          </tr>
-          <tr>
-            <td>Ctrl + K</td>
-            <td>Command palette</td>
-          </tr>
-          <tr>
-            <td>?</td>
-            <td>Show this help</td>
-          </tr>
-          <tr>
-            <td>Escape</td>
-            <td>Close overlay / search</td>
-          </tr>
-        </table>
+      <div class="shortcut-card" tabindex="-1">
+        <header class="shortcut-head">
+          <div>
+            <h2 id="shortcut-title">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                aria-hidden="true"
+              >
+                <rect x="2" y="4" width="20" height="16" rx="2" />
+                <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10" />
+              </svg>
+              Terminal &amp; Canvas Keys
+            </h2>
+            <p id="shortcut-description">Alt controls sessions, canvas, and scrollback. Hold K or L for continuous scrolling.</p>
+          </div>
+          <button class="shortcut-close" type="button" data-action="hide-shortcut-help" aria-label="Close shortcut guide">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+            <span>Close</span>
+          </button>
+        </header>
+
+        <div class="shortcut-groups">
+          <section class="shortcut-group">
+            <h3>Sessions &amp; groups</h3>
+            <table>
+              <tr><th scope="row"><kbd>Alt</kbd> <kbd>1–9</kbd></th><td>Jump to a numbered session</td></tr>
+              <tr><th scope="row"><kbd>Alt</kbd> <kbd>Q / W</kbd></th><td>Previous / next session</td></tr>
+              <tr><th scope="row"><kbd>Ctrl</kbd> <kbd>Tab</kbd></th><td>Next session; add Shift for previous</td></tr>
+              <tr><th scope="row"><kbd>Alt</kbd> <kbd>G</kbd></th><td>Start or cancel grouping, then press Alt + 1–9</td></tr>
+              <tr><th scope="row"><kbd>Alt</kbd> <kbd>Shift</kbd> <kbd>G</kbd></th><td>Cycle the active group layout</td></tr>
+            </table>
+          </section>
+
+          <section class="shortcut-group">
+            <h3>Terminal scrollback</h3>
+            <table>
+              <tr><th scope="row"><kbd>Alt</kbd> <kbd>K / L</kbd></th><td>Scroll up / down 3 lines; hold to continue</td></tr>
+              <tr><th scope="row"><kbd>Alt</kbd> <kbd>Shift</kbd> <kbd>K / L</kbd></th><td>Scroll up / down one page</td></tr>
+              <tr><th scope="row"><kbd>Alt</kbd> <kbd>End</kbd></th><td>Jump to the latest terminal output</td></tr>
+              <tr><th scope="row"><kbd>Ctrl</kbd> <kbd>F</kbd></th><td>Search terminal output</td></tr>
+            </table>
+          </section>
+
+          <section class="shortcut-group">
+            <h3>Canvas</h3>
+            <table>
+              <tr><th scope="row"><kbd>Alt</kbd> <kbd>Arrow</kbd></th><td>Move the selected frame</td></tr>
+              <tr><th scope="row"><kbd>Alt</kbd> <kbd>Shift</kbd> <kbd>Arrow</kbd></th><td>Resize the selected frame</td></tr>
+              <tr><th scope="row"><kbd>Ctrl</kbd> <kbd>Wheel</kbd></th><td>Zoom at the pointer</td></tr>
+              <tr><th scope="row"><kbd>Shift</kbd> <kbd>Wheel</kbd></th><td>Pan horizontally</td></tr>
+              <tr><th scope="row"><kbd>Drag</kbd></th><td>Pan from blank canvas background</td></tr>
+              <tr><th scope="row"><kbd>Enter</kbd></th><td>Focus a keyboard-selected terminal frame</td></tr>
+            </table>
+          </section>
+
+          <section class="shortcut-group">
+            <h3>Terminal actions</h3>
+            <table>
+              <tr><th scope="row"><kbd>Ctrl</kbd> <kbd>T</kbd></th><td>New terminal</td></tr>
+              <tr><th scope="row"><kbd>Ctrl</kbd> <kbd>W</kbd></th><td>Close active terminal</td></tr>
+              <tr><th scope="row"><kbd>Ctrl</kbd> <kbd>J</kbd></th><td>Toggle quick command bar</td></tr>
+              <tr><th scope="row"><kbd>Ctrl</kbd> <kbd>B</kbd></th><td>Toggle broadcast mode</td></tr>
+              <tr><th scope="row"><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>\</kbd></th><td>Split right</td></tr>
+              <tr><th scope="row"><kbd>Ctrl</kbd> <kbd>Shift</kbd> <kbd>−</kbd></th><td>Split below</td></tr>
+            </table>
+          </section>
+
+          <section class="shortcut-group shortcut-group-wide">
+            <h3>Workspace</h3>
+            <table>
+              <tr><th scope="row"><kbd>Ctrl</kbd> <kbd>1 / 2 / 3</kbd></th><td>Overview / Terminal / Changes</td></tr>
+              <tr><th scope="row"><kbd>Ctrl</kbd> <kbd>4 / 5 / 6</kbd></th><td>PRs / Jira / CI/CD</td></tr>
+              <tr><th scope="row"><kbd>Ctrl</kbd> <kbd>7 / 8 / 9</kbd></th><td>Notes / Workflows / README</td></tr>
+              <tr><th scope="row"><kbd>Ctrl</kbd> <kbd>K</kbd></th><td>Command palette</td></tr>
+              <tr><th scope="row"><kbd>F5</kbd> / <kbd>Ctrl</kbd> <kbd>R</kbd></th><td>Reload Cockpit</td></tr>
+              <tr><th scope="row"><kbd>?</kbd> / <kbd>Esc</kbd></th><td>Open / close this guide</td></tr>
+            </table>
+          </section>
+        </div>
       </div>
     </div>
 
