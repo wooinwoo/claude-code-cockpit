@@ -8,8 +8,36 @@ import { registerClickActions, registerChangeActions } from './actions.js';
 export function openSettingsPanel() {
   renderSettingsProjectList();
   loadSettingsApiKeys();
+  loadServerRuntime();
   document.getElementById('settings-overlay').classList.add('open');
   document.getElementById('settings-panel').classList.add('open');
+}
+async function loadServerRuntime() {
+  const status = document.getElementById('settings-server-status');
+  const button = document.getElementById('settings-server-restart');
+  if (!status || !button) return;
+  button.disabled = true;
+  status.textContent = '확인 중…';
+  try {
+    const health = await fetchJson('/api/health');
+    button.disabled = !health.durableTerminals;
+    status.textContent = health.durableTerminals
+      ? `세션 보존 사용 가능 · 터미널 ${health.terminals}개`
+      : '이 환경에서는 세션 보존 재시작을 지원하지 않습니다.';
+  } catch {
+    status.textContent = '서버 상태를 불러오지 못했습니다.';
+  }
+}
+export async function restartCockpitServer() {
+  if (!confirm('Cockpit 서버를 재시작할까요? 터미널 대화는 유지되지만 실행 중인 개발 서버는 종료될 수 있습니다.')) return;
+  try {
+    const result = await postJson('/api/server/restart', {});
+    closeSettingsPanel();
+    showToast(`터미널 ${result.terminalCount}개를 보존하고 재시작합니다. 잠시 후 자동 재연결됩니다.`, 'success', 6000);
+  } catch (error) {
+    showToast(error.message || '서버를 재시작하지 못했습니다.', 'error', 6000);
+    loadServerRuntime();
+  }
 }
 async function loadSettingsApiKeys() {
   try {
@@ -420,11 +448,26 @@ export async function resumeLastSession(projectId) {
 }
 
 // ─── Shortcut Help ───
+let shortcutReturnFocus = null;
+
 export function showShortcutHelp() {
-  document.getElementById('shortcut-overlay').classList.remove('hidden');
+  const overlay = document.getElementById('shortcut-overlay');
+  if (!overlay) return;
+  if (overlay.classList.contains('hidden')) {
+    shortcutReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }
+  overlay.classList.remove('hidden');
+  requestAnimationFrame(() => overlay.querySelector('.shortcut-card')?.focus({ preventScroll: true }));
 }
 export function hideShortcutHelp() {
-  document.getElementById('shortcut-overlay').classList.add('hidden');
+  const overlay = document.getElementById('shortcut-overlay');
+  if (!overlay || overlay.classList.contains('hidden')) return;
+  overlay.classList.add('hidden');
+  const returnFocus = shortcutReturnFocus;
+  shortcutReturnFocus = null;
+  requestAnimationFrame(() => {
+    if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
+  });
 }
 
 // ─── Command Palette ───
@@ -817,19 +860,24 @@ export async function showSessionHistory(projectId) {
       return;
     }
     content.innerHTML = sessions.slice(0, 30).map(s => {
+      const isOc = s.source === 'opencode';
       const model = (s.model || '?').replace('claude-', '').replace(/-\d{8}$/, '');
       const ago = s.lastModified ? timeAgo(s.lastModified) : '?';
       const size = s.sizeKB ? `${s.sizeKB} KB` : '';
-      return `<div class="session-item">
-        <span class="si-status" style="background:var(--text-3)"></span>
-        <span class="si-model">${model}</span>
-        <span class="si-time">${ago} ago</span>
-        <span class="si-tokens">${size}</span>
-        <span class="si-id">${(s.sessionId || '').slice(-8)}</span>
+      const idLabel = isOc ? esc(s.title || (s.sessionId || '').slice(-8)) : (s.sessionId || '').slice(-8);
+      // opencode 세션은 Claude 대화 조회/재개 API 대상이 아니라 표시 전용
+      const actions = isOc ? '' : `
         <button class="btn" style="font-size:.68rem;padding:2px 6px" data-action="view-conv" data-pid="${esc(projectId)}" data-sid="${esc(s.sessionId)}" title="View conversation">View</button>
         <button class="btn" style="font-size:.68rem;padding:2px 6px" data-action="resume-session" data-pid="${esc(projectId)}" data-sid="${esc(s.sessionId)}" title="Resume session">
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-        </button>
+        </button>`;
+      return `<div class="session-item">
+        <span class="si-status" style="background:${isOc ? 'var(--accent)' : 'var(--text-3)'}"></span>
+        <span class="si-model">${isOc ? 'OpenCode' : model}</span>
+        <span class="si-time">${ago} ago</span>
+        <span class="si-tokens">${size}</span>
+        <span class="si-id">${idLabel}</span>
+        ${actions}
       </div>`;
     }).join('');
   } catch {
@@ -1103,6 +1151,9 @@ registerClickActions({
   'load-pkg-scripts': loadPkgScripts,
   'clear-error-log': clearErrorLog,
   'save-settings-gemini-key': saveSettingsGeminiKey,
+  'restart-cockpit': restartCockpitServer,
+  'show-shortcut-help': showShortcutHelp,
+  'hide-shortcut-help': hideShortcutHelp,
   'close-cmd-palette-overlay': (el, e) => { if (e.target === el) closeCommandPalette(); },
   'close-shortcut-overlay': (el, e) => { if (e.target === el) hideShortcutHelp(); },
 });

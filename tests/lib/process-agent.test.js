@@ -25,3 +25,15 @@ test('detectAgentProcess finds Claude and Codex below a PTY shell', () => {
     30: { comm: 'bash\n', cmdline: 'bash\0', children: '' },
   })), { available: true, kind: null });
 });
+
+test('detectAgentProcess finds opencode below a PTY shell', () => {
+  // opencode는 node 래퍼(comm=MainThread) 아래 바이너리로 뜨는 경우도 있다
+  assert.deepEqual(detectAgentProcess(40, proc({
+    40: { comm: 'bash\n', cmdline: 'bash\0', children: '41' },
+    41: { comm: 'opencode\n', cmdline: '/usr/local/bin/opencode\0', children: '' },
+  })), { available: true, kind: 'opencode' });
+  assert.deepEqual(detectAgentProcess(50, proc({
+    50: { comm: 'bash\n', cmdline: 'bash\0', children: '51' },
+    51: { comm: 'MainThread\n', cmdline: 'node\0/home/u/.opencode/bin/opencode\0', children: '' },
+  })), { available: true, kind: 'opencode' });
+});

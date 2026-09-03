@@ -2,13 +2,28 @@ export function getAgentKind(command, text) {
   const value = `${command} ${text}`.toLowerCase();
   if (/\bcodex\b/.test(value)) return 'Codex';
   if (/\bclaude\b/.test(value)) return 'Claude';
+  if (/\bopencode\b/.test(value)) return 'OpenCode';
   return null;
 }
 
-export function getAgentState({ exited, lastOutputAt, output, projectState, now = Date.now() }) {
+export function getAgentTask(summary, lines) {
+  if (summary?.trim()) return summary.trim();
+  const prompts = [...lines].reverse().map(line => line.trim()).filter(Boolean);
+  const prompt = prompts.find(line => /^[›❯>]\s*\S/.test(line));
+  return (prompt ? prompt.replace(/^[›❯>]\s*/, '') : prompts[0])?.slice(0, 120) || '작업 정보 없음';
+}
+
+export function getAgentGoal(goal, lines) {
+  if (goal?.trim()) return goal.trim();
+  const prompt = lines.map(line => line.trim()).find(line => /^[›❯>]\s*\S/.test(line));
+  return prompt?.replace(/^[›❯>]\s*/, '').slice(0, 240) || '';
+}
+
+export function getAgentState({ exited, output, projectState, lastOutputAt, now = Date.now() }) {
   if (exited) return 'done';
-  if (/\b(approve|permission|confirm|continue\?|waiting for input)\b/i.test(output)) return 'waiting';
-  if (now - (lastOutputAt || 0) < 4000) return 'busy';
+  if (/\b(approve|permission|confirm|continue\?|waiting for input|press enter)\b/i.test(output)) return 'waiting';
+  if (/\besc to interrupt\b/i.test(output)) return 'busy';
+  if (Number.isFinite(lastOutputAt) && now - lastOutputAt < 5000) return 'busy';
   return projectState === 'busy' || projectState === 'waiting' ? projectState : 'idle';
 }
 
@@ -24,13 +39,14 @@ export function getAgentAttention(decisions, projectPath, now = Date.now()) {
   return latest && ['ask', 'block', 'deny'].includes(latest.decision) ? latest : null;
 }
 
-export function getAgentAttentionForTerm({ hook, decisions, projectPath, projectAgentCount, now = Date.now() }) {
-  if (hook?.state === 'waiting') return { decision: 'ask', reason: hook.reason, ts: hook.updatedAt };
+export function getAgentAttentionForTerm({ hook, decisions, projectPath, projectAgentCount, lastOutputAt, now = Date.now() }) {
+  const resumedAfterPrompt = Number.isFinite(lastOutputAt) && lastOutputAt > hook?.updatedAt + 1500;
+  if (hook?.state === 'waiting' && !resumedAfterPrompt) return { decision: 'ask', reason: hook.reason, ts: hook.updatedAt };
   return projectAgentCount === 1 ? getAgentAttention(decisions, projectPath, now) : null;
 }
 
 export function getOperationalState(agentState, gateState, attention) {
-  if (attention || (agentState !== 'busy' && gateState === 'hold')) return 'waiting';
+  if (attention) return 'waiting';
   return agentState;
 }
 

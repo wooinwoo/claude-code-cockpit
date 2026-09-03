@@ -127,6 +127,8 @@ export function cardHTML(p) {
         <div class="card-foot">
           <div class="card-btn-row">
             <button class="btn primary" data-action="open-term" data-id="${p.id}" data-cmd="claude" title="New Claude session">Claude</button>
+            <button class="btn" data-action="open-term" data-id="${p.id}" data-cmd="codex" title="New Codex session">Codex</button>
+            <button class="btn" data-action="open-term" data-id="${p.id}" data-cmd="opencode" title="New OpenCode session">OpenCode</button>
             <button class="btn" data-action="open-term" data-id="${p.id}" data-cmd="claude --resume" title="Resume last conversation">Resume</button>
             <button class="btn resume-last-btn" id="resume-last-${p.id}" data-action="resume-last" data-id="${p.id}" style="display:none" title="Resume last session in external terminal">Last</button>
             <button class="btn" data-action="open-term" data-id="${p.id}" data-cmd="" title="Open shell">Shell</button>
