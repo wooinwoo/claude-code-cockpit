@@ -51,6 +51,12 @@ taskkill //F //IM cockpit.exe; sleep 2; start "" "$DST/cockpit.exe"
 
 **중요: 사용자 확인 없이 앱 재시작하지 말 것.** 작업 중 끊김 발생.
 
+### Vendor 번들
+
+- CDN 미사용 원칙 — 모든 프론트엔드 라이브러리는 `vendor/` 로컬 번들
+- 출처/로컬 패치 이력/업그레이드 절차(자동 테스트 + 수동 체크리스트): **`docs/vendor-bundles.md` 참조**
+- xterm 번들 교체 시 `npm test`만으로 한글 셀 폭·휠 전달·alt-screen 회귀가 자동 검증됨 (`tests/lib/xterm-behavior.test.js`) — Viewport 스크롤 체인은 브라우저 수동 확인 필요
+
 ## 프로젝트 구조
 
 ```
