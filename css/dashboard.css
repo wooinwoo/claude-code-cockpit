@@ -49,8 +49,10 @@
 .agent-kanban-head { display: flex; justify-content: space-between; padding: 2px 3px 8px; color: var(--text-2); font-size: .68rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
 .agent-kanban-list { display: flex; flex-direction: column; gap: 8px; min-height: 100px; }
 .agent-kanban-empty { padding: 26px 8px; text-align: center; color: var(--text-3); font-size: .72rem; }
-.agent-tile { min-width: 0; border: 1px solid rgba(255,255,255,.1); border-radius: var(--radius); background: linear-gradient(155deg, #151821, #0f1117); color: #d8dbe6; overflow: hidden; cursor: pointer; text-align: left; box-shadow: 0 5px 18px rgba(0,0,0,.14); transition: border-color .15s, transform .15s, box-shadow .15s; }
+.agent-tile { min-width: 0; border: 1px solid rgba(255,255,255,.1); border-left: 3px solid #535767; border-radius: var(--radius); background: linear-gradient(155deg, #151821, #0f1117); color: #d8dbe6; overflow: hidden; cursor: pointer; text-align: left; box-shadow: 0 5px 18px rgba(0,0,0,.14); transition: border-color .15s, transform .15s, box-shadow .15s; }
 .agent-tile:hover { border-color: var(--border-active); transform: translateY(-1px); }
+.agent-tile.busy { border-left-color: var(--green); }
+.agent-tile.waiting { border-color: color-mix(in srgb, var(--yellow) 42%, transparent); border-left-color: var(--yellow); }
 .agent-tile-main { display: block; width: 100%; padding: 0; border: 0; background: none; color: inherit; cursor: pointer; text-align: left; }
 .agent-tile-head { display: flex; align-items: center; gap: 7px; padding: 9px 10px 4px; font-size: .76rem; }
 .agent-tile-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); }
@@ -60,14 +62,16 @@
 .agent-tile-name { font-weight: 700; color: #f3f4f8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .agent-tile-kind { padding: 1px 5px; border: 1px solid rgba(129,140,248,.2); border-radius: 4px; color: var(--accent-bright); font: .58rem var(--mono); }
 .agent-tile-state { margin-left: auto; color: #85899a; text-transform: uppercase; font-size: .64rem; }
-.agent-tile-meta { display: flex; justify-content: space-between; gap: 8px; padding: 0 10px 8px 24px; color: #74798b; font: .59rem var(--mono); }
-.agent-tile-summary { display: block; margin: 0 8px 6px; padding: 0 2px; color: var(--accent-bright); font-size: .7rem; text-align: left; overflow-wrap: anywhere; }
+.agent-tile-meta { display: flex; flex-wrap: wrap; gap: 5px 12px; padding: 0 10px 10px 24px; color: #74798b; font: .59rem var(--mono); }
+.agent-tile-meta b { color: #b8bdca; font-weight: 500; }
+.agent-tile-section-label { display: block; margin: 0 10px 4px; color: #666b7d; font-size: .56rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.agent-tile-summary { display: block; margin: 0 10px 10px; color: #e6e8ef; font-size: .72rem; font-weight: 600; line-height: 1.4; text-align: left; overflow-wrap: anywhere; }
 .agent-tile-output { min-height: 76px; margin: 0 8px 8px; padding: 9px 10px; border: 1px solid rgba(255,255,255,.06); border-radius: 6px; background: rgba(0,0,0,.16); font: .68rem/1.5 var(--mono); color: #b8bdca; white-space: pre-wrap; overflow-wrap: anywhere; }
-.agent-tile-signals { display: flex; align-items: center; gap: 5px; padding: 0 10px 9px; }
+.agent-tile-signals { display: flex; align-items: center; gap: 7px; min-height: 30px; padding: 0 10px 9px; }
 .agent-signal { border-radius: 999px; background: rgba(255,255,255,.07); color: var(--text-2); padding: 2px 7px; font-size: .62rem; }
 .agent-signal.attention { background: rgba(245,183,66,.14); color: var(--yellow); }
 .agent-gate-reason { min-width: 0; overflow: hidden; color: var(--text-3); font-size: .62rem; text-overflow: ellipsis; white-space: nowrap; }
-.agent-signal.gate { margin-left: auto; cursor: pointer; font-weight: 700; }
+.agent-signal.gate { margin-left: auto; border: 0; cursor: pointer; font-weight: 700; }
 .agent-signal.gate.ready { background: rgba(62,207,142,.14); color: var(--green); }
 .agent-signal.gate.hold { background: rgba(240,92,92,.14); color: var(--red); }
 .agent-signal.gate.checking { background: rgba(245,183,66,.14); color: var(--yellow); }

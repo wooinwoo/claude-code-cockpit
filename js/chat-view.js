@@ -207,6 +207,8 @@ function renderMessages_legacy_unused(messages) {
 }
 
 const ACTIVE_POLLERS = new Map();
+const PENDING_INPUTS = new Map();
+const CHAT_DRAFT_PREFIX = 'cockpit-chat-draft:';
 const SLOW_MS = 1500;   // 기본
 const FAST_MS = 500;    // 사용자 메시지 보낸 직후 부스트
 const BOOST_DURATION = 30000; // 30초
@@ -485,7 +487,15 @@ function wireComposer(cv, leaf) {
     ta.style.height = 'auto';
     ta.style.height = Math.min(ta.scrollHeight, 200) + 'px';
   };
-  ta.addEventListener('input', autosize);
+  try { ta.value = localStorage.getItem(CHAT_DRAFT_PREFIX + leaf.dataset.termId) || ''; } catch {}
+  autosize();
+  ta.addEventListener('input', () => {
+    autosize();
+    try {
+      if (ta.value) localStorage.setItem(CHAT_DRAFT_PREFIX + leaf.dataset.termId, ta.value);
+      else localStorage.removeItem(CHAT_DRAFT_PREFIX + leaf.dataset.termId);
+    } catch {}
+  });
 
   // Enter / 슬래시 메뉴 키보드 네비
   ta.addEventListener('keydown', (e) => {
@@ -650,12 +660,16 @@ function sendComposer(leaf) {
   const text = ta.value;
   const atts = leaf._chatAttachments || [];
   if (!text.trim() && !atts.length) return;
+  const termId = leaf.dataset.termId;
+  if ([...PENDING_INPUTS.values()].some(item => item.termId === termId)) {
+    cvToast('이전 메시지 전송 확인 중', 'info');
+    return;
+  }
   if (app.ws?.readyState !== 1) {
     console.warn('[chat-view] ws not ready');
     cvToast('연결 끊김 — 잠시 후 다시 시도', 'error');
     return;
   }
-  const termId = leaf.dataset.termId;
   let data = text;
   if (atts.length) {
     // Claude 가 Read 도구로 자동 처리하도록 명시적 자연어 prefix
@@ -667,21 +681,75 @@ function sendComposer(leaf) {
     }
   }
   data += '\r';
-  app.ws.send(JSON.stringify({ type: 'input', termId, data }));
-  // optimistic — 내 메시지 즉시 채팅에 표시 (jsonl 폴링 기다리지 말고)
-  const sentText = text;
-  const sentAtts = atts.slice();
-  appendOptimisticUserMsg(leaf, sentText, sentAtts);
-  ta.value = '';
-  ta.style.height = 'auto';
-  // attachment blob URL 은 optimistic 카드가 참조하니까 revoke 늦춤 (refresh 시 정리)
-  leaf._optimisticUrls = [...(leaf._optimisticUrls || []), ...atts.map(a => a.url).filter(Boolean)];
+  const requestId = `chat-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
+  PENDING_INPUTS.set(requestId, { requestId, termId, text, attachments: atts.slice() });
+  setComposerPending(leaf, true);
+  try {
+    app.ws.send(JSON.stringify({ type: 'input', termId, data, requestId }));
+  } catch (error) {
+    PENDING_INPUTS.delete(requestId);
+    setComposerPending(leaf, false);
+    cvToast(`전송 실패 · ${error.message}`, 'error');
+  }
+}
+
+function setComposerPending(leaf, pending) {
+  const cv = leaf?.querySelector('.chat-view');
+  if (!cv) return;
+  cv.querySelector('.composer-input')?.toggleAttribute('readonly', pending);
+  for (const control of cv.querySelectorAll('.composer-send, .composer-attach, .composer-file-input, .att-remove')) {
+    control.disabled = pending;
+  }
+  const send = cv.querySelector('.composer-send');
+  if (send) {
+    send.classList.toggle('pending', pending);
+    send.setAttribute('aria-busy', String(pending));
+    send.title = pending ? '전송 확인 중' : '보내기 (Enter)';
+  }
+}
+
+function leafForTerm(termId) {
+  return document.querySelector(`.split-leaf[data-term-id="${CSS.escape(termId)}"]`);
+}
+
+export function onInputResult(message) {
+  const pending = PENDING_INPUTS.get(message?.requestId);
+  if (!pending || pending.termId !== message.termId) return;
+  PENDING_INPUTS.delete(message.requestId);
+  const leaf = leafForTerm(pending.termId);
+  setComposerPending(leaf, false);
+  if (!message.accepted) {
+    cvToast(message.error || '메시지를 전달하지 못했습니다. 입력 내용은 보존했습니다.', 'error');
+    focusComposer(leaf);
+    return;
+  }
+  try {
+    if (localStorage.getItem(CHAT_DRAFT_PREFIX + pending.termId) === pending.text) {
+      localStorage.removeItem(CHAT_DRAFT_PREFIX + pending.termId);
+    }
+  } catch {}
+  if (!leaf) return;
+  appendOptimisticUserMsg(leaf, pending.text, pending.attachments);
+  const ta = leaf.querySelector('.composer-input');
+  if (ta?.value === pending.text) {
+    ta.value = '';
+    ta.style.height = 'auto';
+  }
+  leaf._optimisticUrls = [...(leaf._optimisticUrls || []), ...pending.attachments.map(item => item.url).filter(Boolean)];
   leaf._chatAttachments = [];
   renderAttachments(leaf);
-  // 즉시 thinking 표시 (assistant 응답 도착 전까지)
   showThinking(leaf, true);
   boostPolling(leaf);
   focusComposer(leaf);
+}
+
+export function onInputTransportClosed() {
+  for (const pending of PENDING_INPUTS.values()) {
+    const leaf = leafForTerm(pending.termId);
+    setComposerPending(leaf, false);
+  }
+  if (PENDING_INPUTS.size) cvToast('연결이 끊겨 전송을 확인하지 못했습니다. 입력 내용은 보존했습니다.', 'error');
+  PENDING_INPUTS.clear();
 }
 
 function appendOptimisticUserMsg(leaf, text, atts) {

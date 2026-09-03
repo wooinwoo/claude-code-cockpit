@@ -12,7 +12,7 @@
   .usage-grid { grid-template-columns: 1fr; }
 
   /* Header: reduce padding */
-  header { padding: 0 10px; }
+  .terminal-first-shell > header { padding: 0 10px; }
   .nav-tab { padding: 5px 10px; font-size: .76rem; }
 
   /* Dashboard padding */
@@ -50,7 +50,7 @@
 
 /* ─── Mobile: 600px — Bottom Tab Bar ─── */
 @media (max-width: 600px) {
-  header {
+  .terminal-first-shell > header {
     position: fixed;
     bottom: 0;
     top: auto;

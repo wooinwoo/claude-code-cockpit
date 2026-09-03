@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { summaryGate, beginSummary, endSummary, getSummaries } from '../../lib/supervisor-service.js';
+import { summaryGate, beginSummary, endSummary, getSummaries, recordAgentEvent } from '../../lib/supervisor-service.js';
 
 describe('supervisor summary gate', () => {
   it('첫 요약은 항상 허용', () => {
@@ -44,5 +44,13 @@ describe('supervisor summary gate', () => {
     endSummary('t-old', '옛날 작업 중', now);
     assert.ok(getSummaries(now)['t-old']);
     assert.equal(getSummaries(now + 31 * 60_000)['t-old'], undefined);
+  });
+
+  it('새 에이전트 세션은 같은 터미널의 이전 요약을 지운다', () => {
+    const now = Date.now();
+    beginSummary('t-reset', 100, now);
+    endSummary('t-reset', '이전 작업 중', now);
+    recordAgentEvent({ term_id: 't-reset', session_id: 's-reset', hook_event_name: 'SessionStart' });
+    assert.equal(getSummaries()['t-reset'], undefined);
   });
 });

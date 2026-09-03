@@ -95,8 +95,19 @@ export function register(ctx) {
       memory: Math.round(process.memoryUsage().rss / 1024 / 1024),
       projects: getProjects().length,
       terminals: ctx.terminals?.size ?? 0,
+      durableTerminals: Boolean(ctx.durableTerminalsEnabled?.()),
       sseClients: poller.sseClients.size
     });
+  });
+
+  addRoute('POST', '/api/server/restart', (_req, res) => {
+    try {
+      const result = ctx.requestServerRestart?.();
+      if (!result) return json(res, { error: '서버 재시작 기능을 사용할 수 없습니다.' }, 501);
+      json(res, { restarting: true, ...result });
+    } catch (error) {
+      json(res, { error: error.message }, 409);
+    }
   });
 
   // ──────────── LAN info & QR code ────────────

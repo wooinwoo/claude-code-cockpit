@@ -1,13 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { getAgentAttention, getAgentAttentionForTerm, getAgentKind, getAgentState, getOperationalState, getReleaseGate, getWallSummary } from '../../js/agent-wall-state.js';
-import { getAgentEvents, recordAgentEvent } from '../../lib/supervisor-service.js';
+import { getAgentAttention, getAgentAttentionForTerm, getAgentGoal, getAgentKind, getAgentState, getAgentTask, getOperationalState, getReleaseGate, getWallSummary } from '../../js/agent-wall-state.js';
+import { getAgentEvents, getSummaries, recordAgentEvent } from '../../lib/supervisor-service.js';
 
 test('Agent Wall classifies agent and operational state', () => {
   assert.equal(getAgentKind('codex --full-auto', ''), 'Codex');
   assert.equal(getAgentKind('', 'Claude Code'), 'Claude');
+  assert.equal(getAgentTask(null, ['old output', '› Fix agent wall task labels', 'latest status']), 'Fix agent wall task labels');
+  assert.equal(getAgentTask('API summary', ['› ignored']), 'API summary');
+  assert.equal(getAgentTask(null, []), '작업 정보 없음');
+  assert.equal(getAgentGoal(null, ['› 최초 목표', '진행 중', '› 후속 지시']), '최초 목표');
+  assert.equal(getAgentGoal('API에서 받은 목표', ['› 무시']), 'API에서 받은 목표');
   assert.equal(getAgentState({ output: 'Waiting for input', now: 10_000 }), 'waiting');
-  assert.equal(getAgentState({ output: 'running tests', lastOutputAt: 9_000, now: 10_000 }), 'busy');
+  assert.equal(getAgentState({ output: 'terminal repaint', lastOutputAt: 9_000, now: 10_000 }), 'busy');
+  assert.equal(getAgentState({ output: 'terminal repaint', lastOutputAt: 4_000, now: 10_000 }), 'idle');
+  assert.equal(getAgentState({ output: 'Press enter', lastOutputAt: 9_900, now: 10_000 }), 'waiting');
+  assert.equal(getAgentState({ output: 'esc to interrupt', now: 10_000 }), 'busy');
+  assert.equal(getAgentState({ output: '', projectState: 'busy', now: 10_000 }), 'busy');
   assert.equal(getAgentState({ exited: true, output: '', now: 10_000 }), 'done');
 
   const now = Date.now();
@@ -21,8 +30,9 @@ test('Agent Wall classifies agent and operational state', () => {
   assert.equal(getAgentAttention([...decisions, { cwd: '/work/app', decision: 'approve', ts: new Date(now).toISOString() }], '/work/app', now), null);
   assert.equal(getAgentAttentionForTerm({ decisions, projectPath: '/work/app', projectAgentCount: 2, now }), null);
   assert.equal(getAgentAttentionForTerm({ hook: { state: 'waiting', reason: 'Approve', updatedAt: now }, decisions, projectPath: '/work/app', projectAgentCount: 2, now })?.reason, 'Approve');
-  assert.equal(getOperationalState('idle', 'hold', null), 'waiting');
-  assert.equal(getOperationalState('done', 'hold', null), 'waiting');
+  assert.equal(getAgentAttentionForTerm({ hook: { state: 'waiting', reason: 'Approve', updatedAt: now - 5_000 }, decisions, projectPath: '/work/app', projectAgentCount: 2, lastOutputAt: now, now }), null);
+  assert.equal(getOperationalState('idle', 'hold', null), 'idle');
+  assert.equal(getOperationalState('done', 'hold', null), 'done');
   assert.equal(getOperationalState('busy', 'hold', null), 'busy');
   assert.deepEqual(getWallSummary([
     { state: 'busy', gate: { state: 'hold' } },
@@ -47,4 +57,9 @@ test('Agent Wall classifies agent and operational state', () => {
   assert.equal(getAgentEvents().filter(e => e.termId === 'term-1').length, 1);
   recordAgentEvent({ session_id: 'agent-wall-test-2', term_id: 'term-1', hook_event_name: 'SubagentStop' });
   assert.equal(getAgentEvents().find(e => e.termId === 'term-1').state, 'busy');
+
+  recordAgentEvent({ session_id: 'canvas-context-test', term_id: 'term-context', hook_event_name: 'SessionStart' });
+  recordAgentEvent({ session_id: 'canvas-context-test', term_id: 'term-context', hook_event_name: 'UserPromptSubmit', prompt: '  Cockpit을 캔버스형 터미널로 바꿔줘\n탭도 필요해  ' });
+  recordAgentEvent({ session_id: 'canvas-context-test', term_id: 'term-context', hook_event_name: 'UserPromptSubmit', prompt: '후속 지시' });
+  assert.equal(getSummaries()['term-context'].goal, 'Cockpit을 캔버스형 터미널로 바꿔줘 탭도 필요해');
 });

@@ -1,5 +1,6 @@
 import { chat as agentChat, stopAgent, listConversations as agentListConvs, getConversation as agentGetConv, deleteConversation as agentDeleteConv, newConversation as agentNewConv, setModel as agentSetModel, getModel as agentGetModel, getAgentProfiles, getTeams, setUserName as agentSetUserName, getUserName as agentGetUserName } from '../lib/agent-service.js';
 import { getActiveAlerts, getReports as getMonitorReports, dismissReport as dismissMonitorReport, dismissAlert, clearAllAlerts } from '../lib/monitor-agent.js';
+import { isValidDelegateStatus } from '../lib/delegate-status.js';
 
 /**
  * Register AI agent routes (config, conversations, chat, TTS, monitoring).
@@ -13,7 +14,7 @@ import { getActiveAlerts, getReports as getMonitorReports, dismissReport as dism
  * @returns {void}
  */
 export function register(ctx) {
-  const { addRoute, json, readBody, getAiConfig, saveAiConfig, rateLimit } = ctx;
+  const { addRoute, json, readBody, getAiConfig, saveAiConfig, rateLimit, isLocalhost, updateDelegateStatus } = ctx;
 
   // Lazy-loaded TTS class — fresh instance per request to avoid WebSocket state corruption
   let _MsEdgeTTS = null;
@@ -83,6 +84,16 @@ export function register(ctx) {
     if (!body.convId || !body.message) return json(res, { error: 'convId and message required' }, 400);
     try { json(res, agentChat(body.convId, body.message, body.agentId || null, body.projectId || null)); }
     catch (err) { json(res, { error: err.message }, 500); }
+  });
+
+  addRoute('POST', '/api/agent/delegate-status', async (req, res) => {
+    if (!isLocalhost?.(req)) return json(res, { error: 'Forbidden' }, 403);
+    if (!rateLimit(`agent:delegate-status:${req.socket?.remoteAddress}`, 120)) return json(res, { error: 'Too many requests' }, 429);
+    const body = await readBody(req);
+    if (!isValidDelegateStatus(body)) return json(res, { error: 'Invalid delegate status' }, 400);
+    const status = updateDelegateStatus?.(body);
+    if (!status) return json(res, { error: 'Project not found' }, 404);
+    json(res, status);
   });
 
   addRoute('POST', '/api/agent/stop', async (req, res) => {

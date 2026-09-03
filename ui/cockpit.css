@@ -1,0 +1,26 @@
+@import "tailwindcss";
+@import "../css/cockpit-next.css";
+
+@source "../index.html";
+@source "../js";
+
+@theme {
+  --font-sans: "Pretendard Variable", sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Code", monospace;
+  --color-bench-950: #090b0c;
+  --color-bench-900: #0d0f10;
+  --color-bench-800: #131619;
+  --color-signal: #5fd18b;
+  --color-focus: #6fa5d3;
+  --color-attention: #e3ad5b;
+}
+
+@layer components {
+  .deck-action {
+    @apply inline-flex items-center justify-center gap-1.5 select-none;
+  }
+
+  .term-empty-actions {
+    @apply flex flex-wrap items-center justify-center gap-2;
+  }
+}

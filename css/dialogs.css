@@ -337,6 +337,19 @@ dialog::backdrop {
   color: var(--text-2);
   margin-bottom: 10px;
 }
+.settings-server-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.settings-server-label { font-size: .82rem; font-weight: 600; }
+.settings-server-status { margin-top: 3px; color: var(--text-3); font-size: .72rem; line-height: 1.4; }
+.settings-server-row .btn { flex-shrink: 0; }
 .settings-api-keys {
   display: flex;
   flex-direction: column;
@@ -907,19 +920,26 @@ dialog::backdrop {
   background: var(--bg-1);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 28px 32px;
-  max-width: 500px;
-  width: 92%;
-  max-height: 80vh;
+  padding: 24px;
+  max-width: 780px;
+  width: calc(100% - 32px);
+  max-height: min(84vh, 820px);
   overflow-y: auto;
   box-shadow: var(--shadow-lg);
   position: relative;
+}
+.shortcut-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--border);
 }
 .shortcut-card h2 {
   font-size: 1rem;
   font-weight: 700;
   color: var(--text-0);
-  margin-bottom: 18px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -929,30 +949,110 @@ dialog::backdrop {
   height: 18px;
   color: var(--accent);
 }
-.shortcut-card table {
+.shortcut-head p {
+  max-width: 560px;
+  margin: 7px 0 0 26px;
+  color: var(--text-2);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+.shortcut-close {
+  min-width: 72px;
+  height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+  color: var(--text-2);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font: 600 0.66rem/1 var(--mono);
+  text-transform: uppercase;
+}
+.shortcut-close:hover {
+  color: var(--text-0);
+  border-color: var(--border-hover);
+  background: var(--bg-3);
+}
+.shortcut-close svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.shortcut-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding-top: 16px;
+}
+.shortcut-group {
+  min-width: 0;
+  padding: 13px 14px 11px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-0);
+}
+.shortcut-group-wide {
+  grid-column: 1 / -1;
+}
+.shortcut-group h3 {
+  margin: 0 0 8px;
+  color: var(--text-3);
+  font: 700 0.65rem/1 var(--mono);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+.shortcut-group table {
   width: 100%;
   border-collapse: collapse;
 }
-.shortcut-card td {
+.shortcut-group th,
+.shortcut-group td {
   padding: 5px 0;
-  font-size: 0.82rem;
+  vertical-align: top;
+  text-align: left;
+  font-size: 0.74rem;
+  line-height: 1.4;
 }
-.shortcut-card td:first-child {
-  font-family: var(--mono);
-  color: var(--accent-bright);
-  width: 44%;
-  font-size: 0.78rem;
-}
-.shortcut-card td:last-child {
+.shortcut-group th {
+  width: 48%;
+  padding-right: 10px;
   color: var(--text-1);
+  font-weight: 500;
+  white-space: nowrap;
 }
-.shortcut-card .sc-section td {
-  color: var(--text-3);
-  font-size: 0.7rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  padding: 14px 0 4px;
+.shortcut-group td {
+  color: var(--text-2);
+}
+.shortcut-group kbd {
+  display: inline-flex;
+  min-width: 22px;
+  min-height: 21px;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 5px;
+  border: 1px solid var(--border-hover);
+  border-bottom-color: var(--text-3);
+  border-radius: 3px;
+  background: var(--bg-2);
+  color: var(--accent-bright);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+  font: 600 0.64rem/1 var(--mono);
+  white-space: nowrap;
+}
+@media (max-width: 680px) {
+  .shortcut-card { padding: 18px; }
+  .shortcut-groups { grid-template-columns: 1fr; }
+  .shortcut-group-wide { grid-column: auto; }
+  .shortcut-head p { margin-left: 0; }
+  .shortcut-close span { display: none; }
+  .shortcut-close { min-width: 32px; width: 32px; padding: 0; }
 }
 @keyframes fadeIn {
   from {
@@ -1134,7 +1234,7 @@ dialog::backdrop {
 
 /* ─── Responsive Layout ─── */
 @media (max-width: 768px) {
-  header {
+  .terminal-first-shell > header {
     padding: 0 10px;
     gap: 4px;
   }
@@ -1176,7 +1276,7 @@ dialog::backdrop {
   .project-card {
     min-width: 200px;
   }
-  header {
+  .terminal-first-shell > header {
     height: 42px;
   }
   .logo {

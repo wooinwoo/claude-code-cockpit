@@ -76,6 +76,8 @@ function setupRoutes(overrides = {}) {
     randomBytes: (n) => ({ toString() { return 'abcd1234'; } }),
     timingSafeEqual: (a, b) => a.toString() === b.toString(),
     terminals: new Map(),
+    durableTerminalsEnabled: () => true,
+    requestServerRestart: () => ({ terminalCount: 2 }),
     getNetworkIPs: () => ['192.168.1.100'],
     registerProjectPollers: () => {},
     getNotifyEnabled: () => true,
@@ -103,6 +105,22 @@ describe('routes/system.js', () => {
     assert.equal(typeof body.memory, 'number');
     assert.equal(body.projects, 0);
     assert.equal(body.terminals, 0);
+    assert.equal(body.durableTerminals, true);
+  });
+
+  it('POST /api/server/restart checkpoints terminals before restart', async () => {
+    const res = createMockRes();
+    await routes['POST /api/server/restart'](createMockReq({ method: 'POST' }), res);
+    assert.equal(res._status, 200);
+    assert.deepEqual(parseBody(res), { restarting: true, terminalCount: 2 });
+  });
+
+  it('POST /api/server/restart reports unsafe restart refusal', async () => {
+    setupRoutes({ requestServerRestart: () => { throw new Error('not durable'); } });
+    const res = createMockRes();
+    await routes['POST /api/server/restart'](createMockReq({ method: 'POST' }), res);
+    assert.equal(res._status, 409);
+    assert.equal(parseBody(res).error, 'not durable');
   });
 
   // --- Auth ---

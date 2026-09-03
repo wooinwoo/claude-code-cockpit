@@ -135,6 +135,7 @@ function renderActivityLog() {
 // ─── SSE ───
 let _currentES = null;
 export function connectSSE() {
+  setConn('reconnecting');
   if (app._sseReconnTimer) { clearTimeout(app._sseReconnTimer); app._sseReconnTimer = null; }
   if (_currentES) { try { _currentES.close(); } catch { /* already closed */ } _currentES = null; }
   const es = new EventSource('/api/events');
@@ -298,9 +299,14 @@ function flushRenders() {
   if (_statsDirty) { _statsDirty = false; updateSummaryStats(); }
 }
 
-function setConn(v) {
-  app.state.connected = v;
-  document.getElementById('conn-dot').className = 'conn-dot' + (v ? '' : ' off');
+function setConn(status) {
+  const connected = status === true || status === 'connected';
+  const reconnecting = status === 'reconnecting';
+  app.state.connected = connected;
+  const dot = document.getElementById('conn-dot');
+  const label = document.getElementById('connection-status');
+  if (dot) dot.className = 'conn-dot' + (connected ? '' : reconnecting ? ' reconnecting' : ' off');
+  if (label) label.textContent = connected ? 'Connected' : reconnecting ? 'Reconnecting' : 'Disconnected';
 }
 
 // ─── Summary Stats ───
@@ -544,6 +550,7 @@ export function switchView(name) {
   // Always-refresh views (need update on every visit)
   if (name === 'terminal') { safeInit(() => notify('renderLayout')); setTimeout(() => notify('fitAllTerminals'), 200); }
   if (name === 'diff') safeInit(() => notify('loadDiff'));
+  if (name === 'ai-accounts') safeInit(() => notify('initAiAccounts'));
   // First-visit-only init views (each module also has internal guards)
   const viewInitMap = { pr: 'initPR', cicd: 'initCicd', workflows: 'initWorkflows', ports: 'initPorts', autopilot: 'initAutopilotView' };
   if (name in viewInitMap) {
@@ -718,6 +725,13 @@ export function setupNavOverflow() {
   const tabs = [...document.querySelectorAll('.nav-tabs > .nav-tab')];
   const menu = document.getElementById('nav-more-menu');
   if (!menu) return;
+  if (document.body.classList.contains('terminal-first-shell') && !window.matchMedia('(max-width: 600px)').matches) {
+    tabs.forEach(t => t.classList.remove('overflow-hidden'));
+    menu.innerHTML = '';
+    menu.classList.remove('open');
+    wrap.style.display = 'none';
+    return;
+  }
   const header = document.querySelector('header');
   const logo = document.querySelector('.logo');
   const headerRight = document.querySelector('.header-right');
@@ -747,6 +761,7 @@ export function setupNavOverflow() {
       break;
     }
   }
+  if (window.matchMedia('(max-width: 600px)').matches) threshold = Math.min(threshold, 4);
 
   // 4. Apply
   menu.innerHTML = '';

@@ -27,6 +27,7 @@ workflow-runs.json
 # User-specific data
 projects.json
 notes/
+.cockpit-board.json
 /workflows/
 
 # Logs
