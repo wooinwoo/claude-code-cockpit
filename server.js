@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { readFile, readdir, stat, writeFile, mkdir } from 'node:fs/promises';
-import { readFileSync, existsSync, unlinkSync, watch, writeFileSync, copyFileSync, readlinkSync } from 'node:fs';
+import { readFileSync, existsSync, unlinkSync, watch, writeFileSync, copyFileSync, readlinkSync, renameSync, mkdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve, normalize } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
@@ -15,7 +15,7 @@ import { getGitHubPRs } from './lib/github-service.js';
 import { computeUsage } from './lib/cost-service.js';
 import { Poller } from './lib/poller.js';
 import { showNotification } from './lib/notify.js';
-import { IS_WIN, getShell, killProcessTree, openUrl as platformOpenUrl } from './lib/platform.js';
+import { IS_WIN, IS_WSL, getShell, killProcessTree, openUrl as platformOpenUrl } from './lib/platform.js';
 import { gitExec, spawnForProject, parseWslPath, toWinPath } from './lib/wsl-utils.js';
 import { init as initWorkflows, listWorkflowDefs, getWorkflowDef, startRun as startWorkflowRun, listRuns as listWorkflowRuns, getRunDetail as getWorkflowRunDetail } from './lib/workflows-service.js';
 import { init as initScheduler } from './lib/workflow-scheduler.js';
@@ -28,7 +28,17 @@ import { getAllStats as getMonitorStats } from './lib/monitor-service.js';
 import { initBatch } from './lib/batch-service.js';
 import { logger } from './lib/logger.js';
 import { listNotes, getNote, createNote, updateNote } from './lib/notes-service.js';
+import { getBoard, replaceBoardIfRevision, updateBoardNote, appendBoardNote, addBoardTask, updateBoardTask, deleteBoardTask } from './lib/board-service.js';
 import { detectAgentProcess } from './lib/process-agent.js';
+import { listAiAccounts, resolveAiAccountLaunch } from './lib/ai-accounts-service.js';
+import {
+  activeDelegatedRun, DELEGATE_HEARTBEAT_TTL_MS, DELEGATE_STATUS_DIR,
+  finishDelegatedRun, isValidDelegateStatus, touchDelegatedRun, withDelegatedRun,
+} from './lib/delegate-status.js';
+import {
+  durableTerminalCwd, durableTerminalExists, durableTerminalsAvailable,
+  ensureDurableTerminal, killDurableTerminal,
+} from './lib/durable-terminal.js';
 
 // Route modules
 import { register as regCicd } from './routes/cicd.js';
@@ -43,6 +53,8 @@ import { register as regPorts } from './routes/ports.js';
 import { register as regTelegram } from './routes/telegram.js';
 import { register as regSupervisor } from './routes/supervisor.js';
 import { register as regAutopilot } from './routes/autopilot.js';
+import { register as regBoard } from './routes/board.js';
+import { register as regAiAccounts } from './routes/ai-accounts.js';
 import { init as initAutopilot } from './lib/autopilot.js';
 import * as supervisorService from './lib/supervisor-service.js';
 import * as supervisorLlm from './lib/supervisor-llm.js';
@@ -65,6 +77,9 @@ const PKG_VERSION = JSON.parse(readFileSync(join(__dirname, 'package.json'), 'ut
 
 // Detect default shell (cross-platform)
 const _defaultShell = getShell();
+const DURABLE_TERMINALS = durableTerminalsAvailable();
+let _shuttingDown = false;
+let _restartRequested = false;
 
 // Prevent server crash from unhandled promise rejections (e.g., msedge-tts WebSocket errors)
 process.on('unhandledRejection', (reason) => {
@@ -813,16 +828,38 @@ function callClaudeStream(prompt, { timeoutMs = LIMITS.claudeTimeoutMs, model = 
 }
 
 // ─── Route Context & Registration ───
+// 프로젝트 목록이 바뀌면 대기 중이던 터미널 복원(deferred)을 즉시 재시도한다.
+function addProjectAndFlush(project) {
+  const added = addProject(project);
+  if (added) {
+    try { flushDeferredTerminalRestores(); } catch (err) { logger.warn('state', `Deferred flush failed: ${err.message}`); }
+  }
+  return added;
+}
+function deleteProjectAndFlush(projectId) {
+  const removed = deleteProject(projectId);
+  if (removed) {
+    // 삭제된 프로젝트 소속 대기 항목은 이제 영구 복구 불가 — 버린다.
+    for (let i = deferredTerminalRestores.length - 1; i >= 0; i--) {
+      if (deferredTerminalRestores[i].projectId === projectId) deferredTerminalRestores.splice(i, 1);
+    }
+  }
+  return removed;
+}
 const routeCtx = {
   addRoute, json, withProject, readBody, rateLimit,
-  getProjects, getProjectById, addProject, updateProject, deleteProject,
-  getJiraConfig, saveJiraConfig, getAiConfig, saveAiConfig, callClaudeStream,
+  getProjects, getProjectById, addProject: addProjectAndFlush, updateProject, deleteProject: deleteProjectAndFlush,
+  getJiraConfig, saveJiraConfig, getAiConfig, saveAiConfig, callClaudeStream, updateDelegateStatus,
   withGitLock, gitExec, toWinPath, parseWslPath, spawnForProject,
   isInsideAnyProject, isValidBranch, isValidStashRef, isLocalhost, authCookie,
   PORT, LIMITS, DATA_DIR, __dirname, PKG_VERSION,
   readFile, readdir, stat, writeFile, mkdir, existsSync, readFileSync, unlinkSync,
   join, resolve, normalize, spawn, execFile, randomBytes, timingSafeEqual, tmpdir,
   poller, devServers, LAN_TOKEN,
+  listAiAccounts,
+  durableTerminalsEnabled: () => DURABLE_TERMINALS,
+  requestServerRestart,
+  getBoard, replaceBoardIfRevision, updateBoardNote, appendBoardNote, addBoardTask, updateBoardTask, deleteBoardTask,
   get wss() { return wss; },
   get terminals() { return terminals; },
   get registerProjectPollers() { return registerProjectPollers; },
@@ -841,15 +878,74 @@ regPorts(routeCtx);
 regTelegram(routeCtx);
 regSupervisor(routeCtx);
 regAutopilot(routeCtx);
+regBoard(routeCtx);
+regAiAccounts(routeCtx);
 
 // ──────────── Polling ────────────
 
 const _prevSessionStates = new Map();
 const _notifyEnabled = true;
+const delegatedRuns = new Map();
+
+function projectSessionState(project) {
+  return withDelegatedRun(detectSessionState(project), activeDelegatedRun(delegatedRuns, project.id));
+}
+
+function delegateProject({ termId, cwd }) {
+  const terminalProjectId = termId ? terminals.get(termId)?.projectId : null;
+  if (terminalProjectId) return getProjectById(terminalProjectId);
+  if (!cwd) return null;
+  const key = value => {
+    const path = normalize(resolve(String(value))).replace(/\\/g, '/').replace(/\/$/, '');
+    return IS_WIN ? path.toLowerCase() : path;
+  };
+  const cwdKey = key(cwd);
+  return getProjects()
+    .map(project => ({ project, path: key(project.path) }))
+    .filter(candidate => cwdKey === candidate.path || cwdKey.startsWith(`${candidate.path}/`))
+    .sort((a, b) => b.path.length - a.path.length)[0]?.project || null;
+}
+
+function updateDelegateStatus(event) {
+  if (!isValidDelegateStatus(event)) return null;
+  const project = delegateProject(event);
+  if (!project) return null;
+  if (event.state === 'done') finishDelegatedRun(delegatedRuns, event.runId);
+  else touchDelegatedRun(delegatedRuns, {
+    runId: event.runId,
+    projectId: project.id,
+    model: event.model || 'sonnet',
+  });
+  const session = projectSessionState(project);
+  poller.broadcast('session:status', session);
+  return { projectId: project.id, state: session.state };
+}
+
+function consumeDelegateStatusFile(filename) {
+  if (typeof filename !== 'string' || !/^[a-zA-Z0-9-]{1,180}\.json$/.test(filename)) return;
+  const file = join(DELEGATE_STATUS_DIR, filename);
+  try {
+    const event = JSON.parse(readFileSync(file, 'utf8'));
+    if (!isValidDelegateStatus(event) || !event.updatedAt
+        || Math.abs(Date.now() - event.updatedAt) > DELEGATE_HEARTBEAT_TTL_MS) return;
+    updateDelegateStatus(event);
+  } catch { /* file may already have been consumed */ }
+  finally { try { unlinkSync(file); } catch { /* already removed */ } }
+}
+
+let delegateStatusWatcher = null;
+try {
+  mkdirSync(DELEGATE_STATUS_DIR, { recursive: true, mode: 0o700 });
+  delegateStatusWatcher = watch(DELEGATE_STATUS_DIR, { persistent: false }, (_event, filename) => {
+    if (filename) consumeDelegateStatusFile(String(filename));
+  });
+} catch (error) {
+  logger.warn('delegate', `Status file bridge unavailable: ${error.message}`);
+}
 
 function registerProjectPollers(project) {
   poller.register(`session:${project.id}`, () => {
-    const result = detectSessionState(project);
+    const result = projectSessionState(project);
     const prev = _prevSessionStates.get(project.id);
     _prevSessionStates.set(project.id, result.state);
     if (_notifyEnabled && prev && prev !== result.state) {
@@ -925,12 +1021,9 @@ try {
           const project = getProjectById(projectId);
           if (!project) return null;
           const termId = 'agent-' + Date.now();
-          const shell = getShell();
-          const shellArgs = IS_WIN ? [] : ['-l'];
-          let cwd;
-          try { cwd = IS_WIN ? toWinPath(project.path) : project.path; } catch { cwd = project.path; }
-          const term = pty.spawn(shell, shellArgs, {
-            name: 'xterm-256color', cols: 120, rows: 30, cwd, env: termEnv(termId),
+          const spec = terminalSpawnSpec(termId, project.path);
+          const term = pty.spawn(spec.shell, spec.args, {
+            name: 'xterm-256color', cols: 120, rows: 30, cwd: spec.cwd, env: spec.env,
           });
           term.onData((data) => {
             const e = terminals.get(termId);
@@ -946,14 +1039,17 @@ try {
           });
           let safeCommand = '';
           if (command && typeof command === 'string' && command.length < 500
-              && /^(claude|codex|npm|npx|node|git|python|pip|docker|yarn|pnpm|bun|cargo|make|cmake|go|rustc|ruby|java|javac|mvn|gradle|dotnet|terraform|kubectl|helm|ansible|packer|deno|tsx|ts-node|jest|vitest|pytest|eslint|prettier|tsc)\b/.test(command)
+              && /^(claude|codex|opencode|npm|npx|node|git|python|pip|docker|yarn|pnpm|bun|cargo|make|cmake|go|rustc|ruby|java|javac|mvn|gradle|dotnet|terraform|kubectl|helm|ansible|packer|deno|tsx|ts-node|jest|vitest|pytest|eslint|prettier|tsc)\b/.test(command)
               && !/[&|<>^;`$]/.test(command)) {
             safeCommand = command;
           }
-          terminals.set(termId, { pty: term, projectId, _bufArr: [], _bufLen: 0, command: safeCommand });
+          terminals.set(termId, {
+            pty: term, projectId, _bufArr: [], _bufLen: 0, command: safeCommand,
+            cols: 120, rows: 30, durableId: spec.durableId,
+          });
           const createdMsg = JSON.stringify({ type: 'created', termId, projectId, command: safeCommand });
           for (const client of wss.clients) { try { client.send(createdMsg); } catch { /* client disconnected */ } }
-          if (safeCommand) term.write(safeCommand + '\r');
+          if (safeCommand && !spec.resumed) setTimeout(() => term.write(safeCommand + '\r'), 120);
           saveTerminalState();
           return termId;
         },
@@ -1120,22 +1216,108 @@ const wss = new WebSocketServer({
 // Clean env for child terminals: remove CLAUDECODE to allow nested claude launches
 const cleanEnv = { ...process.env, TERM: 'xterm-256color' };
 delete cleanEnv.CLAUDECODE;
-function termEnv(termId) {
+function termEnv(termId, accountLaunch = null, targetWsl = false) {
   const env = { ...cleanEnv, COCKPIT_TERM_ID: termId };
+  if (accountLaunch) {
+    delete env.CLAUDE_CONFIG_DIR;
+    delete env.CODEX_HOME;
+    env[accountLaunch.envKey] = accountLaunch.envValue;
+  }
   // WSLENV 없이는 Windows pty 의 env 가 wsl 진입 시 사라져 hook 이벤트가 termId 를 잃음
-  if (IS_WIN) env.WSLENV = [cleanEnv.WSLENV, 'COCKPIT_TERM_ID'].filter(Boolean).join(':');
+  if (IS_WIN) {
+    const entries = [cleanEnv.WSLENV, 'COCKPIT_TERM_ID'];
+    if (accountLaunch && targetWsl) {
+      entries.push(`${accountLaunch.envKey}${accountLaunch.translateForWsl ? '/p' : ''}`);
+    }
+    env.WSLENV = entries.filter(Boolean).join(':');
+  }
   return env;
+}
+
+function terminalSpawnSpec(termId, termPath, accountLaunch = null, durableId = '') {
+  const wsl = parseWslPath(termPath);
+  const targetWsl = IS_WSL || Boolean(wsl);
+  const env = termEnv(termId, accountLaunch, targetWsl);
+  if (DURABLE_TERMINALS && !wsl) {
+    const persistentId = durableId || randomBytes(12).toString('hex');
+    const durable = ensureDurableTerminal({ id: persistentId, cwd: termPath, env });
+    return { ...durable, durableId: persistentId, targetWsl };
+  }
+  if (wsl) {
+    return {
+      shell: 'wsl.exe', args: ['-d', wsl.distro, '--cd', wsl.linuxPath],
+      cwd: process.env.SYSTEMROOT || 'C:\\Windows', env, durableId: '', resumed: false, targetWsl,
+    };
+  }
+  return {
+    shell: _defaultShell, args: [], cwd: IS_WIN ? toWinPath(termPath) : termPath,
+    env, durableId: '', resumed: false, targetWsl,
+  };
+}
+
+function stopTerminal(entry, permanent = false) {
+  if (permanent && entry?.durableId) killDurableTerminal(entry.durableId);
+  try { entry?.pty?.kill(); } catch { /* process already exited */ }
+}
+
+function requestServerRestart() {
+  if (_restartRequested || _shuttingDown) throw new Error('서버 재시작이 이미 진행 중입니다.');
+  if (!DURABLE_TERMINALS) throw new Error('이 환경에서는 터미널 세션 보존을 지원하지 않습니다.');
+  if (!_terminalsRestored) throw new Error('터미널 복원이 아직 완료되지 않아 재시작을 취소했습니다.');
+  const unprotected = [...terminals.values()].filter(terminal => !terminal.durableId).length;
+  if (unprotected) {
+    throw new Error(`현재 터미널 ${unprotected}개는 아직 세션 보존 대상이 아닙니다. 작업을 마친 뒤 처음 한 번만 수동 재시작해 주세요.`);
+  }
+  const unavailable = [...terminals.values()].filter(
+    terminal => terminal.durableId && !durableTerminalExists(terminal.durableId),
+  ).length;
+  if (unavailable) {
+    throw new Error(`현재 터미널 ${unavailable}개의 tmux 연결을 찾지 못해 재시작을 중단했습니다. 기존 세션 연결을 먼저 복구해 주세요.`);
+  }
+  const terminalCount = saveTerminalStateNow(true);
+  const helper = spawn(process.execPath, [join(__dirname, 'scripts', 'restart-server.mjs'), String(process.pid), join(__dirname, 'server.js')], {
+    cwd: __dirname,
+    env: process.env,
+    detached: true,
+    stdio: 'ignore',
+  });
+  helper.unref();
+  _restartRequested = true;
+  setTimeout(() => onShutdown('RESTART'), 250).unref();
+  return { terminalCount };
 }
 
 // Track active PTY processes: Map<termId, { pty, projectId, buffer, command }>
 const terminals = new Map();
+const deferredTerminalRestores = [];
 const MAX_BUFFER = 50000;
+function validPtySize(cols, rows) {
+  return Number.isInteger(cols) && Number.isInteger(rows)
+    && cols >= 2 && cols <= 1000 && rows >= 1 && rows <= 500;
+}
+function applyPtySize(entry, cols, rows) {
+  if (!validPtySize(cols, rows)) return false;
+  if (entry.cols === cols && entry.rows === rows) return true;
+  try {
+    entry.pty.resize(cols, rows);
+    entry.cols = cols;
+    entry.rows = rows;
+    return true;
+  } catch {
+    return false;
+  }
+}
+function claimPtySize(entry, client, cols, rows) {
+  if (!applyPtySize(entry, cols, rows)) return false;
+  entry.resizeOwner = client;
+  return true;
+}
 function terminalAgent(entry) {
   const detected = detectAgentProcess(entry.pty?.pid);
   if (detected.available) return detected.kind || '';
   // 스캔 불가 플랫폼(Windows pty 등)에서는 실행 커맨드로만 판단하고, 그 외엔
   // null(모름)을 반환 — ''(스캔 결과 없음)와 구분해야 클라이언트 출력 휴리스틱이 살아남음
-  return /^(claude|codex)\b/.exec(entry.command || '')?.[1] ?? null;
+  return /^(claude|codex|opencode)\b/.exec(entry.command || '')?.[1] ?? null;
 }
 const agentScanTimer = setInterval(() => {
   for (const [termId, entry] of terminals) {
@@ -1180,7 +1362,7 @@ const summaryTimer = setInterval(() => {
     const mark = entry._outCount || 0;
     if (!mark || !supervisorService.summaryGate(termId, mark)) continue;
     const text = stripAnsi(bufRead(entry)).slice(-3500);
-    if (!/\b(claude|codex)\b/i.test(`${entry.agentCommand || ''} ${text}`)) continue;
+    if (!/\b(claude|codex|opencode)\b/i.test(`${entry.agentCommand || ''} ${text}`)) continue;
     supervisorService.beginSummary(termId, mark);
     supervisorLlm.summarizeActivity(text)
       .then(summary => supervisorService.endSummary(termId, summary))
@@ -1220,26 +1402,58 @@ try {
   });
 } catch (err) { logger.error('monitor', 'Init failed', err.message); }
 
-function saveTerminalState() {
-  if (_saveQueued) return; // debounce
-  _saveQueued = true;
-  queueMicrotask(async () => {
-    _saveQueued = false;
-    const st = [];
-    for (const [id, t] of terminals) {
-      // 셸의 실제 현재 경로 캡처 (사용자가 cd 로 바꾼 경로까지). Linux/WSL: /proc/<pid>/cwd
-      let cwd = '';
-      try { if (t.pty?.pid) cwd = readlinkSync(`/proc/${t.pty.pid}/cwd`); }
-      catch { /* /proc 없음(비-Linux) 또는 프로세스 종료 — 경로 생략, 복원 시 루트로 폴백 */ }
-      st.push({ termId: id, projectId: t.projectId, command: t.command || '', cwd });
+function terminalStateEntries() {
+  const state = [...deferredTerminalRestores];
+  for (const [id, terminal] of terminals) {
+    let cwd = terminal.durableId ? durableTerminalCwd(terminal.durableId) : '';
+    if (!cwd) {
+      try { if (terminal.pty?.pid) cwd = readlinkSync(`/proc/${terminal.pty.pid}/cwd`); }
+      catch { /* platform has no /proc or process already exited */ }
     }
-    if (st.length === 0 && !existsSync(STATE_FILE)) return;
+    state.push({
+      termId: id,
+      projectId: terminal.projectId,
+      command: terminal.command || '',
+      cwd,
+      accountId: terminal.account?.id || '',
+      account: terminal.account ? {
+        id: terminal.account.id, name: terminal.account.name, provider: terminal.account.provider,
+      } : null,
+      durableId: terminal.durableId || '',
+    });
+  }
+  return state;
+}
+
+function saveTerminalStateNow(strict = false) {
+  // A freshly restarted server restores lazily on the first WebSocket connection.
+  // Do not let the 30s autosave replace that checkpoint with an empty list first.
+  if (!_terminalsRestored && existsSync(STATE_FILE)) {
     try {
-      await writeFile(STATE_FILE, JSON.stringify({ terminals: st, timestamp: Date.now() }));
-      if (st.length > 0) logger.debug('state', `Saved ${st.length} terminal(s)`);
-    } catch (err) {
-      logger.error('state', 'Save error', err.message);
-    }
+      return JSON.parse(readFileSync(STATE_FILE, 'utf8')).terminals?.length || 0;
+    } catch { return 0; }
+  }
+  const state = terminalStateEntries();
+  if (state.length === 0 && !existsSync(STATE_FILE)) return 0;
+  const tempStateFile = `${STATE_FILE}.tmp`;
+  try {
+    writeFileSync(tempStateFile, JSON.stringify({ terminals: state, timestamp: Date.now() }));
+    renameSync(tempStateFile, STATE_FILE);
+    if (state.length > 0) logger.debug('state', `Saved ${state.length} terminal(s)`);
+  } catch (error) {
+    logger.error('state', 'Save error', error.message);
+    if (strict) throw new Error(`터미널 체크포인트를 저장하지 못해 재시작을 취소했습니다: ${error.message}`);
+    return null;
+  }
+  return state.length;
+}
+
+function saveTerminalState() {
+  if (_saveQueued || _shuttingDown) return;
+  _saveQueued = true;
+  queueMicrotask(() => {
+    _saveQueued = false;
+    saveTerminalStateNow();
   });
 }
 
@@ -1247,13 +1461,105 @@ function loadTerminalState() {
   try {
     if (!existsSync(STATE_FILE)) return null;
     const data = JSON.parse(readFileSync(STATE_FILE, 'utf8'));
-    // Only restore if less than 24 hours old
-    if (Date.now() - data.timestamp > 24 * 60 * 60 * 1000) {
+    const hasDurableSession = data.terminals?.some(entry => entry?.durableId);
+    // Legacy shell metadata expires after 24 hours; durable tmux sessions do not.
+    if (!hasDurableSession && Date.now() - data.timestamp > 24 * 60 * 60 * 1000) {
       try { unlinkSync(STATE_FILE); } catch { /* cleanup — file may not exist */ }
       return null;
     }
     return data;
   } catch { return null; /* corrupt state file — skip restore */ }
+}
+
+function tryRestoreTerminal(entry) {
+  const canResumeDurable = Boolean(
+    DURABLE_TERMINALS && entry.durableId && durableTerminalExists(entry.durableId),
+  );
+  // __home__ = 프로젝트 비종속 빈 터미널. 그 외엔 등록 프로젝트 필요.
+  const isHome = entry.projectId === '__home__';
+  const project = isHome ? null : getProjectById(entry.projectId);
+  if (!isHome && !project && !canResumeDurable) {
+    return { ok: false, defer: Boolean(entry.durableId) };
+  }
+
+  // 복원 기준 경로: 저장된 cwd(사용자가 cd 한 위치)가 아직 살아있으면 그것, 아니면 프로젝트 루트(홈)
+  const basePath = isHome ? homedir() : project?.path || entry.cwd || homedir();
+  let termPath = basePath;
+  if (entry.cwd && existsSync(IS_WIN ? toWinPath(entry.cwd) : entry.cwd)) {
+    termPath = entry.cwd;
+  }
+
+  const reusableTermId = typeof entry.termId === 'string' && /^[\w.-]{1,200}$/.test(entry.termId)
+    && !terminals.has(entry.termId);
+  const newTermId = canResumeDurable && reusableTermId
+    ? entry.termId
+    : `${entry.projectId}-${randomBytes(6).toString('hex')}`;
+  let accountLaunch = null;
+  let displayAccount = entry.account && entry.account.id === entry.accountId
+    && ['claude', 'codex'].includes(entry.account.provider)
+    ? { id: entry.account.id, name: String(entry.account.name || ''), provider: entry.account.provider }
+    : null;
+  if (entry.accountId && !canResumeDurable) {
+    try {
+      accountLaunch = resolveAiAccountLaunch(entry.accountId, { targetWsl: IS_WSL || Boolean(parseWslPath(termPath)) });
+      displayAccount = accountLaunch;
+    }
+    catch (error) {
+      logger.warn('state', `Skipped account terminal restore: ${error.message}`);
+      return { ok: false, defer: true };
+    }
+  }
+  let spec;
+  try {
+    spec = terminalSpawnSpec(newTermId, termPath, accountLaunch, entry.durableId || '');
+  } catch (error) {
+    logger.warn('state', `Skipped terminal restore: ${error.message}`);
+    return { ok: false, defer: Boolean(spec?.durableId || entry.durableId) };
+  }
+
+  let term;
+  try {
+    term = pty.spawn(spec.shell, spec.args, {
+      name: 'xterm-256color',
+      cols: 120, rows: 30, cwd: spec.cwd, env: spec.env,
+    });
+  } catch (error) {
+    logger.warn('state', `Deferred terminal restore: ${error.message}`);
+    return { ok: false, defer: Boolean(spec.durableId || entry.durableId) };
+  }
+
+  term.onData((data) => {
+    const e = terminals.get(newTermId);
+    if (e) bufAppend(e, data);
+    const msg = JSON.stringify({ type: 'output', termId: newTermId, data });
+    for (const client of wss.clients) {
+      try { client.send(msg); } catch { /* client disconnected */ }
+    }
+  });
+
+  term.onExit(({ exitCode }) => {
+    terminals.delete(newTermId);
+    const msg = JSON.stringify({ type: 'exit', termId: newTermId, exitCode });
+    for (const client of wss.clients) {
+      try { client.send(msg); } catch { /* client disconnected */ }
+    }
+    saveTerminalState();
+  });
+
+  terminals.set(newTermId, {
+    pty: term, projectId: entry.projectId, _bufArr: [], _bufLen: 0,
+    command: entry.command || '', account: displayAccount, cols: 120, rows: 30,
+    durableId: spec.durableId,
+  });
+
+  if (!spec.resumed) {
+    const restoreCommand = entry.command || accountLaunch?.command || '';
+    if (restoreCommand) setTimeout(() => {
+      try { term.write(restoreCommand + '\r'); } catch { /* term already gone */ }
+    }, 500);
+  }
+
+  return { ok: true, termId: newTermId, projectId: entry.projectId };
 }
 
 function restoreTerminals() {
@@ -1264,79 +1570,79 @@ function restoreTerminals() {
   const restored = [];
 
   for (const entry of saved.terminals) {
-    // __home__ = 프로젝트 비종속 빈 터미널. 그 외엔 등록 프로젝트 필요.
-    const isHome = entry.projectId === '__home__';
-    const project = isHome ? null : getProjectById(entry.projectId);
-    if (!isHome && !project) continue;
-
-    // 복원 기준 경로: 저장된 cwd(사용자가 cd 한 위치)가 아직 살아있으면 그것, 아니면 프로젝트 루트(홈)
-    const basePath = isHome ? homedir() : project.path;
-    let termPath = basePath;
-    if (entry.cwd && existsSync(IS_WIN ? toWinPath(entry.cwd) : entry.cwd)) {
-      termPath = entry.cwd;
+    const result = tryRestoreTerminal(entry);
+    if (result.ok) {
+      idMap[entry.termId] = result.termId;
+      restored.push({ termId: result.termId, projectId: result.projectId });
+    } else if (result.defer) {
+      deferredTerminalRestores.push(entry);
     }
-
-    const newTermId = `${entry.projectId}-${randomBytes(6).toString('hex')}`;
-    const wsl = parseWslPath(termPath);
-    let shell, shellArgs, cwd;
-    if (wsl) {
-      shell = 'wsl.exe';
-      shellArgs = ['-d', wsl.distro, '--cd', wsl.linuxPath];
-      cwd = process.env.SYSTEMROOT || 'C:\\Windows';
-    } else {
-      shell = _defaultShell;
-      shellArgs = [];
-      cwd = IS_WIN ? toWinPath(termPath) : termPath;
-    }
-
-    const term = pty.spawn(shell, shellArgs, {
-      name: 'xterm-256color',
-      cols: 120, rows: 30, cwd,
-      env: termEnv(newTermId)
-    });
-
-    term.onData((data) => {
-      const e = terminals.get(newTermId);
-      if (e) bufAppend(e, data);
-      const msg = JSON.stringify({ type: 'output', termId: newTermId, data });
-      for (const client of wss.clients) {
-        try { client.send(msg); } catch { /* client disconnected */ }
-      }
-    });
-
-    term.onExit(({ exitCode }) => {
-      terminals.delete(newTermId);
-      const msg = JSON.stringify({ type: 'exit', termId: newTermId, exitCode });
-      for (const client of wss.clients) {
-        try { client.send(msg); } catch { /* client disconnected */ }
-      }
-    });
-
-    terminals.set(newTermId, { pty: term, projectId: entry.projectId, _bufArr: [], _bufLen: 0, command: entry.command || '' });
-    idMap[entry.termId] = newTermId;
-    restored.push({ termId: newTermId, projectId: entry.projectId });
-
-    // 복원된 모든 터미널에 'claude' 를 미리 입력만 해둠 (실행 X — 사용자가 Enter 로 시작).
-    // \r 안 붙임: 프롬프트에 타이핑만 된 상태로 대기.
-    setTimeout(() => { try { term.write('claude'); } catch { /* term already gone */ } }, 500);
   }
-
-  // Clean up state file after successful restore
-  try { unlinkSync(STATE_FILE); } catch { /* cleanup — file may not exist */ }
 
   logger.info('state', `Restored ${restored.length} terminal(s) from saved state`);
   return { idMap, restored };
 }
 
-// Auto-save terminal state every 30 seconds
-setInterval(saveTerminalState, 30000);
+// 프로젝트 등록/account 복구 등으로 매칭 조건이 나중에 충족되면 대기 항목을 되살린다.
+function flushDeferredTerminalRestores() {
+  if (deferredTerminalRestores.length === 0) return 0;
+  const pending = deferredTerminalRestores.splice(0);
+  const idMap = {};
+  let restoredCount = 0;
+  for (const entry of pending) {
+    const result = tryRestoreTerminal(entry);
+    if (result.ok) {
+      idMap[entry.termId] = result.termId;
+      restoredCount++;
+    } else if (result.defer) {
+      deferredTerminalRestores.push(entry);
+    }
+  }
+  if (restoredCount > 0) {
+    logger.info('state', `Flushed ${restoredCount} deferred terminal restore(s)`);
+    saveTerminalState();
+    // 기존 클라이언트에게 새 세션 목록 + idMap 통보 — 프론트 'terminals' 핸들러가
+    // 그룹/레이아웃 remap부터 재구성까지 기존 경로 그대로 재사용한다.
+    const payload = { type: 'terminals', active: activeTerminalsPayload(), idMap };
+    for (const client of wss.clients) {
+      try { client.send(JSON.stringify(payload)); } catch { /* client disconnected */ }
+    }
+  }
+  return restoredCount;
+}
+
+// 활성 터미널 목록 payload — WS 접속 응답과 deferred flush 브로드캐스트가 공유.
+function activeTerminalsPayload() {
+  const active = [];
+  for (const [id, t] of terminals) {
+    const agentCommand = terminalAgent(t);
+    const item = {
+      termId: id, projectId: t.projectId, command: t.command || '', buffer: bufRead(t),
+      account: t.account ? { id: t.account.id, name: t.account.name, provider: t.account.provider } : null,
+      durable: Boolean(t.durableId),
+    };
+    if (agentCommand !== null) { t.agentCommand = agentCommand; item.agentCommand = agentCommand; }
+    active.push(item);
+  }
+  return active;
+}
+
+// Auto-save terminal state every 30 seconds.
+// 대기 중 복원 항목도 함께 재시도(account 일시 실패 등은 시간이 지나면 회복).
+setInterval(() => {
+  try { flushDeferredTerminalRestores(); } catch { /* flush is best-effort */ }
+  saveTerminalState();
+}, 30000);
 
 // Save on shutdown
 function onShutdown(signal) {
+  if (_shuttingDown) return;
+  _shuttingDown = true;
+  try { delegateStatusWatcher?.close(); } catch { /* already closed */ }
   logger.info('server', `${signal} received, shutting down...`);
-  saveTerminalState();
-  // Kill all terminal processes
-  for (const [, t] of terminals) { try { t.pty.kill(); } catch { /* process already exited */ } }
+  saveTerminalStateNow();
+  // Detach durable terminals; ordinary terminals still stop with the server.
+  for (const [, t] of terminals) stopTerminal(t, false);
   // Kill dev server processes
   for (const [, ds] of devServers) {
     try { killProcessTree(ds.process.pid); } catch { /* process already exited */ }
@@ -1392,23 +1698,31 @@ wss.on('connection', (ws) => {
 
         const termId = `${msg.projectId}-${randomBytes(6).toString('hex')}`;
         const wsl = parseWslPath(termPath);
-        let shell, shellArgs, cwd;
-        if (wsl) {
-          shell = 'wsl.exe';
-          shellArgs = ['-d', wsl.distro, '--cd', wsl.linuxPath];
-          cwd = process.env.SYSTEMROOT || 'C:\\Windows';
-        } else {
-          shell = _defaultShell;
-          shellArgs = [];
-          cwd = IS_WIN ? toWinPath(termPath) : termPath;
+        let accountLaunch = null;
+        if (msg.accountId) {
+          try {
+            accountLaunch = resolveAiAccountLaunch(msg.accountId, { targetWsl: IS_WSL || Boolean(wsl) });
+          } catch (error) {
+            ws.send(JSON.stringify({ type: 'error', message: error.message }));
+            return;
+          }
+        }
+        let spec;
+        try {
+          spec = terminalSpawnSpec(termId, termPath, accountLaunch);
+        } catch (error) {
+          ws.send(JSON.stringify({ type: 'error', message: `터미널 세션을 만들지 못했습니다: ${error.message}` }));
+          return;
         }
 
-        const term = pty.spawn(shell, shellArgs, {
+        const initialCols = Number.isInteger(msg.cols) && msg.cols >= 2 && msg.cols <= 1000 ? msg.cols : 120;
+        const initialRows = Number.isInteger(msg.rows) && msg.rows >= 1 && msg.rows <= 500 ? msg.rows : 30;
+        const term = pty.spawn(spec.shell, spec.args, {
           name: 'xterm-256color',
-          cols: msg.cols || 120,
-          rows: msg.rows || 30,
-          cwd,
-          env: termEnv(termId)
+          cols: initialCols,
+          rows: initialRows,
+          cwd: spec.cwd,
+          env: spec.env,
         });
 
         term.onData((data) => {
@@ -1426,46 +1740,97 @@ wss.on('connection', (ws) => {
           for (const client of wss.clients) {
             try { client.send(msg); } catch { /* client disconnected */ }
           }
+          saveTerminalState();
         });
 
         // C4: Validate command — only allow safe known prefixes
         let safeCommand = '';
         if (msg.command && typeof msg.command === 'string' && msg.command.length < 500
-            && /^(claude|codex|npm|npx|node|git|python|pip|docker|yarn|pnpm|bun|cargo|make|cmake|go|rustc|ruby|java|javac|mvn|gradle|dotnet|terraform|kubectl|helm|ansible|packer|deno|tsx|ts-node|jest|vitest|pytest|eslint|prettier|tsc)\b/.test(msg.command)
+            && /^(claude|codex|opencode|npm|npx|node|git|python|pip|docker|yarn|pnpm|bun|cargo|make|cmake|go|rustc|ruby|java|javac|mvn|gradle|dotnet|terraform|kubectl|helm|ansible|packer|deno|tsx|ts-node|jest|vitest|pytest|eslint|prettier|tsc)\b/.test(msg.command)
             && !/[&|<>^;`$]/.test(msg.command)) {
           safeCommand = msg.command;
         }
+        if (accountLaunch) safeCommand = accountLaunch.command;
 
-        terminals.set(termId, { pty: term, projectId: msg.projectId, _bufArr: [], _bufLen: 0, command: safeCommand });
+        terminals.set(termId, {
+          pty: term, projectId: msg.projectId, _bufArr: [], _bufLen: 0,
+          command: safeCommand, account: accountLaunch,
+          cols: initialCols, rows: initialRows, resizeOwner: ws, durableId: spec.durableId,
+        });
         _currentTermId = termId;
 
-        const createdMsg = JSON.stringify({ type: 'created', termId, projectId: msg.projectId, command: safeCommand });
+        const createdMsg = JSON.stringify({
+          type: 'created', termId, projectId: msg.projectId, command: safeCommand,
+          durable: Boolean(spec.durableId),
+          account: accountLaunch ? { id: accountLaunch.id, name: accountLaunch.name, provider: accountLaunch.provider } : null,
+        });
         for (const client of wss.clients) {
           try { client.send(createdMsg); } catch { /* client disconnected */ }
         }
 
         // Auto-run only validated commands
-        if (safeCommand) {
+        if (safeCommand && !spec.resumed) {
           term.write(safeCommand + '\r');
         }
+        saveTerminalState();
         break;
       }
 
       case 'input': {
         const t = terminals.get(msg.termId);
-        if (t) t.pty.write(msg.data);
+        const requestId = typeof msg.requestId === 'string' && /^[a-zA-Z0-9:_-]{1,128}$/.test(msg.requestId)
+          ? msg.requestId : null;
+        const receipt = (accepted, error = null) => {
+          if (!requestId) return;
+          try { ws.send(JSON.stringify({ type: 'input-result', termId: msg.termId, requestId, accepted, ...(error ? { error } : {}) })); }
+          catch { /* the client disconnect handler preserves its draft */ }
+        };
+        if (!t) {
+          receipt(false, '터미널 세션을 찾지 못했습니다. 입력 내용은 보존했습니다.');
+          break;
+        }
+        if (typeof msg.data !== 'string' || msg.data.length > 1_000_000) {
+          receipt(false, '메시지가 비어 있거나 허용 크기를 초과했습니다.');
+          break;
+        }
+        try {
+          claimPtySize(t, ws, msg.cols, msg.rows);
+          t.pty.write(msg.data);
+          receipt(true);
+        } catch (error) {
+          receipt(false, `터미널 입력 실패: ${String(error?.message || error).slice(0, 240)}`);
+        }
+        break;
+      }
+
+      case 'focus': {
+        const t = terminals.get(msg.termId);
+        if (t) claimPtySize(t, ws, msg.cols, msg.rows);
         break;
       }
 
       case 'resize': {
         const t = terminals.get(msg.termId);
-        if (t) t.pty.resize(msg.cols, msg.rows);
+        if (t && validPtySize(msg.cols, msg.rows)
+            && (!t.resizeOwner || t.resizeOwner === ws || t.resizeOwner.readyState !== 1)) {
+          claimPtySize(t, ws, msg.cols, msg.rows);
+        }
         break;
       }
 
       case 'kill': {
         const t = terminals.get(msg.termId);
-        if (t) { t.pty.kill(); terminals.delete(msg.termId); }
+        if (t) {
+          try {
+            stopTerminal(t, true);
+          } catch (error) {
+            logger.error('terminal', `Close failed for ${msg.termId}`, error.message);
+            ws.send(JSON.stringify({ type: 'error', message: `터미널을 종료하지 못했습니다: ${error.message}` }));
+            break;
+          }
+          terminals.delete(msg.termId);
+          saveTerminalState();
+        }
         break;
       }
 
@@ -1517,31 +1882,30 @@ wss.on('connection', (ws) => {
       for (const w of ws._chatWatchers.values()) { try { w.close(); } catch {} }
       ws._chatWatchers.clear();
     }
+    for (const [, terminal] of terminals) {
+      if (terminal.resizeOwner === ws) terminal.resizeOwner = null;
+    }
     // terminals 는 유지
   });
 
-  // On connect: restore from saved state if no active terminals (once only)
-  // Set flag BEFORE restore to prevent race between concurrent WS connections
+  // Restore is synchronous. Mark complete only after every saved entry was handled,
+  // so an unexpected failure cannot unlock autosave over the old checkpoint.
   let idMap = null;
-  if (terminals.size === 0 && !_terminalsRestored) {
-    _terminalsRestored = true;
+  if (!_terminalsRestored) {
     try {
-      const result = restoreTerminals();
-      if (result) idMap = result.idMap;
+      if (terminals.size === 0) {
+        const result = restoreTerminals();
+        if (result) idMap = result.idMap;
+      }
+      _terminalsRestored = true;
+      saveTerminalStateNow();
     } catch (err) {
       logger.error('state', 'Restore failed', err.message);
     }
   }
 
   // Send list of active terminals (+ idMap if restored)
-  const active = [];
-  for (const [id, t] of terminals) {
-    const agentCommand = terminalAgent(t);
-    const item = { termId: id, projectId: t.projectId, command: t.command || '', buffer: bufRead(t) };
-    if (agentCommand !== null) { t.agentCommand = agentCommand; item.agentCommand = agentCommand; }
-    active.push(item);
-  }
-  const msg = { type: 'terminals', active };
+  const msg = { type: 'terminals', active: activeTerminalsPayload() };
   if (idMap) msg.idMap = idMap;
   ws.send(JSON.stringify(msg));
 });

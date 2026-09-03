@@ -1,5 +1,5 @@
 // ─── Main Entry Point: imports, init, keyboard shortcuts, pub/sub wiring ───
-import { app, subscribe } from './state.js';
+import { app, getOrderedTerminalIds, subscribe } from './state.js';
 import { copyText, esc, showToast, simpleMarkdown, fetchJson, fetchText, postJson } from './utils.js';
 import { getClickAction, getChangeAction, getInputAction, registerClickActions, registerChangeActions, registerInputActions } from './actions.js';
 import { openArenaDialog, startArenaFromDialog, stopArena, startArenaPick, arenaPickDone, copyArenaResult, downloadArenaResult } from './arena.js';
@@ -20,13 +20,14 @@ import {
 // ─── Terminal module ───
 import {
   connectWS, renderLayout, fitAllTerminals,
-  updateTermHeaders, debouncedUpdateTermHeaders, closeTerminal,
+  updateTermHeaders, debouncedUpdateTermHeaders, requestCloseTerminal,
   openNewTermModal, openNewTermModalWithSplit, openHomeTerminal, openTermWith,
   toggleTermSearch, closeTermSearch, doTermSearch, exportTerminal,
   changeTermFontSize, resetTermFontSize, setupTermEventDelegation,
   loadBranchesForTerm, initFileDrop,
   setupMobileActions, setupMobileSwipe,
   updateTermTheme,
+  mobileSwitchTerm,
   toggleCmdPalette,
   toggleBroadcastMode,
   toggleQuickBar,
@@ -79,6 +80,7 @@ import { initPR } from './pr.js';
 // ─── Ports module ───
 import { initPorts, destroyPorts, refreshPorts, togglePortPause, filterPortSearch, toggleDevFilter } from './ports.js';
 import { initAutopilotView } from './autopilot-view.js';
+import { initAiAccounts } from './ai-accounts.js';
 
 
 // ─── README Content ───
@@ -415,11 +417,14 @@ WireGuard 기반 E2E 암호화, 포트 포워딩 불필요.
 | Ctrl+T | 새 터미널 |
 | Ctrl+W | 터미널 닫기 |
 | Ctrl+F | 터미널 내 검색 |
-| Ctrl+R | 커맨드 히스토리 팔레트 |
+| Ctrl+J | 퀵 커맨드 바 |
 | Ctrl+B | 브로드캐스트 모드 토글 |
 | Ctrl+Tab | 다음 터미널 |
 | Ctrl+Shift+Tab | 이전 터미널 |
 | Ctrl+[ / ] | 이전/다음 터미널 |
+| Alt+K / L | 터미널 3줄 위/아래 (길게 눌러 연속 이동) |
+| Alt+Shift+K / L | 터미널 한 화면 위/아래 |
+| F5 / Ctrl+R | Cockpit 새로고침 |
 | E | Diff 전체 펼치기 |
 | C | Diff 전체 접기 |
 | R | Diff 새로고침 |
@@ -833,6 +838,7 @@ subscribe('initPR', () => initPR());
 subscribe('initWorkflows', () => initWorkflows());
 subscribe('initPorts', () => initPorts());
 subscribe('initAutopilotView', () => initAutopilotView());
+subscribe('initAiAccounts', () => initAiAccounts());
 subscribe('destroyPorts', () => destroyPorts());
 
 async function showMobileConnect() {
@@ -934,6 +940,7 @@ document.addEventListener('input', e => {
   if (handler) handler(e.target, e);
 });
 document.addEventListener('keydown', e => {
+  if (e.isComposing || e.key === 'Process' || e.keyCode === 229) return;
   const a = e.target.dataset.action;
   if (a === 'term-search-input') {
     if (e.key === 'Enter') { doTermSearch(e.shiftKey ? 'prev' : 'next'); e.preventDefault(); }
@@ -952,7 +959,8 @@ document.addEventListener('contextmenu', e => {
 // ─── Keyboard Shortcuts ───
 document.addEventListener('keydown', e => {
   const mod = e.ctrlKey || e.metaKey;
-  if (e.key === 'F5' || (mod && e.key === 'r')) { e.preventDefault(); location.reload(); return; }
+  if (e.key === 'F5' || (mod && e.code === 'KeyR' && !e.altKey)) { e.preventDefault(); location.reload(); return; }
+  if (e.isComposing || e.key === 'Process' || e.keyCode === 229) return;
   if (mod && e.key === '1') { e.preventDefault(); switchView('dashboard'); return; }
   if (mod && e.key === '2') { e.preventDefault(); switchView('terminal'); return; }
   if (mod && e.key === '3') { e.preventDefault(); switchView('diff'); return; }
@@ -965,26 +973,20 @@ document.addEventListener('keydown', e => {
   if (mod && e.key === 'Tab') {
     if (document.getElementById('terminal-view').classList.contains('active') && app.termMap.size > 1) {
       e.preventDefault();
-      const ids = [...app.termMap.keys()];
+      const ids = getOrderedTerminalIds();
       const cur = ids.indexOf(app.activeTermId);
       const next = e.shiftKey ? (cur <= 0 ? ids.length - 1 : cur - 1) : (cur >= ids.length - 1 ? 0 : cur + 1);
-      app.activeTermId = ids[next];
-      updateTermHeaders();
-      const t = app.termMap.get(ids[next]);
-      if (t?.xterm) t.xterm.focus();
+      mobileSwitchTerm(ids[next]);
       return;
     }
   }
   if (mod && (e.key === '[' || e.key === ']')) {
     if (document.getElementById('terminal-view').classList.contains('active') && app.termMap.size > 1) {
       e.preventDefault();
-      const ids = [...app.termMap.keys()];
+      const ids = getOrderedTerminalIds();
       const cur = ids.indexOf(app.activeTermId);
       const next = e.key === '[' ? (cur <= 0 ? ids.length - 1 : cur - 1) : (cur >= ids.length - 1 ? 0 : cur + 1);
-      app.activeTermId = ids[next];
-      updateTermHeaders();
-      const t = app.termMap.get(ids[next]);
-      if (t?.xterm) t.xterm.focus();
+      mobileSwitchTerm(ids[next]);
       return;
     }
   }
@@ -995,7 +997,7 @@ document.addEventListener('keydown', e => {
     e.preventDefault(); openHomeTerminal(); return;
   }
   if (mod && e.key === 'w' && !e.shiftKey) {
-    if (document.getElementById('terminal-view').classList.contains('active') && app.activeTermId) { e.preventDefault(); closeTerminal(app.activeTermId); return; }
+    if (document.getElementById('terminal-view').classList.contains('active') && app.activeTermId) { e.preventDefault(); requestCloseTerminal(app.activeTermId); return; }
   }
   if (mod && e.key === 'r' && !e.shiftKey) {
     if (document.getElementById('terminal-view').classList.contains('active') && app.activeTermId) { e.preventDefault(); toggleCmdPalette(); return; }
@@ -1119,6 +1121,8 @@ setupCtxMenuListeners();
 async function init() {
   applyTheme(app.currentTheme);
   renderSkeletons(6);
+  window.addEventListener('resize', setupNavOverflow);
+  setupNavOverflow();
   try { app.projectList = await fetchJson('/api/projects'); } catch (e) {
     const msg = e.status ? `Server error ${e.status}` : 'Server unreachable — check if Cockpit server is running on port 3847';
     document.querySelector('.projects-grid').innerHTML = `<div style="text-align:center;padding:40px;color:var(--text-2)">${msg}</div>`;
@@ -1148,7 +1152,6 @@ async function init() {
   const pgrid = document.getElementById('project-grid');
   if (pgrid) pgrid.addEventListener('scroll', updateScrollIndicators);
   window.addEventListener('resize', updateScrollIndicators);
-  window.addEventListener('resize', setupNavOverflow);
   updateScrollIndicators();
   setupNavOverflow();
   updateEmptyProjectState();
@@ -1167,11 +1170,8 @@ async function init() {
   // Restore terminal font size display
   const fse = document.getElementById('term-font-size');
   if (fse) fse.textContent = app.termFontSize;
-  // Restore saved view
-  const savedView = localStorage.getItem('dl-view');
-  const archivedViews = new Set(['agent', 'company', 'supervisor', 'api-tester', 'jira', 'notes']);
-  if (archivedViews.has(savedView)) switchView('dashboard');
-  else if (savedView && savedView !== 'dashboard') switchView(savedView);
+  // Terminal is the primary workspace. Secondary views remain one action away.
+  switchView('terminal');
   // File drop
   initFileDrop();
   // (moved to top-level module scope — no server data dependency)
@@ -1187,6 +1187,22 @@ async function init() {
 }
 
 // ─── Must run even if init() fails ───
+// 전역 에러 수집 — 처리 안 된 Promise 거부/스크립트 에러가 콘솔에만 묻히지 않게.
+// 토스트는 도배 방지로 최소 간격을 두고, 상세는 항상 콘솔에 남긴다.
+const _globalErrorToastAt = { last: 0 };
+function reportGlobalError(kind, detail) {
+  console.error(`[global:${kind}]`, detail);
+  const now = Date.now();
+  if (now - _globalErrorToastAt.last < 10_000) return;
+  _globalErrorToastAt.last = now;
+  const message = kind === 'unhandledrejection'
+    ? '비동기 작업 실패 — 콘솔 로그 확인'
+    : '스크립트 오류 발생 — 콘솔 로그 확인';
+  showToast(message, 'error', 4000);
+}
+window.addEventListener('error', e => reportGlobalError('error', e.error || e.message));
+window.addEventListener('unhandledrejection', e => reportGlobalError('unhandledrejection', e.reason));
+
 connectSSE();
 connectWS();
 setupCommandPaletteListeners();

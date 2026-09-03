@@ -3,6 +3,8 @@
 // Feature-specific state is grouped into namespace objects.
 // A Proxy provides backward compatibility: `app.cicdRuns` → `app.cicd.runs`.
 
+import { normalizeTerminalGroupLayout } from './terminal-group-layout.js';
+
 const _themeManual = !!localStorage.getItem('dl-theme');
 
 const _app = {
@@ -15,7 +17,21 @@ const _app = {
   // Terminal
   termMap: new Map(),
   activeTermId: null,
+  sessionOrder: (() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('dl-terminal-session-order') || '[]');
+      return Array.isArray(saved) ? saved.filter(id => typeof id === 'string') : [];
+    } catch { return []; }
+  })(),
+  terminalPairs: (() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('dl-terminal-pairs') || '[]');
+      return Array.isArray(saved) ? saved.filter(pair => pair && Array.isArray(pair.termIds)) : [];
+    } catch { return []; }
+  })(),
+  pairSourceTermId: '',
   layoutRoot: null,
+  terminalFocusMode: true,
   draggedTermId: null,
   writeBuffers: new Map(),
 
@@ -32,7 +48,7 @@ const _app = {
   viewZoom: JSON.parse(localStorage.getItem('dl-view-zoom') || '{}'),
   currentTheme: _themeManual
     ? localStorage.getItem('dl-theme')
-    : window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark',
+    : 'dark',
   _themeManual,
 
   // Charts
@@ -267,6 +283,119 @@ export const app = new Proxy(_app, {
     return prop in target;
   },
 });
+
+export function getOrderedTerminalIds() {
+  const liveIds = [...app.termMap.keys()];
+  const live = new Set(liveIds);
+  const ordered = [...new Set(app.sessionOrder.filter(id => live.has(id)))];
+  for (const id of liveIds) if (!ordered.includes(id)) ordered.push(id);
+  return ordered;
+}
+
+export function getOrderedTerminalEntries() {
+  return getOrderedTerminalIds().map(id => [id, app.termMap.get(id)]);
+}
+
+export function setTerminalOrder(ids) {
+  const live = new Set(app.termMap.keys());
+  const ordered = [...new Set(ids.filter(id => live.has(id)))];
+  for (const id of live) if (!ordered.includes(id)) ordered.push(id);
+  app.sessionOrder = ordered;
+  try { localStorage.setItem('dl-terminal-session-order', JSON.stringify(ordered)); } catch { /* storage unavailable */ }
+  return ordered;
+}
+
+export function remapTerminalOrder(idMap) {
+  app.sessionOrder = [...new Set(app.sessionOrder.map(id => idMap[id] || id))];
+  try { localStorage.setItem('dl-terminal-session-order', JSON.stringify(app.sessionOrder)); } catch { /* storage unavailable */ }
+  return app.sessionOrder;
+}
+
+function persistTerminalPairs() {
+  try { localStorage.setItem('dl-terminal-pairs', JSON.stringify(app.terminalPairs)); } catch { /* storage unavailable */ }
+}
+
+export function getTerminalPairs() {
+  const live = new Set(app.termMap.keys());
+  const order = new Map(getOrderedTerminalIds().map((id, index) => [id, index]));
+  const used = new Set();
+  const pairs = [];
+  for (const pair of app.terminalPairs) {
+    const termIds = [...new Set(pair.termIds)]
+      .filter(id => live.has(id) && !used.has(id))
+      .sort((first, second) => order.get(first) - order.get(second));
+    if (termIds.length < 2) continue;
+    termIds.forEach(id => used.add(id));
+    const layout = normalizeTerminalGroupLayout(pair.layout || pair.direction, termIds.length);
+    pairs.push({ termIds, layout, direction: layout === 'rows' ? 'v' : 'h' });
+  }
+  // 상태 비저장 뷰 — app.terminalPairs 원본은 보존하고 live 필터 결과만 반환.
+  // 페이지 로드 직후(termMap이 WS 'terminals'로 채워지기 전) 읽기 접근이 메모리
+  // 원본까지 비우면, 서버 재시작 후 idMap remap이 빈 상태에서 출발해 그룹이
+  // 영구 소실된다. 저장은 명시적 편집(pair/unpair/layout/remap) 시에만.
+  return pairs;
+}
+
+export function getTerminalPair(termId) {
+  return getTerminalPairs().find(pair => pair.termIds.includes(termId)) || null;
+}
+
+export function pairTerminals(firstId, secondId, direction = 'h') {
+  if (!app.termMap.has(firstId) || !app.termMap.has(secondId) || firstId === secondId) return null;
+  const pairs = getTerminalPairs();
+  const firstGroup = pairs.find(pair => pair.termIds.includes(firstId));
+  const secondGroup = pairs.find(pair => pair.termIds.includes(secondId));
+  if (firstGroup && firstGroup === secondGroup) return firstGroup;
+  const order = new Map(getOrderedTerminalIds().map((id, index) => [id, index]));
+  const termIds = [...new Set([
+    ...(firstGroup?.termIds || [firstId]),
+    ...(secondGroup?.termIds || [secondId]),
+  ])].sort((first, second) => order.get(first) - order.get(second));
+  app.terminalPairs = pairs.filter(pair => pair !== firstGroup && pair !== secondGroup);
+  const layout = normalizeTerminalGroupLayout(firstGroup?.layout || secondGroup?.layout || direction, termIds.length);
+  const pair = { termIds, layout, direction: layout === 'rows' ? 'v' : 'h' };
+  app.terminalPairs.push(pair);
+  persistTerminalPairs();
+  return pair;
+}
+
+export function unpairTerminal(termId) {
+  const before = getTerminalPairs();
+  const group = before.find(pair => pair.termIds.includes(termId));
+  if (!group) return false;
+  const remaining = group.termIds.filter(id => id !== termId);
+  app.terminalPairs = before.filter(pair => pair !== group);
+  if (remaining.length >= 2) {
+    const layout = normalizeTerminalGroupLayout(group.layout, remaining.length);
+    app.terminalPairs.push({ termIds: remaining, layout, direction: layout === 'rows' ? 'v' : 'h' });
+  }
+  persistTerminalPairs();
+  return true;
+}
+
+export function setTerminalPairDirection(termId, direction) {
+  return setTerminalGroupLayout(termId, direction === 'v' ? 'rows' : 'cols');
+}
+
+export function setTerminalGroupLayout(termId, layout) {
+  const pair = getTerminalPair(termId);
+  if (!pair) return null;
+  pair.layout = normalizeTerminalGroupLayout(layout, pair.termIds.length);
+  pair.direction = pair.layout === 'rows' ? 'v' : 'h';
+  app.terminalPairs = app.terminalPairs.map(item => item.termIds.some(id => pair.termIds.includes(id)) ? pair : item);
+  persistTerminalPairs();
+  return pair;
+}
+
+export function remapTerminalPairs(idMap) {
+  app.terminalPairs = app.terminalPairs.map(pair => ({
+    termIds: pair.termIds.map(id => idMap[id] || id),
+    layout: normalizeTerminalGroupLayout(pair.layout || pair.direction, pair.termIds.length),
+    direction: pair.direction === 'v' ? 'v' : 'h',
+  }));
+  persistTerminalPairs();
+  return app.terminalPairs;
+}
 
 // ─── Pub/Sub ───
 const _subscribers = new Map();
